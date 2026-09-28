@@ -1,0 +1,10 @@
+models:
+  - name: "Local Code Agent"
+    provider: "ollama"
+    model: "qwen2.5-coder:7b" # Or "llama3.1:8b"
+    apiBase: "http://localhost:11434"
+
+tabAutocompleteModel:
+  title: "Local Autocomplete"
+  provider: "ollama"
+  model: "qwen2.5-coder:7b" # Or "llama3.1:8b"
