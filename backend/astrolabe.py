@@ -215,9 +215,7 @@ def build_astrolabe_manifest(
     if chapter_id:
         return build_chapter_micro_lens(conn, chapter_id, focus_scene_id, projection_mode)
 
-    # Pre-initialize dictionary to silence linter warnings
     scene_telemetry: dict = {}
-
     c = conn.cursor()
 
     b_row = None
@@ -254,7 +252,8 @@ def build_astrolabe_manifest(
     total_scenes = len(scene_rows)
     scene_seq_map = {r["id"]: idx + 1 for idx, r in enumerate(scene_rows)}
 
-    c.execute("SELECT name FROM canonical_entities WHERE entity_type = 'LOCATION' ORDER BY created_at ASC")
+    # Fetch canonical locations
+    c.execute("SELECT name FROM canonical_entities WHERE entity_type = 'LOCATION' ORDER BY rowid ASC")
     canonical_locations = [r["name"].strip() for r in c.fetchall()]
 
     scene_ids = [r["id"] for r in scene_rows]
@@ -271,12 +270,18 @@ def build_astrolabe_manifest(
     events = c.fetchall()
 
     worldline_locations = []
+    scene_actual_ticks = {}
+
     for ev in events:
         try:
             d = json.loads(ev["state_delta"])
             loc_val = d.get("location", "").strip().title()
             if loc_val and loc_val not in worldline_locations and loc_val not in canonical_locations:
                 worldline_locations.append(loc_val)
+            # Record actual chronological tick for each scene
+            sc_id = ev["scene_id"]
+            if sc_id not in scene_actual_ticks:
+                scene_actual_ticks[sc_id] = float(ev["timeline_tick"])
         except Exception:
             pass
 
@@ -318,6 +323,7 @@ def build_astrolabe_manifest(
             current_active_loc = matched_loc
         scene_location_map[sc_id] = current_active_loc
 
+    # Pacing math (Z-Axis)
     raw_z_values = []
     prev_tens = 0.35
 
@@ -403,6 +409,7 @@ def build_astrolabe_manifest(
     traces = []
     palette = ["#f59e0b", "#38bdf8", "#ec4899", "#a855f7", "#10b981", "#fb923c", "#34d399"]
 
+    # Layer 1: Character Trajectory Ribbons
     for idx, (eid, cdata) in enumerate(character_events.items()):
         pts = cdata["points"]
         if not pts: continue
@@ -431,6 +438,7 @@ def build_astrolabe_manifest(
             "opacity": opacity
         })
 
+    # Layer 2: Relic Custody Braiding
     for idx, (aid, adata) in enumerate(artifact_events.items()):
         pts = adata["points"]
         if not pts: continue
@@ -448,6 +456,7 @@ def build_astrolabe_manifest(
             "opacity": opacity
         })
 
+    # Layer 3: Physical Convergence Knots
     conv_x, conv_y, conv_z, conv_text = [], [], [], []
     for coord, names in co_locations.items():
         if len(set(names)) >= 2:
@@ -465,16 +474,65 @@ def build_astrolabe_manifest(
             "marker": {"size": 11, "symbol": "diamond", "color": "#38bdf8", "opacity": 0.95}
         })
 
+    # Layer 4: Chekhov Foreshadowing Gravity Wells
+    c.execute("""
+        SELECT promise_desc, target_tick, target_location, status 
+        FROM promises_ledger 
+        WHERE book_id = ? OR series_id = 'default'
+    """, (book_id,))
+    promises = c.fetchall()
+
+    for p in promises:
+        px = float(p["target_tick"]) if time_mode == "chronological" else 5.0
+        py = loc_to_y.get(p["target_location"], 0)
+        is_focal = (projection_mode in ["ALL", "FORESHADOW"])
+        opacity = 0.95 if is_focal else 0.08
+
+        traces.append({
+            "type": "scatter3d", "mode": "markers", "name": f"Chekhov: {p['promise_desc'][:16]}...",
+            "x": [px], "y": [py], "z": [0.92],
+            "text": [f"<b>Chekhov Gravity Well</b><br>Promise: {p['promise_desc']}<br>Target Day: {px}<br>Status: {p['status']}"],
+            "hoverinfo": "text",
+            "marker": {"size": 13, "symbol": "diamond-open", "color": "#ec4899", "line": {"width": 3, "color": "#f43f5e"}, "opacity": opacity}
+        })
+
+    # Layer 5: Dynamic Event Horizon Deadlines
+    if projection_mode in ["ALL", "DEADLINES"] and time_mode == "chronological":
+        c.execute("SELECT title, deadline_tick, urgency_level FROM story_deadlines WHERE book_id = ? AND status = 'ACTIVE'", (book_id,))
+        deadlines = c.fetchall()
+        for dl in deadlines:
+            dl_tick = float(dl["deadline_tick"])
+            dl_name = dl["title"]
+            traces.append({
+                "type": "scatter3d", "mode": "lines", "name": f"Deadline: {dl_name}",
+                "x": [dl_tick, dl_tick, dl_tick, dl_tick],
+                "y": [0, len(locations)-1, len(locations)-1, 0],
+                "z": [0.05, 0.05, 0.95, 0.95],
+                "line": {"color": "#ef4444", "width": 4, "dash": "dot"},
+                "text": [f"<b>Event Horizon:</b> {dl_name}<br>Tick: Day {dl_tick:.1f}"] * 4,
+                "hoverinfo": "text"
+            })
+
+    # Layer 6 & 7: Pacing Spine & Ratcheting Stakes Floor
     spine_x, spine_y, spine_z, spine_sizes, spine_colors, spine_text = [], [], [], [], [], []
+    floor_z = []
     scene_id_list = []
 
     for idx, (r, z_smooth) in enumerate(zip(scene_rows, smoothed_z), 1):
-        x_story = idx * 0.4 if time_mode == "chronological" else idx
+        # In chronological mode, leap to actual story tick if known (handles flashbacks!)
+        if time_mode == "chronological":
+            x_story = scene_actual_ticks.get(r["id"], idx * 0.5)
+        else:
+            x_story = idx
+
         loc_name = scene_location_map.get(r["id"], locations[0])
         y_val = loc_to_y.get(loc_name, 0)
-        
-        # Safe fallback lookup for telemetry
         metric = scene_telemetry.get(r["id"]) or calculate_text_telemetry(r["content"] or "")
+
+        # Ratcheting 3-scene rolling baseline floor
+        window_start = max(0, idx - 3)
+        current_floor = min(smoothed_z[window_start:idx])
+        floor_z.append(round(current_floor * 0.75, 2))
 
         point_color = "#22d3ee" if (focus_scene_id and r["id"] == focus_scene_id) else "#f59e0b"
         node_size = 20 if (focus_scene_id and r["id"] == focus_scene_id) else max(6, min(16, int(6 + ((r["word_count"] or 0) / 160))))
@@ -489,10 +547,12 @@ def build_astrolabe_manifest(
         hover = (
             f"<b>{r['title']}</b><br>"
             f"Corridor: <b>{loc_name}</b><br>"
-            f"Words: {r['word_count']:,} | Stakes (Z): <b>{z_smooth:.2f}</b>"
+            f"Words: {r['word_count']:,} | Stakes (Z): <b>{z_smooth:.2f}</b><br>"
+            f"Floor: <b>{current_floor:.2f}</b>"
         )
         spine_text.append(hover)
 
+    # Narrative Spacetime Spine
     traces.append({
         "type": "scatter3d", "mode": "lines+markers",
         "name": "Narrative Spacetime Spine",
@@ -506,6 +566,15 @@ def build_astrolabe_manifest(
             "symbol": "circle",
             "opacity": 0.95
         }
+    })
+
+    # The Ratcheting Baseline Floor (Visual verification that stakes are climbing)
+    traces.append({
+        "type": "scatter3d", "mode": "lines",
+        "name": "Stakes Floor (Baseline)",
+        "x": spine_x, "y": spine_y, "z": floor_z,
+        "hoverinfo": "none",
+        "line": {"color": "rgba(245, 158, 11, 0.35)", "width": 2, "dash": "dot"}
     })
 
     layout = {

@@ -5,6 +5,7 @@ import sqlite3
 import ollama
 from backend.database import get_db
 from backend.config import STUDIO_MODEL, LLM_OPTIONS
+from backend.spectrometer import analyze_neuro_spectrum, calculate_manuscript_comps
 
 def generate_narrator_pack(book_id: str | None = None) -> str:
     """
@@ -14,7 +15,6 @@ def generate_narrator_pack(book_id: str | None = None) -> str:
     conn = get_db()
     c = conn.cursor()
 
-    # Resolve active book if not specified
     if not book_id:
         c.execute("""
             SELECT id, title FROM binder_nodes 
@@ -104,7 +104,6 @@ def generate_authorship_certificate(book_id: str | None = None) -> dict:
             "certificate_text": "No manuscript located in the database to certify."
         }
 
-    # Aggregate total revisions and incremental timestamps
     c.execute("""
         SELECT COUNT(r.id) as total_revs, MIN(r.created_at) as earliest_rev, MAX(r.created_at) as latest_rev
         FROM node_revisions r
@@ -114,7 +113,6 @@ def generate_authorship_certificate(book_id: str | None = None) -> dict:
     """, (book["id"],))
     rev_data = c.fetchone()
 
-    # Aggregate total words and scene counts
     c.execute("""
         SELECT COUNT(s.id) as scene_count, SUM(s.word_count) as total_words
         FROM binder_nodes s
@@ -130,7 +128,6 @@ def generate_authorship_certificate(book_id: str | None = None) -> dict:
     timespan_start = rev_data["earliest_rev"] or book["created_at"] or "2026-01-01 00:00:00"
     timespan_end = rev_data["latest_rev"] or time.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Generate deterministic authenticity verification hash
     raw_signature = f"{book['title']}_{total_words}_{total_revs}_{timespan_start}_{timespan_end}_{book['id']}"
     verification_hash = hashlib.sha256(raw_signature.encode('utf-8')).hexdigest()
 
@@ -233,3 +230,51 @@ CAUSAL PLOT SPINE:
         return resp['message']['content']
     except Exception as e:
         return f"Could not generate query synopsis: {e}"
+
+def generate_manuscript_genome(book_id: str | None = None) -> dict:
+    """
+    Computes full-manuscript 4-Channel Neuro-Spectrometry and Comps DNA matching.
+    Aggregates all scenes across all chapters in the active book.
+    """
+    conn = get_db()
+    c = conn.cursor()
+
+    if not book_id:
+        c.execute("""
+            SELECT id, title FROM binder_nodes 
+            WHERE node_type = 'BOOK' AND (is_archived IS NULL OR is_archived = 0) 
+            ORDER BY sort_order ASC LIMIT 1
+        """)
+        book = c.fetchone()
+        if not book:
+            c.execute("SELECT id, title FROM binder_nodes WHERE node_type = 'BOOK' LIMIT 1")
+            book = c.fetchone()
+        book_id = book["id"] if book else None
+
+    if not book_id:
+        conn.close()
+        return {"status": "error", "message": "No manuscript found to analyze."}
+
+    c.execute("""
+        SELECT s.content 
+        FROM binder_nodes s
+        JOIN binder_nodes ch ON s.parent_id = ch.id
+        WHERE ch.parent_id = ? AND s.node_type = 'SCENE'
+        ORDER BY ch.sort_order ASC, s.sort_order ASC
+    """, (book_id,))
+    rows = c.fetchall()
+    conn.close()
+
+    full_text = " ".join([(r["content"] or "") for r in rows if r["content"]])
+    total_words = len(full_text.split())
+
+    spectrum = analyze_neuro_spectrum(full_text)
+    comps = calculate_manuscript_comps(spectrum)
+
+    return {
+        "status": "success",
+        "book_id": book_id,
+        "total_words": total_words,
+        "spectrum": spectrum,
+        "comps": comps
+    }

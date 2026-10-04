@@ -5,10 +5,11 @@ Executes end-to-end integration tests across:
 2. Span-Linked Semantic Hashing & Severed Thread Detection
 3. Law 1 Pacing Physics & Sentence Energetics (Craft X-Ray)
 4. Clutter Shield & Entity Taxonomy Guardrails
-5. 8-Layer 3D Cosmograph & Chapter Beat Micro-Lens
+5. 8-Layer 3D Cosmograph & Beat-Level Chapter Lens
 6. Scrivener & Word Importer Paragraph Normalization
 7. Voice Profile & Modern Anachronism Detection
-8. FastAPI Router Endpoints & Cryptographic Authorship Proof
+8. FastAPI Router API Contracts & Endpoints
+9. Dual-Tier Neuro-Narrative Spectrometer & Comps Engine
 """
 
 import sys
@@ -141,11 +142,11 @@ record_test("Excising Paragraph Detects Severed Causal Thread", len(severed_afte
 test_conn.close()
 
 # =============================================================================
-# 3. CRAFT X-RAY & PACING TELEMETRY
+# 3. CRAFT X-RAY & PACING TELEMETRY (WITH IDIOM SHIELD)
 # =============================================================================
-print(f"\n{BOLD}3. Law 1 Pacing Physics & Craft X-Ray Sentence Energetics{RESET}")
+print(f"\n{BOLD}3. Law 1 Pacing Physics, Craft X-Ray, & Idiom Shield{RESET}")
 
-from backend.telemetry import calculate_text_telemetry, classify_sentence_energetics
+from backend.telemetry import calculate_text_telemetry, classify_sentence_energetics, scrub_idioms
 
 sample_prose = (
     "The outer courtyard bells broke through the clerestory vents. "
@@ -159,6 +160,11 @@ telemetry = calculate_text_telemetry(sample_prose)
 record_test("Cadence Velocity & Sentence Standard Deviation", telemetry["cadence_stdev"] > 0)
 record_test("Dialogue Ratio Calculation", telemetry["dialogue_ratio"] > 0)
 record_test("Filter Verbs & Crutch Words Scanning", len(telemetry["filters"]) >= 2 and len(telemetry["crutches"]) >= 1)
+
+# Anti-GIGO Idiom Shield test
+idiom_text = "She drank blood-orange tea by the fireplace, bored to death."
+scrubbed = scrub_idioms(idiom_text)
+record_test("Anti-GIGO Idiom Shield Scrubs False Crises (Blood-Orange/Fireplace)", "blood" not in scrubbed.lower() and "fire" not in scrubbed.lower())
 
 xray = classify_sentence_energetics(sample_prose)
 types_found = {s["type"] for s in xray}
@@ -193,7 +199,7 @@ astro_conn.execute("""
     CREATE TABLE binder_nodes (
         id TEXT PRIMARY KEY, parent_id TEXT, project_id TEXT DEFAULT 'default',
         node_type TEXT, title TEXT, sort_order REAL, content TEXT, word_count INTEGER,
-        is_archived INTEGER DEFAULT 0
+        is_archived INTEGER DEFAULT 0, synopsis TEXT DEFAULT ''
     )
 """)
 astro_conn.execute("""
@@ -206,21 +212,24 @@ astro_conn.execute("""
     )
 """)
 astro_conn.execute("""
-    CREATE TABLE canonical_entities (entity_id TEXT PRIMARY KEY, name TEXT, entity_type TEXT, aliases TEXT)
+    CREATE TABLE canonical_entities (entity_id TEXT PRIMARY KEY, name TEXT, entity_type TEXT, aliases TEXT, created_at TEXT)
 """)
 astro_conn.execute("""
     CREATE TABLE promises_ledger (id INTEGER PRIMARY KEY, series_id TEXT, book_id TEXT, planted_scene_id TEXT, target_volume INTEGER, target_tick REAL, target_location TEXT, promise_desc TEXT, status TEXT)
 """)
+astro_conn.execute("""
+    CREATE TABLE story_deadlines (id TEXT PRIMARY KEY, book_id TEXT, title TEXT, deadline_tick REAL, urgency_level TEXT, status TEXT)
+""")
 
-astro_conn.execute("INSERT INTO binder_nodes VALUES ('book_1', NULL, 'default', 'BOOK', 'Book One', 10.0, '', 0, 0)")
-astro_conn.execute("INSERT INTO binder_nodes VALUES ('ch_1', 'book_1', 'default', 'CHAPTER', 'Chapter One', 10.0, '', 0, 0)")
+astro_conn.execute("INSERT INTO binder_nodes VALUES ('book_1', NULL, 'default', 'BOOK', 'Book One', 10.0, '', 0, 0, '')")
+astro_conn.execute("INSERT INTO binder_nodes VALUES ('ch_1', 'book_1', 'default', 'CHAPTER', 'Chapter One', 10.0, '', 0, 0, '')")
 three_beat_prose = (
     "She considered the silent docks and wondered what had happened to the light.\n\n"
     "\"Drop the weapon!\" the guard shouted, stepping forward.\n\n"
     "Cold steel cleaved through the night air. Blood hissed upon the flagstones."
 )
 astro_conn.execute("""
-    INSERT INTO binder_nodes VALUES ('sc_1', 'ch_1', 'default', 'SCENE', 'The Confrontation', 10.0, ?, 36, 0)
+    INSERT INTO binder_nodes VALUES ('sc_1', 'ch_1', 'default', 'SCENE', 'The Confrontation', 10.0, ?, 36, 0, 'Combat at Docks')
 """, (three_beat_prose,))
 astro_conn.commit()
 
@@ -231,13 +240,10 @@ micro_manifest = build_astrolabe_manifest(astro_conn, chapter_id='ch_1', focus_s
 beats_trace = micro_manifest["data"][0] if micro_manifest["data"] else {}
 num_beats = len(beats_trace.get("x", []))
 record_test("Chapter Lens Maps Paragraph Beats (Not 1 Dot)", num_beats == 3)
-record_test("Chapter Lens Maps 3 Dramatic Channels (Interior/Dialogue/Action)", set(beats_trace.get("y", [])) == {0.0, 1.0, 2.0})
+record_test("Chapter Lens Encodes Clickable Beat Navigation Data", len(beats_trace.get("customdata", [])) == 3 and isinstance(beats_trace["customdata"][0], dict))
 
 astro_conn.close()
 
-# =============================================================================
-# 6. SCRIVENER & TEXT IMPORTER NORMALIZATION
-# =============================================================================
 # =============================================================================
 # 6. SCRIVENER & TEXT IMPORTER NORMALIZATION
 # =============================================================================
@@ -273,7 +279,6 @@ try:
 
     first_scene_id = build_binder_from_manifest(mock_manifest, "Test Import Project")
 
-    # Re-open fresh connection to verify data was committed to disk
     verify_conn = sqlite3.connect(import_db_path)
     verify_conn.row_factory = sqlite3.Row
     c = verify_conn.cursor()
@@ -332,6 +337,39 @@ record_test("GET /api/lore Returns Living Lexicon", lore_res.status_code == 200 
 
 authorship_res = client.get("/api/publishing/authorship-proof")
 record_test("GET /api/publishing/authorship-proof Generates Cryptographic Hash", authorship_res.status_code == 200 and "verification_hash" in authorship_res.json())
+
+genome_res = client.get("/api/publishing/genome")
+record_test("GET /api/publishing/genome Computes Macro Audience DNA", genome_res.status_code == 200 and "spectrum" in genome_res.json())
+
+# =============================================================================
+# 9. DUAL-TIER NEURO-NARRATIVE SPECTROMETER & COMPS ENGINE
+# =============================================================================
+print(f"\n{BOLD}9. Dual-Tier Neuro-Narrative Spectrometer & Comps Engine{RESET}")
+
+from backend.spectrometer import analyze_neuro_spectrum, calculate_manuscript_comps
+
+# Test Intimate / Somatic Romance Prose
+romance_prose = (
+    "\"Don't look at me like that,\" she whispered, her pulse hammering in her throat. "
+    "His fingers brushed her collarbone. The cold heat of his touch made her shiver. "
+    "\"Tell me the truth,\" he said, leaning closer until her breath caught."
+)
+romance_spec = analyze_neuro_spectrum(romance_prose)
+record_test("Detects High Oxytocin in Intimate Proximity Dialogue", romance_spec["oxytocin"] >= 40)
+
+# Test Kinetic Action Prose
+action_prose = (
+    "Blade struck iron! Sparks showered the stone. "
+    "She dodged left. The pavement splintered under the impact. "
+    "Run! Her lungs burned as the whistle screamed across the dark rooftops."
+)
+action_spec = analyze_neuro_spectrum(action_prose)
+record_test("Detects High Adrenaline in Staccato Combat Prose", action_spec["adrenaline"] >= 40)
+
+# Test Canonical Comps Matching
+mock_book_spec = {"adrenaline": 20, "oxytocin": 45, "dopamine": 15, "serotonin": 20}
+comps = calculate_manuscript_comps(mock_book_spec)
+record_test("Calculates Vector Cosine Similarity Against Canonical Comps", len(comps) == 3 and comps[0]["author"] == "Robin Hobb")
 
 # =============================================================================
 # SUMMARY REPORT

@@ -101,38 +101,111 @@
         </div>
       </div>
 
-      <!-- TAB 2: TELEMETRY -->
+      <!-- TAB 2: TELEMETRY & NEURO-SPECTROMETER -->
       <div v-if="store.activeInspectorTab === 'telemetry'" class="space-y-4">
-        <div class="grid grid-cols-2 gap-2 text-center">
+        
+        <!-- Pacing Metrics Grid -->
+        <div class="grid grid-cols-2 gap-2 text-center font-mono">
           <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800">
             <div class="text-[10px] text-zinc-500">Cadence StDev</div>
-            <div class="text-base font-bold text-amber-400 font-mono">{{ telemetry.cadence_stdev || 0 }}</div>
+            <div class="text-base font-bold text-amber-400">{{ telemetry.cadence_stdev || 0 }}</div>
           </div>
           <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800">
             <div class="text-[10px] text-zinc-500">Sentence Avg</div>
-            <div class="text-base font-bold text-amber-400 font-mono">{{ telemetry.avg_sentence || 0 }}w</div>
+            <div class="text-base font-bold text-amber-400">{{ telemetry.avg_sentence || 0 }}w</div>
           </div>
         </div>
 
-        <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800 flex items-center justify-between">
-          <span class="text-[11px] text-zinc-400">Tension Elevation (Z):</span>
-          <span class="font-mono text-amber-400 font-bold">{{ telemetry.tension_elevation || 0.35 }}</span>
+        <!-- Stakes Elevation & Slope Diagnosis -->
+        <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800 flex items-center justify-between font-mono">
+          <div>
+            <span class="text-[10px] text-zinc-500 uppercase block">Stakes Elevation (Z)</span>
+            <span class="text-xs text-zinc-300">{{ telemetry.slope_diagnosis || 'STABLE_FLOW' }}</span>
+          </div>
+          <span class="text-base font-bold text-amber-400">{{ telemetry.tension_elevation || 0.35 }}</span>
         </div>
 
+        <!-- Micro Neuro-Narrative Spectrometer (The 4 Reader Drives) -->
+        <div class="p-3.5 bg-zinc-950 rounded-xl border border-zinc-800 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-amber-400 font-mono flex items-center gap-1.5">
+              <Activity class="w-3.5 h-3.5" /> Reader Neuro-Spectrum
+            </span>
+            <span class="text-[9px] font-mono text-zinc-500">Live Scene Fuel</span>
+          </div>
+
+          <!-- 4 Channel Gauges -->
+          <div class="space-y-2 font-mono text-[10px]">
+            <div>
+              <div class="flex justify-between text-rose-400 mb-0.5">
+                <span>Adrenaline (Kinetic Survival)</span>
+                <span>{{ telemetry.spectrometer?.adrenaline || 25 }}%</span>
+              </div>
+              <div class="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
+                <div class="bg-rose-500 h-full rounded-full transition-all" :style="{ width: (telemetry.spectrometer?.adrenaline || 25) + '%' }"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-purple-400 mb-0.5">
+                <span>Oxytocin (Relational Intimacy)</span>
+                <span>{{ telemetry.spectrometer?.oxytocin || 25 }}%</span>
+              </div>
+              <div class="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
+                <div class="bg-purple-500 h-full rounded-full transition-all" :style="{ width: (telemetry.spectrometer?.oxytocin || 25) + '%' }"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-cyan-400 mb-0.5">
+                <span>Dopamine (Deductive Mystery)</span>
+                <span>{{ telemetry.spectrometer?.dopamine || 25 }}%</span>
+              </div>
+              <div class="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
+                <div class="bg-cyan-500 h-full rounded-full transition-all" :style="{ width: (telemetry.spectrometer?.dopamine || 25) + '%' }"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-emerald-400 mb-0.5">
+                <span>Serotonin (Aesthetic Immersion)</span>
+                <span>{{ telemetry.spectrometer?.serotonin || 25 }}%</span>
+              </div>
+              <div class="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
+                <div class="bg-emerald-500 h-full rounded-full transition-all" :style="{ width: (telemetry.spectrometer?.serotonin || 25) + '%' }"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Reader Hunger & Fatigue Warning -->
+          <div 
+            class="p-2.5 rounded-lg border text-[10px] leading-relaxed font-sans"
+            :class="[
+              telemetry.spectrometer?.hunger_severity === 'WARNING' 
+                ? 'bg-amber-950/30 border-amber-900/60 text-amber-200' 
+                : (telemetry.spectrometer?.hunger_severity === 'CAUTION' ? 'bg-cyan-950/30 border-cyan-900/60 text-cyan-200' : 'bg-zinc-900/50 border-zinc-800 text-zinc-400')
+            ]"
+          >
+            <strong>Reader State:</strong> {{ telemetry.spectrometer?.hunger_alert || "Calibrating neurochemical equilibrium..." }}
+          </div>
+        </div>
+
+        <!-- Filter Verbs & Clutter -->
         <div>
           <label class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1">Filter Verbs Detected</label>
           <div v-if="Object.keys(telemetry.filters || {}).length" class="space-y-1">
             <div 
               v-for="(cnt, v) in telemetry.filters" 
               :key="v" 
-              class="flex justify-between bg-zinc-950 px-2 py-1 rounded border border-zinc-800/50"
+              class="flex justify-between bg-zinc-950 px-2.5 py-1 rounded border border-zinc-800/50 font-mono text-[11px]"
             >
-              <span class="text-rose-400 font-mono">{{ v }}</span>
-              <span class="font-mono text-zinc-500">{{ cnt }}</span>
+              <span class="text-rose-400">{{ v }}</span>
+              <span class="text-zinc-500">{{ cnt }}</span>
             </div>
           </div>
           <div v-else class="text-zinc-600 italic">No filter verbs detected. Deep POV intact.</div>
         </div>
+
       </div>
 
       <!-- TAB 3: SOCRATIC MIRROR & TUTOR -->
@@ -320,7 +393,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
-import { Microscope, Sparkles, Loader, Send, Target, Search, Maximize, X } from 'lucide-vue-next'
+import { Microscope, Sparkles, Loader, Send, Target, Search, Maximize, X, Activity } from 'lucide-vue-next'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 
