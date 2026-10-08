@@ -6,38 +6,37 @@ echo ===================================================
 echo   LAUNCHING THEDRAL SOVEREIGN STUDIO
 echo ===================================================
 
-REM 1. Create virtual environment if missing
-if not exist "venv" (
-    echo [1/3] Creating Python environment...
-    python -m venv venv
-    call venv\Scripts\activate.bat
-    echo [2/3] Installing Python requirements...
-    pip install -r requirements.txt
-) else (
-    call venv\Scripts\activate.bat
-)
+if exist venv goto HAS_VENV
+echo Creating Python virtual environment...
+python -m venv venv
+call venv\Scripts\activate.bat
+echo Installing Python dependencies...
+pip install -r requirements.txt
+goto CHECK_NODE
 
-REM 2. Install interface packages if missing
-if not exist "node_modules" (
-    echo [3/3] Installing interface packages...
-    call npm install
-)
+:HAS_VENV
+call venv\Scripts\activate.bat
 
-REM 3. Start Backend & Frontend
+:CHECK_NODE
+if exist node_modules goto START_SERVERS
+echo Installing interface dependencies...
+call npm install
+
+:START_SERVERS
 set ENABLE_AI=false
-echo Starting Backend...
+
+echo Starting Backend Server on Port 8000...
 start "" venv\Scripts\python.exe app.py
 
-echo Starting Frontend...
+echo Starting Interface on Port 5173...
 start "" cmd /c "npm run dev -- --host"
 
-REM 4. Open Browser
 timeout /t 4 /nobreak >nul
 echo Opening studio in browser...
 start http://localhost:5173
 
 echo ===================================================
-echo  THEDRAL IS LIVE! 
+echo  THEDRAL IS LIVE!
 echo  Keep this window open while writing.
 echo ===================================================
 pause
