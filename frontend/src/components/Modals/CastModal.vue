@@ -13,7 +13,7 @@
             <Users class="w-5 h-5 text-amber-500" /> Cast & Relics Directory
           </h3>
           <span class="text-[10px] font-mono bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
-            {{ store.registeredEntities?.length || 0 }} registered
+            {{ displayedEntities.length }} in view
           </span>
         </div>
         <button @click="closeModal" class="text-zinc-500 hover:text-white transition">
@@ -50,32 +50,51 @@
         </div>
       </div>
 
-      <!-- Filter Tabs -->
-      <div class="flex items-center space-x-2 text-xs font-mono shrink-0">
-        <button 
-          @click="activeFilter = 'ALL'"
-          :class="['px-2.5 py-1 rounded transition', activeFilter === 'ALL' ? 'bg-zinc-800 text-amber-400' : 'text-zinc-500 hover:text-zinc-300']"
-        >
-          All ({{ store.registeredEntities?.length || 0 }})
-        </button>
-        <button 
-          @click="activeFilter = 'CHARACTER'"
-          :class="['px-2.5 py-1 rounded transition', activeFilter === 'CHARACTER' ? 'bg-zinc-800 text-amber-400' : 'text-zinc-500 hover:text-zinc-300']"
-        >
-          Characters ({{ characterCount }})
-        </button>
-        <button 
-          @click="activeFilter = 'ITEM'"
-          :class="['px-2.5 py-1 rounded transition', activeFilter === 'ITEM' ? 'bg-zinc-800 text-cyan-400' : 'text-zinc-500 hover:text-zinc-300']"
-        >
-          Artifacts ({{ itemCount }})
-        </button>
+      <!-- Filter Bar: Book Scope vs Type -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono shrink-0 border-b border-zinc-800/60 pb-2.5">
+        <!-- Scope Filter: Current Book vs Series Canon -->
+        <div class="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+          <button 
+            @click="scopeFilter = 'BOOK'"
+            :class="['px-2 py-0.5 rounded text-[11px] transition', scopeFilter === 'BOOK' ? 'bg-zinc-800 text-amber-400 font-bold' : 'text-zinc-500 hover:text-zinc-300']"
+          >
+            📖 Active Book
+          </button>
+          <button 
+            @click="scopeFilter = 'SERIES'"
+            :class="['px-2 py-0.5 rounded text-[11px] transition', scopeFilter === 'SERIES' ? 'bg-zinc-800 text-amber-400 font-bold' : 'text-zinc-500 hover:text-zinc-300']"
+          >
+            🌌 Full Series Canon
+          </button>
+        </div>
+
+        <!-- Type Filter Pills -->
+        <div class="flex items-center space-x-1.5 text-[11px]">
+          <button 
+            @click="typeFilter = 'ALL'"
+            :class="['px-2 py-0.5 rounded transition', typeFilter === 'ALL' ? 'text-amber-400 underline font-bold' : 'text-zinc-500 hover:text-zinc-300']"
+          >
+            All
+          </button>
+          <button 
+            @click="typeFilter = 'CHARACTER'"
+            :class="['px-2 py-0.5 rounded transition', typeFilter === 'CHARACTER' ? 'text-amber-400 underline font-bold' : 'text-zinc-500 hover:text-zinc-300']"
+          >
+            Characters
+          </button>
+          <button 
+            @click="typeFilter = 'ITEM'"
+            :class="['px-2 py-0.5 rounded transition', typeFilter === 'ITEM' ? 'text-cyan-400 underline font-bold' : 'text-zinc-500 hover:text-zinc-300']"
+          >
+            Artifacts
+          </button>
+        </div>
       </div>
 
       <!-- Entity Directory List -->
       <div class="flex-1 overflow-y-auto space-y-2 p-1 custom-scrollbar">
         <div 
-          v-for="ent in filteredEntities" 
+          v-for="ent in displayedEntities" 
           :key="ent.entity_id" 
           class="p-3 bg-zinc-950 border border-zinc-800/80 hover:border-zinc-700 rounded-xl flex items-center justify-between transition group"
         >
@@ -107,14 +126,16 @@
           </button>
         </div>
 
-        <div v-if="!filteredEntities.length" class="text-center py-10 text-xs text-zinc-500 italic">
-          No tracked entities match this perspective.
+        <div v-if="!displayedEntities.length" class="text-center py-10 text-xs text-zinc-500 italic font-serif">
+          {{ scopeFilter === 'BOOK' ? 'No tracked entities active in this manuscript yet. Switch to "Full Series Canon" or add one above.' : 'No entities found in series canon.' }}
         </div>
       </div>
 
       <!-- Footer -->
       <div class="border-t border-zinc-800 pt-3 flex justify-between items-center shrink-0">
-        <span class="text-[10px] text-zinc-500 font-mono">Synchronized with 3D Cosmograph</span>
+        <span class="text-[10px] text-zinc-500 font-mono">
+          {{ scopeFilter === 'BOOK' ? 'Showing entities active in current draft' : 'Showing all series-wide canon' }}
+        </span>
         <button 
           @click="closeModal" 
           class="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-lg transition"
@@ -132,25 +153,53 @@ import { ref, computed, watch } from 'vue'
 import { store, showToast } from '../../store.js'
 import { Users, X, Trash2, Plus } from 'lucide-vue-next'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 
-const activeFilter = ref('ALL')
+const scopeFilter = ref('BOOK')   // 'BOOK' | 'SERIES'
+const typeFilter = ref('ALL')     // 'ALL' | 'CHARACTER' | 'ITEM'
+
 const newEntity = ref({
   name: '',
   entity_type: 'CHARACTER'
 })
 
-const characterCount = computed(() => 
-  (store.registeredEntities || []).filter(e => e.entity_type === 'CHARACTER').length
-)
-const itemCount = computed(() => 
-  (store.registeredEntities || []).filter(e => e.entity_type === 'ITEM').length
-)
+// Returns concatenated prose of all scenes in active book to detect active cast
+const activeBookProse = computed(() => {
+  const scenes = []
+  for (const book of store.tree || []) {
+    for (const ch of book.children || []) {
+      for (const sc of ch.children || []) {
+        if (sc.content) scenes.push(sc.content)
+      }
+    }
+  }
+  return scenes.join(' ').toLowerCase()
+})
 
-const filteredEntities = computed(() => {
-  const list = store.registeredEntities || []
-  if (activeFilter.value === 'ALL') return list
-  return list.filter(e => e.entity_type === activeFilter.value)
+const displayedEntities = computed(() => {
+  let list = store.registeredEntities || []
+
+  // 1. Filter by Type
+  if (typeFilter.value !== 'ALL') {
+    list = list.filter(e => e.entity_type === typeFilter.value)
+  }
+
+  // 2. Filter by Scope: if BOOK, only show if entity appears in the current draft
+  if (scopeFilter.value === 'BOOK' && activeBookProse.value) {
+    const bookText = activeBookProse.value
+    list = list.filter(e => {
+      const name = (e.name || '').toLowerCase()
+      if (!name) return false
+      if (bookText.includes(name)) return true
+      if (e.aliases) {
+        const aliasList = e.aliases.toLowerCase().split(',')
+        return aliasList.some(a => a.trim() && bookText.includes(a.trim()))
+      }
+      return false
+    })
+  }
+
+  return list
 })
 
 const closeModal = () => {

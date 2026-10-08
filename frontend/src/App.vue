@@ -7,7 +7,7 @@
         : 'bg-zinc-950 text-zinc-100 selection:bg-indigo-900/50'
     ]"
   >
-    <!-- Top Global Command & Navigation Bar (Hidden in Void Mode) -->
+    <!-- Top Global Command & Navigation Bar -->
     <TopNav v-if="!store.isVoidMode" />
 
     <!-- Main Workspace Container -->
@@ -32,7 +32,7 @@
               : 'rounded-lg border border-zinc-800/80 bg-zinc-900/70 backdrop-blur-sm'
         ]"
       >
-        <!-- Distraction-Free Void Mode Floating Exit Control -->
+        <!-- Void Mode Floating Exit Control -->
         <div 
           v-if="store.isVoidMode" 
           class="absolute top-4 right-6 z-50 flex items-center gap-3 opacity-20 hover:opacity-100 transition-opacity"
@@ -87,7 +87,7 @@
       </TransitionGroup>
     </div>
 
-    <!-- Modals Layer -->
+    <!-- ALL 7 MODALS MOUNTED -->
     <OmnibarModal v-if="store.modals.omnibar" />
     <CastModal v-if="store.modals.cast" />
     <LoreModal v-if="store.modals.lore" />
@@ -125,37 +125,31 @@ const dismissToast = (id) => {
   if (index > -1) toasts.splice(index, 1)
 }
 
-// Keep body tag in sync for custom candlelight CSS
 watch(() => store.isCandlelight, (val) => {
   document.body.classList.toggle('candlelight-mode', val)
 })
 
-// Global Hotkey Orchestrator
 const handleKeydown = (e) => {
   const isMeta = e.metaKey || e.ctrlKey
 
-  // Cmd/Ctrl + K -> Omnibar
   if (isMeta && e.key.toLowerCase() === 'k') {
     e.preventDefault()
     store.toggleModal('omnibar')
     return
   }
 
-  // Cmd/Ctrl + \ -> Toggle Void Mode
   if (isMeta && e.key === '\\') {
     e.preventDefault()
     store.toggleVoidMode()
     return
   }
 
-  // Cmd/Ctrl + J -> Toggle Craft X-Ray
   if (isMeta && e.key.toLowerCase() === 'j') {
     e.preventDefault()
     store.toggleXRay()
     return
   }
 
-  // Escape key: closes open modal first, otherwise exits Void mode
   if (e.key === 'Escape') {
     const openModalKey = Object.keys(store.modals).find(key => store.modals[key])
     if (openModalKey) {
@@ -171,8 +165,6 @@ const handleKeydown = (e) => {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
-  
-  // Hydrate core trees and registries from backend
   await store.fetchTree()
   store.fetchCast()
   store.fetchLore()
@@ -184,7 +176,6 @@ onUnmounted(() => {
 </script>
 
 <style>
-/* Custom Global Transitions for Toast System */
 .toast-enter-active,
 .toast-leave-active {
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
@@ -198,7 +189,6 @@ onUnmounted(() => {
   transform: translateY(-8px) scale(0.96);
 }
 
-/* Custom Minimalist Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -214,7 +204,6 @@ onUnmounted(() => {
   background: #3f3f46;
 }
 
-/* Circadian Candlelight Theme Rules */
 body.candlelight-mode {
   background-color: #0c0a09 !important;
   color: #fef3c7 !important;
