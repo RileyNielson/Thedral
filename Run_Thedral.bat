@@ -26,6 +26,7 @@ if not exist "node_modules" (
 )
 
 :: 3. Start Backend in Background
+set ENABLE_AI=false
 echo Starting Thedral Backend (Port 8000)...
 start /B "" %PYTHON_CMD% app.py
 
