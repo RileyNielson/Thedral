@@ -6,27 +6,35 @@ echo =================================================================
 echo    LAUNCHING THEDRAL SOVEREIGN STUDIO (WINDOWS 10)
 echo =================================================================
 
-:: 1. Activate Python Virtual Environment
-if exist "venv\Scripts\activate.bat" (
+:: 1. Self-Installing Virtual Environment
+if not exist "venv" (
+    echo [1/3] First-time setup: Creating Python virtual environment...
+    python -m venv venv
     call venv\Scripts\activate.bat
-    set PYTHON_CMD=venv\Scripts\python.exe
-) else if exist ".venv\Scripts\activate.bat" (
-    call .venv\Scripts\activate.bat
-    set PYTHON_CMD=.venv\Scripts\python.exe
+    echo [2/3] Installing Python requirements (FastAPI, docx, uvicorn)...
+    pip install -r requirements.txt
 ) else (
-    set PYTHON_CMD=python
+    call venv\Scripts\activate.bat
 )
 
-:: 2. Start FastAPI Backend in Background
+set PYTHON_CMD=venv\Scripts\python.exe
+
+:: 2. Self-Installing Node Modules
+if not exist "node_modules" (
+    echo [3/3] First-time setup: Installing interface packages...
+    call npm install
+)
+
+:: 3. Start Backend in Background
 echo Starting Thedral Backend (Port 8000)...
 start /B "" %PYTHON_CMD% app.py
 
-:: 3. Start Vite Frontend in Background
+:: 4. Start Frontend in Background
 echo Starting Studio Interface (Port 5173)...
 start /B "" cmd /c "npm run dev -- --host"
 
-:: 4. Wait 3 seconds and open default browser
-timeout /t 3 /nobreak >nul
+:: 5. Wait 4 seconds and open in default browser
+timeout /t 4 /nobreak >nul
 echo Opening studio in browser...
 start http://localhost:5173
 
