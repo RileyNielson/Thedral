@@ -6,30 +6,25 @@ echo ===================================================
 echo   LAUNCHING THEDRAL SOVEREIGN STUDIO
 echo ===================================================
 
-:: Check if a working python.exe actually exists inside venv
-if exist "%~dp0venv\Scripts\python.exe" goto HAS_VENV
+:: Check if backend packages are already installed
+if exist "%~dp0venv\Lib\site-packages\uvicorn" goto HAS_PACKAGES
 
 echo [1/3] Setting up Python environment...
-:: Remove broken/empty venv folder if it exists
-if exist venv rmdir /s /q venv >nul 2>&1
-
-:: Create fresh venv (tries python, falls back to py launcher)
-python -m venv venv >nul 2>&1
 if not exist "%~dp0venv\Scripts\python.exe" (
-    py -m venv venv >nul 2>&1
-)
-
-if not exist "%~dp0venv\Scripts\python.exe" (
-    echo ERROR: Python is not installed or not in PATH!
-    echo Please install Python from python.org and check "Add Python to PATH".
-    pause
-    exit /b 1
+    python -m venv venv >nul 2>&1
+    if not exist "%~dp0venv\Scripts\python.exe" (
+        py -m venv venv >nul 2>&1
+    )
 )
 
 echo [2/3] Installing Python requirements...
-call "%~dp0venv\Scripts\pip.exe" install -r requirements.txt
+if exist "%~dp0requirements.txt" (
+    call "%~dp0venv\Scripts\pip.exe" install -r "%~dp0requirements.txt"
+) else (
+    call "%~dp0venv\Scripts\pip.exe" install fastapi uvicorn python-docx pydantic plotly
+)
 
-:HAS_VENV
+:HAS_PACKAGES
 
 :: Check interface packages
 if exist "%~dp0node_modules" goto START_SERVERS
@@ -45,7 +40,7 @@ start "" "%~dp0venv\Scripts\python.exe" app.py
 echo Starting Interface on Port 5173...
 start "" cmd /c "npm run dev -- --host"
 
-timeout /t 4 /nobreak >nul
+timeout /t 5 /nobreak >nul
 echo Opening studio in browser...
 start http://localhost:5173
 
