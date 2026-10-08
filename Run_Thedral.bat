@@ -2,47 +2,42 @@
 title Thedral Sovereign Studio
 cd /d "%~dp0"
 
-echo =================================================================
-echo    LAUNCHING THEDRAL SOVEREIGN STUDIO (WINDOWS 10)
-echo =================================================================
+echo ===================================================
+echo   LAUNCHING THEDRAL SOVEREIGN STUDIO
+echo ===================================================
 
-:: 1. Self-Installing Virtual Environment
+REM 1. Create virtual environment if missing
 if not exist "venv" (
-    echo [1/3] First-time setup: Creating Python virtual environment...
+    echo [1/3] Creating Python environment...
     python -m venv venv
     call venv\Scripts\activate.bat
-    echo [2/3] Installing Python requirements (FastAPI, docx, uvicorn)...
+    echo [2/3] Installing Python requirements...
     pip install -r requirements.txt
 ) else (
     call venv\Scripts\activate.bat
 )
 
-set PYTHON_CMD=venv\Scripts\python.exe
-
-:: 2. Self-Installing Node Modules
+REM 2. Install interface packages if missing
 if not exist "node_modules" (
-    echo [3/3] First-time setup: Installing interface packages...
+    echo [3/3] Installing interface packages...
     call npm install
 )
 
-:: 3. Start Backend in Background
+REM 3. Start Backend & Frontend
 set ENABLE_AI=false
-echo Starting Thedral Backend (Port 8000)...
-start /B "" %PYTHON_CMD% app.py
+echo Starting Backend...
+start "" venv\Scripts\python.exe app.py
 
-:: 4. Start Frontend in Background
-echo Starting Studio Interface (Port 5173)...
-start /B "" cmd /c "npm run dev -- --host"
+echo Starting Frontend...
+start "" cmd /c "npm run dev -- --host"
 
-:: 5. Wait 4 seconds and open in default browser
+REM 4. Open Browser
 timeout /t 4 /nobreak >nul
 echo Opening studio in browser...
 start http://localhost:5173
 
-echo.
-echo =================================================================
-echo  THEDRAL IS LIVE!
-echo  Desktop: http://localhost:5173
-echo  Close this window to stop the studio.
-echo =================================================================
+echo ===================================================
+echo  THEDRAL IS LIVE! 
+echo  Keep this window open while writing.
+echo ===================================================
 pause
