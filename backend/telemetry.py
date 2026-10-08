@@ -1,13 +1,10 @@
 import re
 import math
 from backend.config import FILTER_VERBS, CRUTCH_WORDS, TENSION_KEYWORDS
-from backend.spectrometer import analyze_neuro_spectrum
-
-# =============================================================================
-# ANTI-GIGO COMPOUND IDIOM SHIELD
-# Prevents colloquial phrases like "blood-orange" or "fire in his eyes"
-# from faking a high-tension crisis.
-# =============================================================================
+from backend.spectrometer import (
+    analyze_neuro_spectrum, OXYTOCIN_KEYWORDS, 
+    DOPAMINE_KEYWORDS, SEROTONIN_KEYWORDS
+)
 
 COMPOUND_IDIOM_PATTERNS = [
     r"\bblood[- ]orange\b", r"\bbad blood\b", r"\bblood is thicker\b",
@@ -21,25 +18,12 @@ COMPOUND_IDIOM_PATTERNS = [
 ]
 
 def scrub_idioms(text: str) -> str:
-    """Masks non-literal idioms so keyword scanners only capture authentic diegetic stakes."""
     scrubbed = text
     for pattern in COMPOUND_IDIOM_PATTERNS:
         scrubbed = re.sub(pattern, " ", scrubbed, flags=re.IGNORECASE)
     return scrubbed
 
-# =============================================================================
-# PACING & TELEMETRY ENGINE
-# =============================================================================
-
 def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> dict:
-    """
-    Evaluates Law 1 Pacing Physics, Prose Craft Metrics, and the Neuro-Spectrometer:
-    - Tension Elevation Z (Stakes Height: 0.05 to 0.95 with Anti-GIGO Idiom Shield)
-    - Cadence Velocity V (Sentence Length Standard Deviation)
-    - Pacing Momentum M = V * (1 + delta_Z)
-    - Micro Neuro-Narrative Spectrometer (Adrenaline/Oxytocin/Dopamine/Serotonin)
-    - Filter Verb and Crutch Word density scans
-    """
     if not text or not text.strip():
         return {
             "words": 0, "avg_sentence": 0.0, "cadence_stdev": 0.0,
@@ -53,7 +37,6 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
     words = len(text.split())
     text_lower = text.lower()
     
-    # 1. Lexical Scans using centralized config lexicons
     filters_found = {
         v: len(re.findall(r"\b" + v + r"\b", text_lower)) 
         for v in FILTER_VERBS if v in text_lower
@@ -63,7 +46,6 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
         for w in CRUTCH_WORDS if w in text_lower
     }
 
-    # 2. Cadence Velocity V (Sentence Length Burstiness)
     sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
     sentence_lengths = [len(s.split()) for s in sentences if len(s.split()) > 0]
 
@@ -74,12 +56,10 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
     else:
         avg_len, stdev = 0.0, 0.0
 
-    # 3. Dialogue Ratio
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     dialogue_paras = sum([1 for p in paragraphs if '"' in p or '“' in p])
     dialogue_ratio = round((dialogue_paras / max(1, len(paragraphs))) * 100, 1)
 
-    # 4. Stakes Elevation Z (0.05 to 0.95) with Idiom Masking
     scrubbed_text_lower = scrub_idioms(text).lower()
     tension_hits = sum(len(re.findall(r"\b" + re.escape(k) + r"\b", scrubbed_text_lower)) for k in TENSION_KEYWORDS)
     tension_density = (tension_hits / max(1, words)) * 1000
@@ -91,7 +71,6 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
         elev -= 0.10
     tension_elevation = round(max(0.05, min(0.95, elev)), 2)
 
-    # 5. Pacing Momentum & Slope Calculus (Non-prescriptive)
     pacing_slope = 0.0
     slope_diagnosis = "STABLE_FLOW"
     pacing_momentum = stdev
@@ -102,7 +81,7 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
         pacing_momentum = round(stdev * (1.0 + delta_z), 1)
 
         if abs(delta_z) < 0.03 and words > 700:
-            slope_diagnosis = "LATERAL_STALL"
+            slope_diagnosis = "SUSTAINED_BASELINE"
         elif delta_z > 0.45:
             slope_diagnosis = "MELODRAMATIC_WHIPLASH"
         elif delta_z > 0.12:
@@ -125,18 +104,127 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
         "spectrometer": analyze_neuro_spectrum(text)
     }
 
+# =============================================================================
+# MULTI-LENS SENTENCE ENERGETICS & TELEMETRY CLASSIFIER
+# =============================================================================
+
+def highlight_clutter_words(sentence_text: str) -> tuple[str, list, list]:
+    """Wraps exact filter verbs and crutch words in HTML span tags."""
+    filters_hit = []
+    crutches_hit = []
+    html = sentence_text
+
+    for v in FILTER_VERBS:
+        pat = re.compile(r"\b(" + re.escape(v) + r")\b", re.IGNORECASE)
+        if pat.search(sentence_text):
+            filters_hit.append(v)
+            html = pat.sub(r'<span class="clutter-filter">\1</span>', html)
+
+    for w in CRUTCH_WORDS:
+        pat = re.compile(r"\b(" + re.escape(w) + r")\b", re.IGNORECASE)
+        if pat.search(sentence_text):
+            crutches_hit.append(w)
+            html = pat.sub(r'<span class="clutter-crutch">\1</span>', html)
+
+    return html, filters_hit, crutches_hit
+
+def classify_multi_lens_sentence(s: str) -> dict:
+    words = len(s.split())
+    s_lower = s.lower()
+    scrubbed_s = scrub_idioms(s).lower()
+
+    # 1. LENS: ENERGETICS (Pacing Physics)
+    has_tension_kw = any(k in scrubbed_s for k in TENSION_KEYWORDS)
+    has_somatic = any(v in s_lower for v in [
+        "locked", "struck", "skid", "dragged", "snapped", 
+        "blood", "frost", "cold", "grip", "teeth", "muscle", "bone"
+    ])
+    is_staccato = 0 < words <= 8
+    is_long = words >= 22
+    has_resolver_kw = any(k in s_lower for k in [
+        "waited", "quiet", "exhaled", "breathed", "paused", 
+        "realized", "sat", "rested", "fade", "stillness"
+    ])
+    has_mystery_kw = any(k in s_lower for k in DOPAMINE_KEYWORDS)
+    is_pivot = bool(re.match(r'^(?:but|yet|the runner rug|suddenly|and then|instead|except|then)\b', s_lower)) or "gave out" in s_lower or "gave way" in s_lower
+
+    filters_in_s = [v for v in FILTER_VERBS if re.search(r'\b' + v + r'\b', s_lower)]
+    crutches_in_s = [w for w in CRUTCH_WORDS if re.search(r'\b' + w + r'\b', s_lower)]
+
+    if is_pivot:
+        energetics_type = "PIVOT"
+        energetics_reason = "🟡 Turning Hinge: Shifts dramatic direction or complicates the scene"
+    elif (has_tension_kw or has_somatic) and (is_staccato or has_tension_kw):
+        energetics_type = "ESCALATOR"
+        energetics_reason = f"🔴 Staccato Impact ({words}w): Tightens physical pressure and heart rate"
+    elif (has_resolver_kw or is_long) and not has_tension_kw:
+        energetics_type = "RESOLVER"
+        intrigue_note = " • Carries narrative intrigue ('secret')" if has_mystery_kw else ""
+        energetics_reason = f"🟢 Lyrical Flow ({words}w): Dilation / Breathing room for reflection{intrigue_note}"
+    elif len(filters_in_s) >= 2 or len(crutches_in_s) >= 2:
+        energetics_type = "SLACK"
+        energetics_reason = f"⚪ Clutter / Slack: Multiple filter verbs ({', '.join(filters_in_s)}) weaken psychic distance"
+    else:
+        energetics_type = "NEUTRAL"
+        energetics_reason = f"Grounded Baseline ({words}w): Clean narrative backbone (60-70% of healthy prose)"
+
+    # 2. LENS: NEURO-SPECTRUM (Emotional Fuel)
+    has_oxytocin = any(k in s_lower for k in OXYTOCIN_KEYWORDS) or ('"' in s or '“' in s)
+    has_dopamine = any(k in s_lower for k in DOPAMINE_KEYWORDS) or '?' in s or '...' in s or '…' in s
+    has_serotonin = any(k in s_lower for k in SEROTONIN_KEYWORDS) or is_long
+
+    if has_tension_kw or (is_staccato and not has_oxytocin):
+        neuro_type = "ADRENALINE"
+        neuro_reason = "🔴 Adrenaline: Kinetic survival, staccato urgency, physical consequence"
+    elif has_oxytocin and not has_tension_kw:
+        neuro_type = "OXYTOCIN"
+        neuro_reason = "🟣 Oxytocin: Interpersonal intimacy, dialogue friction, somatic vulnerability"
+    elif has_dopamine:
+        neuro_type = "DOPAMINE"
+        neuro_reason = "🔵 Dopamine: Epistemic question, secret planted, puzzle/clue revelation"
+    elif has_serotonin:
+        neuro_type = "SEROTONIN"
+        neuro_reason = "🟢 Serotonin: Atmospheric sensory grounding, aesthetic immersion, mythic weight"
+    else:
+        neuro_type = "NEUTRAL"
+        neuro_reason = "Balanced Flow: Narrative transitional beat"
+
+    # 3. LENS: CADENCE RHYTHM (Sentence Length)
+    if is_staccato:
+        cadence_type = "STACCATO"
+        cadence_reason = f"Staccato Burst ({words}w): High velocity / rapid impact"
+    elif is_long:
+        cadence_type = "EXPANSIVE"
+        cadence_reason = f"Expansive Flow ({words}w): Atmospheric breath and contemplative room"
+    else:
+        cadence_type = "BASELINE"
+        cadence_reason = f"Grounded Baseline ({words}w): Steady narrative tempo"
+
+    # 4. LENS: CLUTTER & FILTERS (Cleanse)
+    clutter_html, f_hits, c_hits = highlight_clutter_words(s)
+    has_clutter = len(f_hits) > 0 or len(c_hits) > 0
+    clutter_reason = f"Flagged: {', '.join(f_hits + c_hits)}" if has_clutter else "Clean sentence: Zero filter verbs or crutch words"
+
+    return {
+        "text": s,
+        "words": words,
+        "type": energetics_type,          # Backwards-compatible
+        "reason": energetics_reason,      # Backwards-compatible
+        "energetics_type": energetics_type,
+        "energetics_reason": energetics_reason,
+        "neuro_type": neuro_type,
+        "neuro_reason": neuro_reason,
+        "cadence_type": cadence_type,
+        "cadence_reason": cadence_reason,
+        "has_clutter": has_clutter,
+        "clutter_html": clutter_html,
+        "clutter_reason": clutter_reason
+    }
+
 def classify_sentence_energetics(text: str) -> list[dict]:
-    """
-    Classifies every sentence into an authoritative narrative energy state for the Craft X-Ray:
-    - ESCALATOR (Rose): Somatic friction, staccato cadence (<9 words), crisis keywords.
-    - RESOLVER (Emerald): Falling cadences (>=22 words), contemplative aftermath, breathing space.
-    - PIVOT (Amber): Hinge clauses shifting dramatic direction or complication.
-    - SLACK (Dotted): Filter verbs, throat-clearing crutch words, ungrounded drift.
-    - NEUTRAL: Grounded expository or narrative baseline.
-    """
+    """Single-pass flat list parser (backwards compatible for test suite)."""
     if not text or not text.strip():
         return []
-
     raw_chunks = re.split(r'([.!?]+(?:\s+|\Z))', text)
     sentences = []
     for i in range(0, len(raw_chunks)-1, 2):
@@ -145,51 +233,24 @@ def classify_sentence_energetics(text: str) -> list[dict]:
             sentences.append(s.strip())
     if len(raw_chunks) % 2 == 1 and raw_chunks[-1].strip():
         sentences.append(raw_chunks[-1].strip())
+    return [classify_multi_lens_sentence(s) for s in sentences]
 
-    classified = []
-    for s in sentences:
-        words = len(s.split())
-        s_lower = s.lower()
-        scrubbed_s = scrub_idioms(s).lower()
-
-        has_tension_kw = any(k in scrubbed_s for k in TENSION_KEYWORDS)
-        has_somatic = any(v in s_lower for v in [
-            "locked", "struck", "skid", "dragged", "snapped", 
-            "blood", "frost", "cold", "grip", "teeth", "muscle", "bone"
-        ])
-        is_staccato = 0 < words <= 8
-        is_long = words >= 22
-        has_resolver_kw = any(k in s_lower for k in [
-            "waited", "quiet", "exhaled", "breathed", "paused", 
-            "realized", "sat", "rested", "fade", "stillness"
-        ])
-        
-        is_pivot = bool(re.match(r'^(?:but|yet|the runner rug|suddenly|and then|instead|except|then)\b', s_lower)) or "gave out" in s_lower or "gave way" in s_lower
-
-        filters = [v for v in FILTER_VERBS if re.search(r'\b' + v + r'\b', s_lower)]
-        crutches = [w for w in CRUTCH_WORDS if re.search(r'\b' + w + r'\b', s_lower)]
-
-        if is_pivot:
-            c_type = "PIVOT"
-            reason = "Pivot: Shifts the direction or complication of the beat"
-        elif (has_tension_kw or has_somatic) and (is_staccato or has_tension_kw):
-            c_type = "ESCALATOR"
-            reason = f"Escalator: {'Staccato cadence ' if is_staccato else ''}{'Somatic friction ' if has_somatic else ''}{'Stakes keyword' if has_tension_kw else ''}".strip()
-        elif (has_resolver_kw or is_long) and not has_tension_kw:
-            c_type = "RESOLVER"
-            reason = f"Resolver: {'Falling cadence ' if is_long else ''}{'Contemplative aftermath' if has_resolver_kw else ''}".strip()
-        elif len(filters) >= 2 or len(crutches) >= 2:
-            c_type = "SLACK"
-            reason = f"Narrative Slack: Multiple filter verbs ({', '.join(filters)}) or crutch words"
-        else:
-            c_type = "NEUTRAL"
-            reason = "Grounded exposition / transition"
-
-        classified.append({
-            "text": s,
-            "type": c_type,
-            "reason": reason,
-            "words": words
-        })
-
-    return classified
+def classify_paragraph_energetics(text: str) -> list[list[dict]]:
+    """Native paragraph-by-paragraph multi-lens parser."""
+    if not text or not text.strip():
+        return []
+    raw_paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    structured_blocks = []
+    for para in raw_paragraphs:
+        raw_chunks = re.split(r'([.!?]+(?:\s+|\Z))', para)
+        sentences = []
+        for i in range(0, len(raw_chunks)-1, 2):
+            s = raw_chunks[i] + raw_chunks[i+1]
+            if s.strip():
+                sentences.append(s.strip())
+        if len(raw_chunks) % 2 == 1 and raw_chunks[-1].strip():
+            sentences.append(raw_chunks[-1].strip())
+        classified = [classify_multi_lens_sentence(s) for s in sentences]
+        if classified:
+            structured_blocks.append(classified)
+    return structured_blocks

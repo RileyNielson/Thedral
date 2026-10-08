@@ -52,16 +52,64 @@
 
     <div v-else class="flex-1 overflow-y-auto p-4 text-xs space-y-5 custom-scrollbar">
       
-      <!-- TAB 1: INDEX CARD -->
+      <!-- TAB 1: PERSISTENT SOVEREIGN SCENE CARD -->
       <div v-if="store.activeInspectorTab === 'card'" class="space-y-4">
+        
+        <!-- 4 Sovereign Grounding Fields (Snaps 3D Coordinates) -->
+        <div class="grid grid-cols-2 gap-2 font-mono">
+          <div>
+            <label class="text-[9px] font-bold text-amber-400 uppercase tracking-wider block mb-1">POV Character</label>
+            <input 
+              v-model="cardData.pov_character" 
+              @blur="forceSave" 
+              placeholder="e.g. Ellie" 
+              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 text-xs focus:border-amber-500/50 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label class="text-[9px] font-bold text-amber-400 uppercase tracking-wider block mb-1">Setting / Corridor</label>
+            <input 
+              v-model="cardData.setting" 
+              @blur="forceSave" 
+              placeholder="e.g. The Sky Docks" 
+              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 text-xs focus:border-amber-500/50 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 font-mono">
+          <div>
+            <label class="text-[9px] font-bold text-cyan-400 uppercase tracking-wider block mb-1">Story Day / Time</label>
+            <input 
+              v-model="cardData.narrative_time" 
+              @blur="forceSave" 
+              placeholder="e.g. Day 3.5 or -5 yrs" 
+              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 text-xs focus:border-cyan-500/50 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label class="text-[9px] font-bold text-cyan-400 uppercase tracking-wider block mb-1">Tension Target: {{ cardData.tension_target || 50 }}%</label>
+            <input 
+              type="range"
+              min="0"
+              max="100"
+              v-model.number="cardData.tension_target" 
+              @change="forceSave" 
+              class="w-full accent-amber-500 mt-2 cursor-pointer"
+            />
+          </div>
+        </div>
+
         <div>
-          <label class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1">Scene Synopsis</label>
+          <label class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1">Scene Beat Synopsis</label>
           <textarea 
             v-model="store.activeNode.synopsis" 
             @blur="forceSave" 
-            rows="5" 
-            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 text-xs focus:border-amber-500/50 focus:outline-none transition" 
-            placeholder="What dramatic shifts occur in this beat?"
+            rows="4" 
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 text-xs focus:border-amber-500/50 focus:outline-none transition leading-relaxed font-serif" 
+            placeholder="What irreversible dramatic shift occurs in this beat?"
           ></textarea>
         </div>
 
@@ -77,7 +125,7 @@
         </div>
 
         <div>
-          <label class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1">Revision Status</label>
+          <label class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1">Drafting Status</label>
           <select 
             v-model="store.activeNode.status" 
             @change="forceSave" 
@@ -103,8 +151,6 @@
 
       <!-- TAB 2: TELEMETRY & NEURO-SPECTROMETER -->
       <div v-if="store.activeInspectorTab === 'telemetry'" class="space-y-4">
-        
-        <!-- Pacing Metrics Grid -->
         <div class="grid grid-cols-2 gap-2 text-center font-mono">
           <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800">
             <div class="text-[10px] text-zinc-500">Cadence StDev</div>
@@ -116,7 +162,6 @@
           </div>
         </div>
 
-        <!-- Stakes Elevation & Slope Diagnosis -->
         <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800 flex items-center justify-between font-mono">
           <div>
             <span class="text-[10px] text-zinc-500 uppercase block">Stakes Elevation (Z)</span>
@@ -125,7 +170,7 @@
           <span class="text-base font-bold text-amber-400">{{ telemetry.tension_elevation || 0.35 }}</span>
         </div>
 
-        <!-- Micro Neuro-Narrative Spectrometer (The 4 Reader Drives) -->
+        <!-- Micro Neuro-Narrative Spectrometer -->
         <div class="p-3.5 bg-zinc-950 rounded-xl border border-zinc-800 space-y-3">
           <div class="flex items-center justify-between">
             <span class="text-[10px] font-bold uppercase tracking-wider text-amber-400 font-mono flex items-center gap-1.5">
@@ -134,7 +179,6 @@
             <span class="text-[9px] font-mono text-zinc-500">Live Scene Fuel</span>
           </div>
 
-          <!-- 4 Channel Gauges -->
           <div class="space-y-2 font-mono text-[10px]">
             <div>
               <div class="flex justify-between text-rose-400 mb-0.5">
@@ -177,7 +221,6 @@
             </div>
           </div>
 
-          <!-- Live Reader Hunger & Fatigue Warning -->
           <div 
             class="p-2.5 rounded-lg border text-[10px] leading-relaxed font-sans"
             :class="[
@@ -190,7 +233,6 @@
           </div>
         </div>
 
-        <!-- Filter Verbs & Clutter -->
         <div>
           <label class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1">Filter Verbs Detected</label>
           <div v-if="Object.keys(telemetry.filters || {}).length" class="space-y-1">
@@ -205,12 +247,10 @@
           </div>
           <div v-else class="text-zinc-600 italic">No filter verbs detected. Deep POV intact.</div>
         </div>
-
       </div>
 
       <!-- TAB 3: SOCRATIC MIRROR & TUTOR -->
       <div v-if="store.activeInspectorTab === 'socratic'" class="space-y-4 flex flex-col h-full">
-        <!-- Active Socratic Critique -->
         <div v-if="store.socraticCritique" class="space-y-2">
           <div class="p-3.5 bg-zinc-950 rounded-xl border border-amber-500/30 text-zinc-200 leading-relaxed whitespace-pre-line text-xs font-serif shadow-lg">
             {{ store.socraticCritique }}
@@ -246,7 +286,6 @@
           </button>
         </div>
 
-        <!-- Socratic Tutor Prompt -->
         <div class="pt-4 border-t border-zinc-800">
           <label class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-2">Ask The Socratic Companion</label>
           <div class="flex gap-2">
@@ -267,7 +306,6 @@
           </div>
         </div>
         
-        <!-- Critique History Log -->
         <div class="pt-3 border-t border-zinc-800 space-y-2 flex-1 overflow-y-auto">
           <div class="flex items-center justify-between">
             <span class="text-[10px] font-bold uppercase tracking-wider text-zinc-400 font-mono">Editorial Log</span>
@@ -404,6 +442,20 @@ const isScanning = ref(false)
 const isLensLoading = ref(false)
 let currentManifest = null
 
+// Persistent Scene Card Data Proxy (Stored in SQLite binder_nodes.card_data)
+const cardData = computed(() => {
+  if (!store.activeNode) return {}
+  if (!store.activeNode.card) {
+    store.activeNode.card = {
+      pov_character: '',
+      setting: '',
+      narrative_time: '',
+      tension_target: 50
+    }
+  }
+  return store.activeNode.card
+})
+
 const getPlotly = async () => {
   if (typeof window !== 'undefined' && window.Plotly) return window.Plotly
   try {
@@ -414,7 +466,7 @@ const getPlotly = async () => {
   }
 }
 
-// Live Reading Bead Receiver: Updates the glowing bead on the 3D plot
+// Live Reading Bead Receiver
 const handleScrollBeat = async (e) => {
   const beatIdx = e.detail?.beat || 1
   const plotEl = document.getElementById('mini-astrolabe-plot')
@@ -481,7 +533,6 @@ const renderMiniAstrolabe = async () => {
         displayModeBar: false 
       })
 
-      // Click on a 3D beat to jump directly to that paragraph in the Scriptorium
       plotEl.removeAllListeners?.('plotly_click')
       plotEl.on('plotly_click', async (data) => {
         if (data && data.points && data.points[0]) {
@@ -492,12 +543,10 @@ const renderMiniAstrolabe = async () => {
           const beatIdx = typeof cdata === 'object' ? cdata.beat_idx : (data.points[0].pointIndex + 1)
           const snippet = typeof cdata === 'object' ? cdata.snippet : ''
 
-          // If the beat belongs to a sibling scene in the chapter, load it
           if (sceneId && sceneId !== store.activeNode?.id) {
             await store.loadScene(sceneId)
           }
 
-          // Fire jump event to Scriptorium
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('lens-beat-jump', {
               detail: { beat: beatIdx, snippet: snippet }
@@ -524,6 +573,7 @@ watch(() => [store.activeNode?.id, store.activeInspectorTab], ([newId, tab]) => 
   }
 })
 
+// Force save persists title, synopsis, content, epigraph, status, AND cardData directly to SQLite
 const forceSave = async () => {
   if (!store.activeNode?.id) return
   try {
@@ -535,7 +585,8 @@ const forceSave = async () => {
         synopsis: store.activeNode.synopsis, 
         content: store.activeNode.content, 
         epigraph: store.activeNode.epigraph, 
-        status: store.activeNode.status 
+        status: store.activeNode.status,
+        card_data: cardData.value
       })
     })
     window.dispatchEvent(new Event('refresh-tree'))

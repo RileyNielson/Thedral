@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import time
 import uuid
 import json
@@ -9,42 +10,44 @@ import xml.etree.ElementTree as ET
 from backend.database import get_db
 
 def sanitize_text(text: str) -> str:
-    """Normalizes line breaks, whitespace, and non-printable control characters."""
     if not text:
         return ""
     text = text.replace('\x0b', '\n').replace('\r\n', '\n').replace('\r', '\n')
     text = re.sub(r'[\x00-\x08\x0e-\x1f]', '', text)
     return text.strip()
 
-def normalize_paragraphs(raw_text: str) -> list[str]:
+def strip_rtf_native(rtf_text: str) -> str:
     """
-    Normalizes single and double line breaks into clean paragraphs,
-    stripping manual tab/space indents so TipTap can handle typography.
+    Cross-Platform RTF Stripper for Windows and Linux:
+    Strips RTF control words, fonts, and headers without external dependencies.
     """
-    cleaned = sanitize_text(raw_text)
-    if not cleaned:
-        return []
-
-    if "\n\n" in cleaned:
-        chunks = re.split(r'\n{2,}', cleaned)
-    else:
-        chunks = cleaned.split("\n")
-
-    paragraphs = []
-    for c in chunks:
-        p = re.sub(r'^[ \t]+', '', c).strip()
-        if p and not p.startswith("{\\rtf"):
-            paragraphs.append(p)
-    return paragraphs
+    if not rtf_text:
+        return ""
+    # Strip RTF groups and control words
+    text = re.sub(r'[{\\][^{}\\]*?[}]', '', rtf_text)
+    text = re.sub(r'\\[a-z]{1,32}(-?\d+)? ?', '', text)
+    text = re.sub(r'\\\'[0-9a-fA-F]{2}', '', text)
+    return sanitize_text(text)
 
 def read_file_content(fp: str) -> str:
-    """Converts RTF, TXT, or MD files into plain text."""
+    """Reads RTF, TXT, or MD files across macOS, Windows 10, and Linux."""
     if not fp or not os.path.exists(fp):
         return ""
     try:
         if fp.lower().endswith('.rtf'):
-            res = subprocess.run(['textutil', '-convert', 'txt', fp, '-stdout'], capture_output=True, text=True)
-            return res.stdout or ""
+            # If on macOS, use textutil
+            if sys.platform == 'darwin':
+                try:
+                    res = subprocess.run(['textutil', '-convert', 'txt', fp, '-stdout'], capture_output=True, text=True)
+                    if res.returncode == 0 and res.stdout:
+                        return res.stdout
+                except Exception:
+                    pass
+            
+            # Windows 10 / Linux native fallback
+            with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+                return strip_rtf_native(f.read())
+
         elif fp.lower().endswith(('.txt', '.md')):
             with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
                 return f.read()
@@ -52,27 +55,51 @@ def read_file_content(fp: str) -> str:
         pass
     return ""
 
-def is_chapter_heading(text: str, is_heading_style: bool = False) -> tuple[bool, str]:
+def normalize_paragraphs(raw_text: str) -> list[str]:
+    cleaned = sanitize_text(raw_text)
+    if not cleaned:
+        return []
+    if "\n\n" in cleaned:
+        chunks = re.split(r'\n{2,}', cleaned)
+    else:
+        chunks = cleaned.split("\n")
+    paragraphs = []
+    for c in chunks:
+        p = re.sub(r'^[ \t]+', '', c).strip()
+        if p and not p.startswith("{\\rtf"):
+            paragraphs.append(p)
+    return paragraphs
+
+def is_chapter_heading(text: str, is_heading_style: bool = False, is_bold: bool = False) -> tuple[bool, str]:
     t = text.strip()
-    if not t or len(t) > 90:
+    if not t or len(t) > 85:
         return False, ""
+    
     clean = re.sub(r"[\*#_~]", "", t).strip()
+    clean_lower = clean.lower()
+
     if clean.isdigit() and int(clean) < 150:
         return True, f"Chapter {clean}"
-    words = ["one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty"]
-    if clean.lower() in words:
-        return True, f"Chapter {clean.title()}"
     if re.match(r"^(?:[IVXLCDM]+)\.?$", clean, re.IGNORECASE) and len(clean) <= 6:
         return True, f"Chapter {clean.upper()}"
+
+    words = ["one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty"]
+    if clean_lower in words:
+        return True, f"Chapter {clean.title()}"
+
     match = re.match(r"^(?:chapter|act|part|prologue|epilogue|interlude|book)\b(?:\s+[\w\d]+)?(?:\s*[:\-–—]\s*(.*))?$", clean, re.I)
     if match:
         return True, clean
-    if is_heading_style and len(clean) < 60:
-        return True, clean
+
+    if (is_heading_style or is_bold) and len(clean) < 55:
+        if not clean.endswith(('.', '!', '?')) and len(clean.split()) <= 7:
+            return True, clean
+
     return False, ""
 
 def is_scene_divider(text: str) -> bool:
-    return bool(re.match(r"^(?:(?:\*\s*){3,}|(?:#\s*){3,}|(?:~\s*){3,}|(?:•\s*){3,}|-{3,})$", text.strip()))
+    t = text.strip()
+    return bool(re.match(r"^(?:(?:\*\s*){3,}|(?:#\s*){3,}|(?:~\s*){3,}|(?:•\s*){3,}|-{3,})$", t))
 
 def derive_smart_scene_title(first_para: str, sc_num: int, ch_title: str, custom_title: str | None = None) -> str:
     if custom_title and custom_title.strip() and not custom_title.lower().startswith(("scene ", "untitled")):
@@ -98,27 +125,34 @@ def parse_docx(fpath: str) -> list[tuple[str, bool, str, str, str]]:
         if not txt:
             continue
         is_h = bool(p.style and p.style.name.lower().startswith(('heading', 'title', 'subtitle')))
-        output.append((txt, is_h, "", "", ""))
+        is_bold = False
+        if p.runs and len(p.runs) > 0:
+            is_bold = all(run.bold for run in p.runs if run.text.strip())
+
+        is_ch, ch_title = is_chapter_heading(txt, is_heading_style=is_h, is_bold=is_bold)
+        if is_ch:
+            output.append((f"Chapter: {ch_title}", True, ch_title, "", ""))
+        elif is_scene_divider(txt):
+            output.append(("* * *", False, "", "", ""))
+        else:
+            output.append((txt, False, "", "", ""))
     return output
 
 def parse_plaintext(fpath: str) -> list[tuple[str, bool, str, str, str]]:
     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
-        return [(p, False, "", "", "") for p in normalize_paragraphs(content)]
-
-# =============================================================================
-# OMNISCIENT SCRIVENER PARSER (Manuscript, Synopses, Notes, Cast, & Lore)
-# =============================================================================
+        output = []
+        for p in normalize_paragraphs(content):
+            is_ch, ch_title = is_chapter_heading(p)
+            if is_ch:
+                output.append((f"Chapter: {ch_title}", True, ch_title, "", ""))
+            elif is_scene_divider(p):
+                output.append(("* * *", False, "", "", ""))
+            else:
+                output.append((p, False, "", "", ""))
+        return output
 
 def parse_scrivener_project(scriv_path: str) -> dict:
-    """
-    Parses a Scrivener 2 or 3 project comprehensively:
-    - Traverses the entire binder XML.
-    - Extracts Manuscript (Chapters, Scenes, Synopses, Notes).
-    - Extracts Characters into Cast entities.
-    - Extracts Places into Location entities.
-    - Extracts Research into Living Style Sheet rules.
-    """
     files_map = {}
     for root, _, files in os.walk(scriv_path):
         low_root = root.lower()
@@ -130,7 +164,6 @@ def parse_scrivener_project(scriv_path: str) -> dict:
             fl = f.lower()
             file_stem = os.path.splitext(f)[0]
 
-            # Index by parent UUID folder and file stem
             for key in [parent_dir, file_stem]:
                 if key not in files_map:
                     files_map[key] = {}
@@ -162,18 +195,15 @@ def parse_scrivener_project(scriv_path: str) -> dict:
                 itype = item_node.attrib.get('Type', '')
                 uuid_val = str(item_node.attrib.get('UUID') or item_node.attrib.get('Id') or "")
 
-                # Categorize based on Scrivener structure
                 is_char_folder = "character" in title_lower or "cast" in title_lower or "people" in title_lower
                 is_loc_folder = "place" in title_lower or "location" in title_lower or "setting" in title_lower
                 is_lore_folder = "research" in title_lower or "lore" in title_lower or "glossary" in title_lower or "world" in title_lower
 
-                # Fetch associated files
                 file_bundle = files_map.get(uuid_val, {})
                 content_text = read_file_content(file_bundle.get('content', ''))
                 synopsis_text = read_file_content(file_bundle.get('synopsis', ''))
                 notes_text = read_file_content(file_bundle.get('notes', ''))
 
-                # 1. Characters Folder -> Cast Directory
                 if is_char_folder:
                     children = item_node.findall('Children/BinderItem') if item_node.find('Children') is not None else []
                     for ch in children:
@@ -186,7 +216,6 @@ def parse_scrivener_project(scriv_path: str) -> dict:
                             characters.append({"name": c_title, "bio": c_bio, "synopsis": c_syn})
                     return
 
-                # 2. Places Folder -> Location Corridors
                 if is_loc_folder:
                     children = item_node.findall('Children/BinderItem') if item_node.find('Children') is not None else []
                     for loc in children:
@@ -198,7 +227,6 @@ def parse_scrivener_project(scriv_path: str) -> dict:
                             locations.append({"name": l_title, "desc": l_desc})
                     return
 
-                # 3. Lore & Research -> Living Style Sheet
                 if is_lore_folder:
                     children = item_node.findall('Children/BinderItem') if item_node.find('Children') is not None else []
                     for rule in children:
@@ -210,7 +238,6 @@ def parse_scrivener_project(scriv_path: str) -> dict:
                             lore_entries.append({"term": r_title, "definition": r_def})
                     return
 
-                # 4. Standard Manuscript (DraftFolder or Nested Folders/Docs)
                 children = item_node.findall('Children/BinderItem') if item_node.find('Children') is not None else []
                 if itype == 'Folder' or (children and itype != 'Text'):
                     folder_name = raw_title or current_folder or "Chapter"
@@ -230,9 +257,8 @@ def parse_scrivener_project(scriv_path: str) -> dict:
                 traverse_folder(top_item)
 
         except Exception as e:
-            print(f"Scrivener XML traversal error: {e}")
+            print(f"Scrivener parse notice: {e}")
 
-    # Fallback to direct file recovery if XML found no manuscript text
     if not manuscript_tuples and files_map:
         for key, bundle in sorted(files_map.items()):
             content_text = read_file_content(bundle.get('content', ''))
@@ -251,10 +277,6 @@ def parse_scrivener_project(scriv_path: str) -> dict:
         "lore": lore_entries
     }
 
-# =============================================================================
-# BINDER & REGISTRY BUILDER (Commits Everything into SQLite)
-# =============================================================================
-
 def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
     tuples = manifest.get("manuscript", [])
     characters = manifest.get("characters", [])
@@ -268,11 +290,10 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
     c = conn.cursor()
     now = time.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. Create Book Node
     book_id = f"book_{uuid.uuid4().hex[:8]}"
     c.execute("""
-        INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, created_at, updated_at)
-        VALUES (?, NULL, 'default', 'BOOK', ?, 10.0, 'Imported Manuscript', '', '', 'DRAFT', 0, 0, '', ?, ?)
+        INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+        VALUES (?, NULL, 'default', 'BOOK', ?, 10.0, 'Imported Manuscript', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
     """, (book_id, book_title, now, now))
 
     current_ch_id = None
@@ -292,8 +313,6 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
         if current_sc_id and current_scene_paras:
             full_text = "\n\n".join(current_scene_paras).strip()
             wc = len(full_text.split())
-            
-            # Use Scrivener card synopsis if present, else derive preview
             final_synopsis = current_synopsis.strip() if current_synopsis.strip() else ((full_text[:140] + "...") if len(full_text) > 140 else full_text)
             final_title = derive_smart_scene_title(current_scene_paras[0], sc_num, current_ch_title, current_custom_title)
             
@@ -311,7 +330,6 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
             current_synopsis = ""
             current_notes = ""
 
-    # 2. Build Chapter & Scene Nodes
     for item in tuples:
         text = item[0]
         is_h = item[1]
@@ -320,7 +338,7 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
         item_notes = item[4] if len(item) > 4 else ""
 
         t_clean = text.strip()
-        is_ch, ch_heading = is_chapter_heading(t_clean, is_h)
+        is_ch, ch_heading = is_chapter_heading(t_clean, is_heading_style=is_h)
 
         if t_clean.startswith("### SCENE_TITLE: "):
             flush_scene()
@@ -339,8 +357,8 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
             current_ch_title = ch_heading if is_ch else t_clean.replace("Chapter: ", "").strip()
             
             c.execute("""
-                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, created_at, updated_at)
-                VALUES (?, ?, 'default', 'CHAPTER', ?, ?, ?, '', ?, 'DRAFT', 0, 0, '', ?, ?)
+                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+                VALUES (?, ?, 'default', 'CHAPTER', ?, ?, ?, '', ?, 'DRAFT', 0, 0, '', '{}', ?, ?)
             """, (current_ch_id, book_id, current_ch_title, ch_sort, item_synopsis, item_notes, now, now))
             ch_sort += 10.0
             continue
@@ -348,8 +366,8 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
         if not current_ch_id:
             current_ch_id = f"ch_{uuid.uuid4().hex[:8]}"
             c.execute("""
-                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, created_at, updated_at)
-                VALUES (?, ?, 'default', 'CHAPTER', 'Chapter 1', 10.0, '', '', '', 'DRAFT', 0, 0, '', ?, ?)
+                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+                VALUES (?, ?, 'default', 'CHAPTER', 'Chapter 1', 10.0, '', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
             """, (current_ch_id, book_id, now, now))
 
         if is_scene_divider(t_clean):
@@ -365,8 +383,8 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
             current_notes = item_notes or current_notes
 
             c.execute("""
-                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, created_at, updated_at)
-                VALUES (?, ?, 'default', 'SCENE', ?, ?, '', '', '', 'DRAFT', 0, 0, '', ?, ?)
+                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+                VALUES (?, ?, 'default', 'SCENE', ?, ?, '', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
             """, (current_sc_id, current_ch_id, placeholder_title, sc_sort, now, now))
             sc_sort += 10.0
 
@@ -374,7 +392,7 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
 
     flush_scene()
 
-    # 3. Commit Character Sheets into Cast Directory (canonical_entities)
+    # Commit Character Sheets
     for ch in characters:
         name_clean = ch["name"].strip()
         if name_clean and len(name_clean) >= 2:
@@ -389,7 +407,7 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
                     sensory_profile = CASE WHEN canonical_entities.sensory_profile = '' THEN excluded.sensory_profile ELSE canonical_entities.sensory_profile END
             """, (eid, name_clean, sensory, axioms, now))
 
-    # 4. Commit Places into Location Entities
+    # Commit Locations
     for loc in locations:
         loc_name = loc["name"].strip()
         if loc_name:
@@ -401,7 +419,7 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
                 ON CONFLICT(entity_id) DO NOTHING
             """, (eid, loc_name, axioms, now))
 
-    # 5. Commit Research & Lore into Living Style Sheet
+    # Commit Lore
     for rule in lore_entries:
         term = rule["term"].strip()
         definition = rule["definition"].strip()

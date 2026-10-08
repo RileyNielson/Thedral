@@ -16,14 +16,15 @@ os.makedirs(EXPORTS_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 # =============================================================================
-# 2. LOCAL AI INFERENCE CONFIGURATION (Ollama)
+# 2. LOCAL AI & SOVEREIGN PURE MATH SWITCH
 # =============================================================================
 
-# Default to fast, low-RAM 3B model (overridable via environment variable)
+# Set ENABLE_AI=false in .env to disable all LLM features completely
+ENABLE_AI = os.environ.get("ENABLE_AI", "true").lower() in ("true", "1", "yes")
+
 STUDIO_MODEL = os.environ.get("STUDIO_MODEL", "llama3.2:3b")
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
-# Deterministic sampling configuration with 8192 context window
 LLM_OPTIONS = {
     "num_ctx": 8192,
     "temperature": 0.25,

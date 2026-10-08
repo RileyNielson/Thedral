@@ -1,7 +1,12 @@
 import json
 import re
-import ollama
-from backend.config import STUDIO_MODEL, LLM_OPTIONS
+from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
+
+SOCRATIC_OFFLINE_NOTICE = (
+    "🏛️ Sovereign Pure Math Mode Active.\n"
+    "All local machine learning is disabled. Thedral is operating purely on "
+    "deterministic pacing physics, cadence standard deviation, and SQLite event sourcing."
+)
 
 # =============================================================================
 # 1. NON-PRESCRIPTIVE SOCRATIC MIRROR & VOICE PRESERVATION DIRECTIVE
@@ -49,8 +54,16 @@ def elevate_prose_diagnosis(
     Evaluates what the text DOES and DOES NOT do to the reader without prescriptive AI bias.
     Dynamically injects the omniscient context dossier if a scene_id is supplied.
     """
+    if not ENABLE_AI:
+        return SOCRATIC_OFFLINE_NOTICE
+
     if not passage or not passage.strip():
         return "Select a passage in the editor to run a Socratic mirror diagnosis."
+
+    try:
+        import ollama
+    except ImportError:
+        return SOCRATIC_OFFLINE_NOTICE
 
     # Lazy import to keep module decoupled during standalone tests
     dossier_text = ""
@@ -93,7 +106,7 @@ def elevate_prose_diagnosis(
         )
         return resp['message']['content']
     except Exception as e:
-        return f"⚠️ Socratic Mirror Notice: Could not connect to {STUDIO_MODEL} ({e}). Ensure `ollama serve` is active."
+        return SOCRATIC_OFFLINE_NOTICE
 
 # =============================================================================
 # 2. GHOST SURVEYOR (Clutter-Shielded Relational Extraction)
@@ -131,9 +144,10 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 
 def extract_ghost_proposals(scene_text: str) -> list[dict]:
     """Extracts candidate state deltas without modifying canonical database truth."""
-    if not scene_text or len(scene_text.strip()) < 40:
+    if not ENABLE_AI or not scene_text or len(scene_text.strip()) < 40:
         return []
     try:
+        import ollama
         resp = ollama.chat(
             model=STUDIO_MODEL,
             messages=[
@@ -162,13 +176,19 @@ Keep it under 3 sentences. Do not write the prose.
 
 def discover_synaptic_resonance(scene_text: str, lore_summary: str) -> str:
     """Uncovers dormant connections between the current scene and existing series lore."""
-    prompt = f"{SERENDIPITY_PROMPT}\n\nLORE REPOSITORY:\n{lore_summary}\n\nCURRENT SCENE TEXT:\n{scene_text[:3000]}"
+    if not ENABLE_AI:
+        return "Resonance engine offline (Pure Math Mode active)."
     try:
+        import ollama
+        prompt = f"{SERENDIPITY_PROMPT}\n\nLORE REPOSITORY:\n{lore_summary}\n\nCURRENT SCENE TEXT:\n{scene_text[:3000]}"
         resp = ollama.chat(model=STUDIO_MODEL, messages=[{"role": "user", "content": prompt}], options=LLM_OPTIONS)
         return resp['message']['content']
-    except Exception as e:
-        return f"Could not compute resonance: {e}"
+    except Exception:
+        return "Resonance calculation unavailable offline."
 
+# =============================================================================
+# 4. CROSS-GENRE SOCRATIC TUTOR
+# =============================================================================
 
 TUTOR_PROMPT = """You are an elite MFA Creative Writing Professor and Master Stylist.
 The author is asking you for a specific craft technique or structural goal.
@@ -185,9 +205,12 @@ To ensure the author never accidentally adopts your prose, you must NEVER teach 
 
 def get_socratic_lesson(question: str, context: str = "") -> str:
     """Delivers a mini-masterclass on a specific craft technique."""
-    prompt = f"{TUTOR_PROMPT}" + chr(10) + chr(10) + "=== AUTHOR'S GOAL ===" + chr(10) + f"{question}" + chr(10) + chr(10) + "=== SCENE CONTEXT ===" + chr(10) + f"{context}"
+    if not ENABLE_AI:
+        return SOCRATIC_OFFLINE_NOTICE
     try:
+        import ollama
+        prompt = f"{TUTOR_PROMPT}\n\n=== AUTHOR'S GOAL ===\n{question}\n\n=== SCENE CONTEXT ===\n{context}"
         resp = ollama.chat(model=STUDIO_MODEL, messages=[{"role": "user", "content": prompt}], options=LLM_OPTIONS)
         return resp["message"]["content"]
-    except Exception as e:
-        return f"Tutor offline: {e}"
+    except Exception:
+        return SOCRATIC_OFFLINE_NOTICE

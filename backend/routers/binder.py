@@ -1,5 +1,6 @@
 import re
 import time
+import json
 import uuid
 import asyncio
 import ollama
@@ -21,6 +22,7 @@ class NodeUpdate(BaseModel):
     epigraph: str | None = None
     notes: str | None = None
     status: str | None = None
+    card_data: str | dict | None = None
 
 class NodeCreate(BaseModel):
     parent_id: str | None = None
@@ -37,7 +39,7 @@ def get_binder_tree():
     conn = get_db()
     c = conn.cursor()
     c.execute("""
-        SELECT id, parent_id, node_type, title, sort_order, synopsis, word_count, status, epigraph 
+        SELECT id, parent_id, node_type, title, sort_order, synopsis, word_count, status, epigraph, card_data 
         FROM binder_nodes 
         WHERE (is_archived IS NULL OR is_archived = 0) 
         ORDER BY sort_order ASC
@@ -71,6 +73,16 @@ def get_node(node_id: str):
     node = dict(row)
     node["telemetry"] = calculate_text_telemetry(node["content"] or "")
     node["severed_threads"] = find_severed_threads(conn, node_id, node["content"] or "")
+    
+    # Parse card_data JSON into native dictionary
+    if node.get("card_data"):
+        try:
+            node["card"] = json.loads(node["card_data"]) if isinstance(node["card_data"], str) else node["card_data"]
+        except Exception:
+            node["card"] = {}
+    else:
+        node["card"] = {}
+
     conn.close()
     return node
 
@@ -82,8 +94,15 @@ def update_node(node_id: str, payload: NodeUpdate):
     data = payload.model_dump(exclude_unset=True)
 
     for k, v in data.items():
-        fields.append(f"{k} = ?")
-        values.append(v)
+        if k == "card_data" and isinstance(v, dict):
+            fields.append("card_data = ?")
+            values.append(json.dumps(v))
+        elif k != "card_data":
+            fields.append(f"{k} = ?")
+            values.append(v)
+        else:
+            fields.append("card_data = ?")
+            values.append(v or "{}")
 
     if "content" in data and data["content"] is not None:
         wc = len(data["content"].split()) if data["content"] else 0
@@ -144,8 +163,8 @@ def create_node(payload: NodeCreate):
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with conn:
         conn.execute("""
-            INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, is_archived, created_at, updated_at)
-            VALUES (?, ?, 'default', ?, ?, 999.0, 0, ?, ?)
+            INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, is_archived, card_data, created_at, updated_at)
+            VALUES (?, ?, 'default', ?, ?, 999.0, 0, '{}', ?, ?)
         """, (node_id, payload.parent_id, payload.node_type, payload.title, now, now))
     conn.close()
     return {"id": node_id, "title": payload.title}
@@ -296,8 +315,8 @@ async def master_triage_scene(scene_id: str):
             wc = len(clean_block.split())
             
             conn.execute("""
-                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, content, status, word_count, is_archived, created_at, updated_at)
-                VALUES (?, ?, 'default', 'SCENE', ?, ?, ?, 'DRAFT', ?, 0, ?, ?)
+                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, content, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+                VALUES (?, ?, 'default', 'SCENE', ?, ?, ?, 'DRAFT', ?, 0, '', '{}', ?, ?)
             """, (new_id, parent_id, f"Sliced Scene {idx}", new_sort, clean_block, wc, now, now))
             new_scene_ids.append(new_id)
 

@@ -183,7 +183,7 @@ import {
   ChevronDown, BookOpen, Pencil, Archive, Trash2, Folder, Plus, FileText 
 } from 'lucide-vue-next'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 
 const collapsed = ref({})
 const isCollapsed = (id) => !!collapsed.value[id]
@@ -193,36 +193,15 @@ const editingNodeId = ref(null)
 const editingTitle = ref('')
 
 const fetchTree = async () => {
-  try {
-    const res = await fetch(`${API_BASE}/api/tree`)
-    if (!res.ok) throw new Error('Binder fetch failed')
-    store.tree = await res.json()
-    
-    // Auto-select first available scene if none active
-    if (!store.activeNode?.id && store.tree[0]?.children?.[0]?.children?.[0]) {
-      selectNode(store.tree[0].children[0].children[0].id)
-    }
-  } catch(e) {
-    showToast("Error loading Binder.", "error")
-  }
+  await store.fetchTree()
 }
 
+// Unified Scene Selector: Calls store.loadScene directly to guarantee zero 404s
 const selectNode = async (id) => {
-  try {
-    const res = await fetch(`${API_BASE}/api/node/${id}`)
-    if (!res.ok) throw new Error('Scene load failed')
-    store.activeNode = await res.json()
-    store.editorState.previousWordCount = (store.activeNode.content || '').split(/\s+/).filter(Boolean).length
-    store.saveStatus = 'Loaded'
-
-    // Synchronize telemetry, horizon disclosures, and critiques
-    fetch(`${API_BASE}/api/disclosures/scene/${id}`).then(r => r.json()).then(d => store.activeDisclosures = d).catch(()=>{})
-    fetch(`${API_BASE}/api/critiques/scene/${id}`).then(r => r.json()).then(d => store.sceneCritiques = d).catch(()=>{})
-    store.fetchTelemetry(id)
-    store.fetchChapterLens(id)
-  } catch(e) {
-    showToast("Failed to open scene.", "error")
-  }
+  if (!id) return
+  await store.loadScene(id)
+  store.viewMode = 'editor'
+  store.modals.mobileBinder = false
 }
 
 const createManuscript = async () => {
@@ -254,7 +233,7 @@ const addChapter = async () => {
       headers: { 'Content-Type': 'application/json' }, 
       body: JSON.stringify({ parent_id: bookId, node_type: 'CHAPTER', title: 'New Chapter' }) 
     })
-    fetchTree()
+    await fetchTree()
   } catch (e) {
     showToast("Failed to create chapter", "error")
   }
@@ -278,7 +257,7 @@ const addSceneTo = async (chId) => {
     })
     const data = await res.json()
     await fetchTree()
-    selectNode(data.id)
+    await selectNode(data.id)
   } catch (e) {
     showToast("Failed to create scene", "error")
   }
@@ -315,7 +294,7 @@ const saveRename = async (node) => {
       headers: { 'Content-Type': 'application/json' }, 
       body: JSON.stringify({ title: newTitle }) 
     })
-    fetchTree()
+    await fetchTree()
   } catch(e) {
     showToast("Rename failed.", "error")
   }
@@ -328,7 +307,7 @@ const closeBook = async (book) => {
     if (store.activeNode?.book_id === book.id || store.activeNode?.id === book.id) {
       store.activeNode = null
     }
-    fetchTree()
+    await fetchTree()
     store.saveStatus = `Closed ${book.title}`
   } catch (e) {
     showToast("Could not archive book.", "error")
@@ -343,7 +322,7 @@ const deleteNode = async (node) => {
     if (store.activeNode?.id === node.id) {
       store.activeNode = null
     }
-    fetchTree()
+    await fetchTree()
     store.saveStatus = `Deleted ${node.title}`
   } catch (e) {
     showToast("Delete failed.", "error")
@@ -362,7 +341,7 @@ const autoTitleScenes = async () => {
     if (!res.ok) throw new Error('Auto-titling failed')
     const data = await res.json()
     store.saveStatus = `Updated ${data.updated_count || 0} scene titles!`
-    fetchTree()
+    await fetchTree()
   } catch(e) {
     showToast("Auto-titling failed.", "error")
   }

@@ -71,27 +71,71 @@
       </div>
     </div>
 
-    <!-- Craft X-Ray Visual Key Legend Tray -->
+    <!-- 4-Channel X-Ray Lens Switcher & Dynamic Legend -->
     <div 
       v-if="store.isXRayActive && !store.isVoidMode" 
-      class="h-8 bg-zinc-950/80 border-b border-zinc-800/80 px-6 flex items-center justify-between text-[10px] font-mono shrink-0 animate-fade-in"
+      class="bg-zinc-950/95 border-b border-zinc-800/80 px-6 py-2 flex flex-col sm:flex-row sm:items-center justify-between text-[10px] font-mono gap-2 shrink-0 animate-fade-in"
     >
-      <div class="flex items-center gap-4">
-        <span class="text-zinc-500 uppercase tracking-wider font-bold">X-Ray Key:</span>
-        <span class="flex items-center gap-1.5 text-rose-300">
-          <span class="w-2.5 h-2.5 rounded-sm bg-rose-500/30 border border-rose-500"></span> Escalator (Action / Stakes)
-        </span>
-        <span class="flex items-center gap-1.5 text-amber-300">
-          <span class="w-2.5 h-2.5 rounded-sm bg-amber-500/30 border border-amber-500"></span> Pivot (Turning Hinge)
-        </span>
-        <span class="flex items-center gap-1.5 text-emerald-300">
-          <span class="w-2.5 h-2.5 rounded-sm bg-emerald-500/30 border border-emerald-500"></span> Resolver (Breathing Room)
-        </span>
-        <span class="flex items-center gap-1.5 text-zinc-400">
-          <span class="w-2.5 h-2.5 rounded-sm bg-zinc-800 border border-dashed border-zinc-600"></span> Slack (Filter Verbs / Clutter)
-        </span>
+      <!-- 4 Lens Toggle Pills -->
+      <div class="flex items-center gap-1.5 overflow-x-auto">
+        <span class="text-zinc-500 uppercase tracking-wider font-bold mr-1">Lens:</span>
+        <button 
+          @click="activeXRayLens = 'energetics'" 
+          :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'energetics' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']"
+        >
+          ⚡ Energetics
+        </button>
+        <button 
+          @click="activeXRayLens = 'neuro'" 
+          :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'neuro' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']"
+        >
+          🧬 Neuro-Spectrum
+        </button>
+        <button 
+          @click="activeXRayLens = 'clutter'" 
+          :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'clutter' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']"
+        >
+          🔍 Clutter & Filters
+        </button>
+        <button 
+          @click="activeXRayLens = 'cadence'" 
+          :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'cadence' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']"
+        >
+          🎵 Cadence
+        </button>
       </div>
-      <span class="text-zinc-500 italic hidden lg:inline">Click any sentence to consult Socratic partner</span>
+
+      <!-- Dynamic Lens Legend -->
+      <div class="flex items-center gap-3 overflow-x-auto text-[9px] text-zinc-400">
+        <!-- 1. Energetics Key -->
+        <template v-if="activeXRayLens === 'energetics'">
+          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/30 border border-rose-500"></span> Staccato (&lt;9w)</span>
+          <span class="flex items-center gap-1 text-amber-300"><span class="w-2 h-2 rounded-sm bg-amber-500/30 border border-amber-500"></span> Turning Hinge</span>
+          <span class="flex items-center gap-1 text-emerald-300"><span class="w-2 h-2 rounded-sm bg-emerald-500/30 border border-emerald-500"></span> Lyrical Flow (22w+)</span>
+          <span class="flex items-center gap-1 text-zinc-500"><span class="w-2 h-2 rounded-sm border border-zinc-700 bg-transparent"></span> Clean Baseline</span>
+        </template>
+
+        <!-- 2. Neuro-Spectrum Key -->
+        <template v-else-if="activeXRayLens === 'neuro'">
+          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/40"></span> Adrenaline</span>
+          <span class="flex items-center gap-1 text-purple-300"><span class="w-2 h-2 rounded-sm bg-purple-500/40"></span> Oxytocin</span>
+          <span class="flex items-center gap-1 text-cyan-300"><span class="w-2 h-2 rounded-sm bg-cyan-500/40"></span> Dopamine</span>
+          <span class="flex items-center gap-1 text-emerald-300"><span class="w-2 h-2 rounded-sm bg-emerald-500/40"></span> Serotonin</span>
+        </template>
+
+        <!-- 3. Clutter Key -->
+        <template v-else-if="activeXRayLens === 'clutter'">
+          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/30 border border-rose-500"></span> Filter Verbs (saw, felt)</span>
+          <span class="flex items-center gap-1 text-amber-300"><span class="w-2 h-2 rounded-sm bg-amber-500/30 border border-amber-500"></span> Crutch Words (suddenly)</span>
+        </template>
+
+        <!-- 4. Cadence Key -->
+        <template v-else-if="activeXRayLens === 'cadence'">
+          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/30"></span> Staccato (&lt;9w)</span>
+          <span class="flex items-center gap-1 text-zinc-500"><span class="w-2 h-2 rounded-sm border border-zinc-700"></span> Baseline (9-21w)</span>
+          <span class="flex items-center gap-1 text-emerald-300"><span class="w-2 h-2 rounded-sm bg-emerald-500/30"></span> Expansive (22w+)</span>
+        </template>
+      </div>
     </div>
 
     <!-- Severed Causal Thread Alert Banner -->
@@ -159,24 +203,38 @@
         :class="store.isCandlelight ? 'text-amber-100/90' : 'text-zinc-200'"
       />
       
-      <!-- Craft X-Ray Analytical Overlay with Diagnostics -->
+      <!-- Multi-Lens Analytical Overlay -->
       <div 
         v-show="store.isXRayActive" 
         class="prose-canvas flex-1 font-serif text-lg md:text-xl leading-relaxed space-y-6"
       >
-        <div v-for="(p_block, p_idx) in store.xraySentences" :key="p_idx" class="leading-relaxed">
-          <span 
-            v-for="(s, s_idx) in p_block" 
-            :key="s_idx" 
-            :class="['inline-block transition px-1 py-0.5 rounded cursor-pointer mr-1.5 mb-1.5 relative group', getXRayClass(s.type)]" 
-            @click="handleXRaySentenceClick(s.text)"
+        <div v-if="isXRayLoading" class="py-12 text-center text-xs font-mono text-amber-400 flex items-center justify-center gap-2">
+          <RotateCcw class="w-4 h-4 animate-spin" /> Analyzing prose lens...
+        </div>
+
+        <div v-else>
+          <p 
+            v-for="(paraBlock, pIdx) in store.xraySentences" 
+            :key="pIdx" 
+            class="xray-paragraph"
           >
-            {{ s.text }}
-            <!-- Interactive Diagnostic Tooltip -->
-            <span class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1 bg-zinc-950 text-zinc-200 text-[10px] font-mono rounded-lg shadow-2xl border border-zinc-700 z-50 whitespace-nowrap pointer-events-none">
-              {{ s.reason }}
+            <span 
+              v-for="(s, sIdx) in paraBlock" 
+              :key="sIdx" 
+              :class="['xray-sentence group relative cursor-pointer', getSentenceLensClass(s)]" 
+              @click="handleXRaySentenceClick(s.text)"
+            >
+              <!-- Renders word-level clutter if available, else plain text -->
+              <span v-if="activeXRayLens === 'clutter' && s.clutter_html" v-html="s.clutter_html"></span>
+              <span v-else>{{ s.text }}</span>
+              {{ ' ' }}
+
+              <!-- Adaptive Tooltip -->
+              <span class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-zinc-950 text-zinc-200 text-[10px] font-mono rounded-lg shadow-2xl border border-zinc-700 z-50 whitespace-nowrap pointer-events-none">
+                {{ getSentenceTooltip(s) }}
+              </span>
             </span>
-          </span>
+          </p>
         </div>
       </div>
     </div>
@@ -234,6 +292,8 @@ import Typography from '@tiptap/extension-typography'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 const microStallAlert = ref(false)
+const isXRayLoading = ref(false)
+const activeXRayLens = ref('energetics') // 'energetics' | 'neuro' | 'clutter' | 'cadence'
 const scrollContainer = ref(null)
 let editor = null
 let scrollThrottle = null
@@ -329,13 +389,10 @@ const handleLensBeatJump = (e) => {
 
   if (targetP) {
     targetP.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    
-    // Cyan pulse animation
     targetP.classList.add('pulse-beat')
     setTimeout(() => {
       targetP.classList.remove('pulse-beat')
     }, 2200)
-
     showToast(`📍 Focused on Beat ${beatIdx}`, 'info')
   } else if (snippet) {
     handleSniperScroll({ detail: { text: snippet.substring(0, 30) } })
@@ -381,23 +438,22 @@ const initEditor = () => {
   })
 }
 
-// Watch scene changes: updates editor AND refreshes X-Ray analysis immediately!
-watch(() => store.activeNode?.id, (newId) => {
+// Scene switch watcher: purges old X-Ray text immediately, then re-analyzes
+watch(() => store.activeNode?.id, async (newId) => {
   if (newId) {
+    store.xraySentences = []
+
     if (!editor) {
       initEditor()
     } else {
       const currentText = htmlToText(editor.getHTML())
-      if (currentText !== store.activeNode?.content) {
-        editor.commands.setContent(textToHtml(store.activeNode?.content) || '')
+      if (currentText !== store.activeNode.content) {
+        editor.commands.setContent(textToHtml(store.activeNode.content) || '')
       }
     }
     
-    // If X-Ray is currently active, immediately analyze the newly selected scene
     if (store.isXRayActive && store.activeNode?.content) {
-      fetchXRayAnalysis()
-    } else {
-      store.xraySentences = []
+      await fetchXRayAnalysis()
     }
   }
 })
@@ -429,11 +485,14 @@ const queueAutoSave = () => {
   }, 1200)
 }
 
+/// Native Paragraph-by-Paragraph Craft X-Ray Fetch with Full Fallback
 const fetchXRayAnalysis = async () => {
   if (!store.activeNode?.content) {
     store.xraySentences = []
     return
   }
+
+  isXRayLoading.value = true
   try {
     const res = await fetch(`${API_BASE}/api/craft/xray`, { 
       method: 'POST', 
@@ -442,23 +501,19 @@ const fetchXRayAnalysis = async () => {
     })
     if (!res.ok) throw new Error('X-Ray extraction failed')
     const data = await res.json()
-    const paras = (store.activeNode.content || '').split("\n\n")
-    let sentIdx = 0
-    const blocks = []
-    for (const p of paras) {
-      const pLen = p.trim().length
-      let currentBlock = []
-      let collectedLen = 0
-      while (sentIdx < data.sentences.length && collectedLen < pLen) {
-        currentBlock.push(data.sentences[sentIdx])
-        collectedLen += data.sentences[sentIdx].text.length + 1
-        sentIdx++
-      }
-      if (currentBlock.length) blocks.push(currentBlock)
+    
+    // Accepts structured paragraphs, or wraps flat sentences if backend is older
+    if (data.paragraphs && data.paragraphs.length > 0) {
+      store.xraySentences = data.paragraphs
+    } else if (data.sentences && data.sentences.length > 0) {
+      store.xraySentences = [data.sentences]
+    } else {
+      store.xraySentences = []
     }
-    store.xraySentences = blocks.length ? blocks : [data.sentences]
   } catch(e) { 
     showToast(e.message, 'error') 
+  } finally {
+    isXRayLoading.value = false
   }
 }
 
@@ -471,14 +526,46 @@ const toggleXRay = async () => {
   }
 }
 
-const getXRayClass = (type) => {
-  switch (type) {
-    case 'ESCALATOR': return 'xray-escalator'
-    case 'RESOLVER': return 'xray-resolver'
-    case 'PIVOT': return 'xray-pivot'
-    case 'SLACK': return 'xray-slack'
-    default: return 'bg-zinc-800/40 text-zinc-300'
+// Resilient Lens Highlighting Classes (with fallback to s.type)
+const getSentenceLensClass = (s) => {
+  if (!s) return 'text-zinc-300'
+
+  if (activeXRayLens.value === 'energetics') {
+    const type = s.energetics_type || s.type || ''
+    switch (type) {
+      case 'ESCALATOR': return 'xray-escalator'
+      case 'RESOLVER': return 'xray-resolver'
+      case 'PIVOT': return 'xray-pivot'
+      case 'SLACK': return 'xray-slack'
+      default: return 'text-zinc-300'
+    }
+  } else if (activeXRayLens.value === 'neuro') {
+    const nType = s.neuro_type || ''
+    switch (nType) {
+      case 'ADRENALINE': return 'xray-adrenaline'
+      case 'OXYTOCIN': return 'xray-oxytocin'
+      case 'DOPAMINE': return 'xray-dopamine'
+      case 'SEROTONIN': return 'xray-serotonin'
+      default: return 'text-zinc-300'
+    }
+  } else if (activeXRayLens.value === 'cadence') {
+    const words = s.words || (s.text ? s.text.split(' ').length : 12)
+    if (words <= 8) return 'xray-escalator'
+    if (words >= 22) return 'xray-resolver'
+    return 'text-zinc-300'
+  } else if (activeXRayLens.value === 'clutter') {
+    return s.has_clutter ? 'bg-zinc-900/60' : 'text-zinc-300'
   }
+  return 'text-zinc-300'
+}
+
+// Adaptive Tooltips
+const getSentenceTooltip = (s) => {
+  if (activeXRayLens.value === 'energetics') return s.energetics_reason || s.reason
+  if (activeXRayLens.value === 'neuro') return s.neuro_reason
+  if (activeXRayLens.value === 'cadence') return s.cadence_reason
+  if (activeXRayLens.value === 'clutter') return s.clutter_reason
+  return s.reason
 }
 
 const handleXRaySentenceClick = (text) => { 
@@ -573,6 +660,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
+/* ProseMirror & TipTap Typography Rules */
 .ProseMirror p {
   margin-bottom: 1.5em;
   line-height: 1.85;
@@ -584,6 +672,25 @@ onBeforeUnmount(() => {
   pointer-events: none;
   height: 0;
 }
+
+/* Craft X-Ray Paragraph Flow */
+.xray-paragraph {
+  margin-bottom: 1.5em;
+  line-height: 1.85;
+}
+
+.xray-sentence {
+  display: inline;
+  padding: 2px 2px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+}
+
+.xray-sentence:hover {
+  filter: brightness(1.2);
+}
+
+/* 1. Energetics Color Schemes */
 .xray-escalator {
   background-color: rgba(239, 68, 68, 0.2);
   color: #fca5a5;
@@ -604,6 +711,48 @@ onBeforeUnmount(() => {
   color: #a1a1aa;
   text-decoration: underline dotted #71717a;
 }
+
+/* 2. Neuro-Spectrum Color Schemes */
+.xray-adrenaline {
+  background-color: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+  border-bottom: 2px solid rgba(239, 68, 68, 0.8);
+}
+.xray-oxytocin {
+  background-color: rgba(168, 85, 247, 0.25);
+  color: #d8b4fe;
+  border-bottom: 2px solid rgba(168, 85, 247, 0.8);
+}
+.xray-dopamine {
+  background-color: rgba(6, 182, 212, 0.25);
+  color: #67e8f9;
+  border-bottom: 2px solid rgba(6, 182, 212, 0.8);
+}
+.xray-serotonin {
+  background-color: rgba(16, 185, 129, 0.25);
+  color: #6ee7b7;
+  border-bottom: 2px solid rgba(16, 185, 129, 0.8);
+}
+
+/* 3. Word-Level Clutter & Filter Highlights */
+.clutter-filter {
+  background-color: rgba(244, 63, 94, 0.35);
+  color: #fda4af;
+  border-bottom: 2px solid #f43f5e;
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+.clutter-crutch {
+  background-color: rgba(245, 158, 11, 0.35);
+  color: #fde68a;
+  border-bottom: 2px solid #f59e0b;
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+/* Beat Jump Highlight Pulse */
 .pulse-beat {
   background-color: rgba(34, 211, 238, 0.22) !important;
   border-left: 3px solid #22d3ee !important;

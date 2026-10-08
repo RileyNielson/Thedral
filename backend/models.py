@@ -33,6 +33,7 @@ def init_db(custom_path: str | Path | None = None) -> None:
             word_count INTEGER DEFAULT 0,
             is_archived INTEGER DEFAULT 0,
             epigraph TEXT DEFAULT '',
+            card_data TEXT DEFAULT '{}',
             created_at TEXT,
             updated_at TEXT,
             FOREIGN KEY(parent_id) REFERENCES binder_nodes(id) ON DELETE CASCADE
@@ -47,7 +48,8 @@ def init_db(custom_path: str | Path | None = None) -> None:
             ("word_count", "INTEGER DEFAULT 0"),
             ("status", "TEXT DEFAULT 'DRAFT'"),
             ("is_archived", "INTEGER DEFAULT 0"),
-            ("epigraph", "TEXT DEFAULT ''")
+            ("epigraph", "TEXT DEFAULT ''"),
+            ("card_data", "TEXT DEFAULT '{}'")
         ]:
             if col not in existing_node_cols:
                 c.execute(f"ALTER TABLE binder_nodes ADD COLUMN {col} {ctype};")
@@ -109,7 +111,8 @@ def init_db(custom_path: str | Path | None = None) -> None:
             ("aliases", "TEXT DEFAULT ''"),
             ("sensory_profile", "TEXT DEFAULT ''"),
             ("status", "TEXT DEFAULT 'ALIVE'"),
-            ("parent_location_id", "TEXT")
+            ("parent_location_id", "TEXT"),
+            ("created_at", "TEXT")
         ]:
             if col not in existing_ent_cols:
                 c.execute(f"ALTER TABLE canonical_entities ADD COLUMN {col} {ctype};")
@@ -212,7 +215,6 @@ def init_db(custom_path: str | Path | None = None) -> None:
             created_at TEXT
         )""")
 
-        # Self-healing migration for style_sheet
         c.execute("PRAGMA table_info(style_sheet)")
         existing_style_cols = [r[1] for r in c.fetchall()]
         for col, ctype in [
@@ -305,13 +307,9 @@ def init_db(custom_path: str | Path | None = None) -> None:
         )""")
 
         # =====================================================================
-        # PERFORMANCE INDEXES
-        # =====================================================================
-        
-        # =====================================================================
         # 15. EDITORIAL CRITIQUE VAULT
         # =====================================================================
-        c.execute('''
+        c.execute("""
         CREATE TABLE IF NOT EXISTS editorial_critiques (
             id TEXT PRIMARY KEY,
             scene_id TEXT NOT NULL,
@@ -321,13 +319,12 @@ def init_db(custom_path: str | Path | None = None) -> None:
             created_at TEXT,
             resolved_at TEXT,
             FOREIGN KEY(scene_id) REFERENCES binder_nodes(id) ON DELETE CASCADE
-        )''')
-        c.execute('CREATE INDEX IF NOT EXISTS idx_critique_scene ON editorial_critiques (scene_id, status);')
+        )""")
 
         # =====================================================================
         # 16. STORY DEADLINES (Event Horizons)
         # =====================================================================
-        c.execute('''
+        c.execute("""
         CREATE TABLE IF NOT EXISTS story_deadlines (
             id TEXT PRIMARY KEY,
             book_id TEXT NOT NULL,
@@ -336,9 +333,13 @@ def init_db(custom_path: str | Path | None = None) -> None:
             urgency_level TEXT DEFAULT 'CRITICAL',
             status TEXT DEFAULT 'ACTIVE',
             created_at TEXT
-        )''')
-        c.execute('CREATE INDEX IF NOT EXISTS idx_deadline_book ON story_deadlines (book_id, deadline_tick);')
+        )""")
 
+        # =====================================================================
+        # PERFORMANCE INDEXES
+        # =====================================================================
+        c.execute("CREATE INDEX IF NOT EXISTS idx_critique_scene ON editorial_critiques (scene_id, status);")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_deadline_book ON story_deadlines (book_id, deadline_tick);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_binder_order ON binder_nodes (parent_id, sort_order);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_worldlines_flow ON canonical_worldlines (entity_id, timeline_tick);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_rel_source ON entity_relationships (source_id);")
@@ -354,14 +355,14 @@ def init_db(custom_path: str | Path | None = None) -> None:
 
             c.execute("""
                 INSERT INTO binder_nodes 
-                (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, created_at, updated_at)
-                VALUES (?, NULL, 'default', 'BOOK', 'Book 1: The Sky Docks', 10.0, 'Volume 1 of Victorian Skies', '', '', 'DRAFT', 0, 0, '', ?, ?)
+                (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+                VALUES (?, NULL, 'default', 'BOOK', 'Book 1: The Sky Docks', 10.0, 'Volume 1 of Victorian Skies', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
             """, (b_id, ts, ts))
 
             c.execute("""
                 INSERT INTO binder_nodes 
-                (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, created_at, updated_at)
-                VALUES (?, ?, 'default', 'CHAPTER', 'Chapter 1: The Iron Balcony', 10.0, 'Admiralty Infiltration', '', '', 'DRAFT', 0, 0, '', ?, ?)
+                (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+                VALUES (?, ?, 'default', 'CHAPTER', 'Chapter 1: The Iron Balcony', 10.0, 'Admiralty Infiltration', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
             """, (ch_id, b_id, ts, ts))
 
             sample_prose = (
@@ -370,13 +371,19 @@ def init_db(custom_path: str | Path | None = None) -> None:
                 "My lungs locked midway through an exhale. My heel dragged against the flagstones, catching the "
                 "door before it swung free by a fraction of an inch."
             )
+            sample_card = json.dumps({
+                "pov_character": "Ellie",
+                "setting": "The Grand Balustrade",
+                "narrative_time": 1.0,
+                "tension_target": 75
+            })
+
             c.execute("""
                 INSERT INTO binder_nodes 
-                (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, created_at, updated_at)
-                VALUES (?, ?, 'default', 'SCENE', 'Scene 1: The Dropped Latch', 10.0, 'Ellie evades the watchmen on the balustrade.', ?, '', 'DRAFT', 68, 0, '', ?, ?)
-            """, (sc_id, ch_id, sample_prose, ts, ts))
+                (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+                VALUES (?, ?, 'default', 'SCENE', 'Scene 1: The Dropped Latch', 10.0, 'Ellie evades the watchmen on the balustrade.', ?, '', 'DRAFT', 68, 0, '', ?, ?, ?)
+            """, (sc_id, ch_id, sample_prose, sample_card, ts, ts))
 
-            # Seed canonical cast with explicit columns
             c.execute("""
                 INSERT OR IGNORE INTO canonical_entities 
                 (entity_id, name, entity_type, role, aliases, sensory_profile, status, parent_location_id, axioms, created_at)
@@ -389,7 +396,12 @@ def init_db(custom_path: str | Path | None = None) -> None:
                 VALUES ('vance', 'Captain Vance', 'CHARACTER', 'SUPPORTING', 'The Captain', 'Clipped naval rasp', 'ALIVE', NULL, ?, ?)
             """, (json.dumps({"health_score": 1.0}), ts))
 
-            # Seed baseline voice profile for Ellie
+            c.execute("""
+                INSERT OR IGNORE INTO canonical_entities 
+                (entity_id, name, entity_type, role, aliases, sensory_profile, status, parent_location_id, axioms, created_at)
+                VALUES ('loc_balustrade', 'The Grand Balustrade', 'LOCATION', 'SUPPORTING', '', '', 'ALIVE', NULL, '{}', ?)
+            """, (ts,))
+
             c.execute("""
                 INSERT OR IGNORE INTO voice_profiles 
                 (profile_id, entity_id, pov_name, target_avg_sentence, target_cadence_stdev, allowed_metaphor_domains, forbidden_lexicon, signature_sensory_anchors, canonical_quote_anchor, updated_at)
@@ -404,7 +416,6 @@ def init_db(custom_path: str | Path | None = None) -> None:
                 )
             """, (ts,))
 
-        # Synchronize FTS5 search index if empty
         c.execute("SELECT COUNT(*) FROM binder_fts")
         if c.fetchone()[0] == 0:
             c.execute("""
