@@ -6,42 +6,40 @@ echo ===================================================
 echo   LAUNCHING THEDRAL SOVEREIGN STUDIO
 echo ===================================================
 
-:: 1. Close any stuck old server processes from earlier
+REM 1. Stop any background python processes
 taskkill /F /IM python.exe >nul 2>&1
 
-:: 2. Check Python environment and packages
-if not exist "%~dp0venv\Scripts\python.exe" (
-    echo [1/3] Setting up Python environment...
-    python -m venv venv >nul 2>&1 || py -m venv venv >nul 2>&1
-)
+REM 2. Check Python Environment
+if exist venv\Scripts\python.exe goto CHECK_BACKEND_PACKAGES
+echo [1/3] Setting up Python environment...
+python -m venv venv >nul 2>&1
+if not exist venv\Scripts\python.exe py -m venv venv >nul 2>&1
 
-if not exist "%~dp0venv\Lib\site-packages\uvicorn" (
-    echo [2/3] Installing backend requirements...
-    call "%~dp0venv\Scripts\pip.exe" install fastapi uvicorn python-docx pydantic plotly python-multipart
-)
+:CHECK_BACKEND_PACKAGES
+if exist venv\Lib\site-packages\uvicorn goto CHECK_VITE
+echo [2/3] Installing backend requirements...
+call venv\Scripts\pip.exe install fastapi uvicorn python-docx pydantic plotly python-multipart
 
-:: 3. Check if Vite is installed; if missing, install automatically
-if not exist "%~dp0node_modules\vite" (
-    echo [3/3] Installing interface packages (takes about 30 seconds)...
-    call npm install
-)
+:CHECK_VITE
+if exist node_modules\vite goto LAUNCH_STUDIO
+echo [3/3] Installing interface packages, please wait...
+call npm install
 
-:: 4. Start Servers
+:LAUNCH_STUDIO
 set ENABLE_AI=false
 
 echo Starting Backend Server on Port 8000...
-start "" "%~dp0venv\Scripts\python.exe" app.py
+start "" venv\Scripts\python.exe app.py
 
 echo Starting Interface on Port 5173...
 start "" cmd /c "npm run dev -- --host"
 
-:: 5. Open Browser
 timeout /t 5 /nobreak >nul
 echo Opening studio in browser...
 start http://localhost:5173
 
 echo ===================================================
-echo  THEDRAL IS LIVE!
-echo  Keep this window open while writing.
+echo   THEDRAL IS LIVE!
+echo   Keep this window open while writing.
 echo ===================================================
 pause
