@@ -418,23 +418,37 @@ const initEditor = () => {
       const text = htmlToText(editor.getHTML())
       if (!store.activeNode) return
       store.activeNode.content = text
-      store.activeNode.word_count = text.split(/\s+/).filter(Boolean).length
+      
+      const currentWords = text.split(/\s+/).filter(Boolean).length
+      store.activeNode.word_count = currentWords
       
       const now = Date.now()
-      if (now - store.editorState.lastKeystrokeTime < 3000) {
+      
+      // If you pause typing for more than 4 seconds, reset the baseline
+      if (now - store.editorState.lastKeystrokeTime > 4000) {
+        store.editorState.keystrokeRepeatCount = 0
+        store.editorState.previousWordCount = currentWords
+      } else {
         store.editorState.keystrokeRepeatCount++
-        if (store.editorState.keystrokeRepeatCount >= 14) {
+      }
+
+      // Evaluate for churning every 75 keystrokes
+      if (store.editorState.keystrokeRepeatCount > 75) {
+        const netGrowth = currentWords - store.editorState.previousWordCount
+        
+        // If you typed 75 characters but gained fewer than 4 words, you are churning!
+        if (netGrowth < 4) {
           microStallAlert.value = true
         }
-      } else { 
-        store.editorState.keystrokeRepeatCount = 0 
+        
+        // Reset tracker so it doesn't spam you
+        store.editorState.keystrokeRepeatCount = 0
+        store.editorState.previousWordCount = currentWords
       }
+
       store.editorState.lastKeystrokeTime = now
       queueAutoSave()
     },
-    onSelectionUpdate: () => {
-      syncSelectionFromEditor()
-    }
   })
 }
 
