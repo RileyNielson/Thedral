@@ -18,12 +18,12 @@ if not exist venv\Scripts\python.exe py -m venv venv >nul 2>&1
 :CHECK_BACKEND_PACKAGES
 if exist venv\Lib\site-packages\uvicorn goto CHECK_VITE
 echo [2/3] Installing backend requirements...
-call venv\Scripts\pip.exe install fastapi uvicorn python-docx pydantic plotly python-multipart
+call venv\Scripts\pip.exe install fastapi uvicorn python-docx pydantic plotly python-multipart ollama
 
 :CHECK_VITE
 if exist node_modules\vite goto LAUNCH_STUDIO
 echo [3/3] Installing interface packages, please wait...
-call npm install
+call npm install --legacy-peer-deps
 
 :LAUNCH_STUDIO
 set ENABLE_AI=false
