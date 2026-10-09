@@ -2,16 +2,11 @@ import json
 import time
 import hashlib
 import sqlite3
-import ollama
 from backend.database import get_db
-from backend.config import STUDIO_MODEL, LLM_OPTIONS
+from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
 from backend.spectrometer import analyze_neuro_spectrum, calculate_manuscript_comps
 
 def generate_narrator_pack(book_id: str | None = None) -> str:
-    """
-    Compiles an official voice actor and audiobook pronunciation dossier
-    from the Living Style Sheet and Canonical Entity registers.
-    """
     conn = get_db()
     c = conn.cursor()
 
@@ -27,11 +22,9 @@ def generate_narrator_pack(book_id: str | None = None) -> str:
             row = c.fetchone()
         book_id = row["id"] if row else None
 
-    # 1. Fetch Pronunciations from Style Sheet
     c.execute("SELECT term, category, pronunciation, rule_definition FROM style_sheet ORDER BY category ASC, term ASC")
     style_rows = c.fetchall()
 
-    # 2. Fetch Character Vocal Registers & Sensory Profiles
     c.execute("""
         SELECT name, role, aliases, sensory_profile, status 
         FROM canonical_entities 
@@ -75,10 +68,6 @@ def generate_narrator_pack(book_id: str | None = None) -> str:
     return "\n".join(output)
 
 def generate_authorship_certificate(book_id: str | None = None) -> dict:
-    """
-    Constructs a verifiable cryptographic audit trail proving organic human drafting over time.
-    Analyzes multi-session revision velocity, timestamps, and paragraph mutations.
-    """
     conn = get_db()
     c = conn.cursor()
 
@@ -167,10 +156,9 @@ Issued by Thedral Studio (Local-First AGPLv3 Sovereignty Architecture).
     }
 
 def generate_query_synopsis(book_id: str | None = None) -> str:
-    """
-    Compiles an agent-ready 1-page query synopsis (~450-500 words) from the causal plot spine.
-    Reveals the ending completely as required by professional literary agents.
-    """
+    if not ENABLE_AI:
+        return "Query Synopsis generation requires local AI. Running in Pure Math Mode."
+
     conn = get_db()
     c = conn.cursor()
 
@@ -222,6 +210,7 @@ CAUSAL PLOT SPINE:
 """
 
     try:
+        import ollama
         resp = ollama.chat(
             model=STUDIO_MODEL, 
             messages=[{"role": "user", "content": prompt}], 
@@ -232,10 +221,6 @@ CAUSAL PLOT SPINE:
         return f"Could not generate query synopsis: {e}"
 
 def generate_manuscript_genome(book_id: str | None = None) -> dict:
-    """
-    Computes full-manuscript 4-Channel Neuro-Spectrometry and Comps DNA matching.
-    Aggregates all scenes across all chapters in the active book.
-    """
     conn = get_db()
     c = conn.cursor()
 
