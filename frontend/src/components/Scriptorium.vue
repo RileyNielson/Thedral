@@ -2,37 +2,24 @@
   <div class="flex-1 flex flex-col overflow-hidden relative h-full">
     
     <!-- Void Mode Floating HUD -->
-    <div 
-      v-if="store.isVoidMode" 
-      class="absolute bottom-0 left-0 w-full p-6 flex justify-between items-end pointer-events-none z-40"
-    >
+    <div v-if="store.isVoidMode" class="absolute bottom-0 left-0 w-full p-6 flex justify-between items-end pointer-events-none z-40">
       <div class="pointer-events-auto opacity-20 hover:opacity-100 transition-opacity duration-500 flex items-center gap-3">
         <span class="text-zinc-500 font-mono text-[10px] bg-zinc-950/70 px-2.5 py-1 rounded border border-zinc-800 backdrop-blur">
           Words: {{ store.activeNode?.word_count || 0 }}
         </span>
-        <button 
-          @click="store.toggleModal('omnibar', true)" 
-          class="px-2.5 py-1 bg-zinc-900/80 border border-zinc-800 hover:border-amber-500/50 text-zinc-400 hover:text-amber-400 rounded text-[10px] font-mono transition flex items-center gap-1.5 backdrop-blur"
-        >
+        <button @click="store.toggleModal('omnibar', true)" class="px-2.5 py-1 bg-zinc-900/80 border border-zinc-800 hover:border-amber-500/50 text-zinc-400 hover:text-amber-400 rounded text-[10px] font-mono transition flex items-center gap-1.5 backdrop-blur">
           <Search class="w-3 h-3" /> Lore Check (Cmd+K)
         </button>
       </div>
-
       <div class="pointer-events-auto opacity-20 hover:opacity-100 transition-opacity duration-500">
-        <button 
-          @click="store.toggleVoidMode()" 
-          class="px-3 py-1.5 bg-zinc-900/80 border border-zinc-800 hover:border-rose-500/50 text-zinc-400 hover:text-rose-400 rounded text-xs font-mono transition flex items-center gap-1.5 backdrop-blur"
-        >
+        <button @click="store.toggleVoidMode()" class="px-3 py-1.5 bg-zinc-900/80 border border-zinc-800 hover:border-rose-500/50 text-zinc-400 hover:text-rose-400 rounded text-xs font-mono transition flex items-center gap-1.5 backdrop-blur">
           <DoorOpen class="w-3.5 h-3.5" /> Exit Void (Esc)
         </button>
       </div>
     </div>
 
     <!-- Standard Action Sub-Header -->
-    <div 
-      v-if="store.activeNode?.id && !store.isVoidMode" 
-      class="h-9 border-b border-zinc-800/60 bg-zinc-900/40 px-6 flex items-center justify-between text-xs z-10 shrink-0 backdrop-blur-sm"
-    >
+    <div v-if="store.activeNode?.id && !store.isVoidMode" class="h-9 border-b border-zinc-800/60 bg-zinc-900/40 px-6 flex items-center justify-between text-xs z-10 shrink-0 backdrop-blur-sm">
       <div class="flex items-center gap-4">
         <span class="text-[11px] text-zinc-500 font-mono">
           Words: <strong class="text-zinc-300 font-medium">{{ store.activeNode?.word_count || 0 }}</strong>
@@ -43,205 +30,48 @@
       </div>
 
       <div class="flex items-center space-x-2">
-        <button 
-          @click="toggleXRay" 
-          :class="[
-            'px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition border',
-            store.isXRayActive 
-              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.15)]' 
-              : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-          ]"
-        >
+        <button @click="toggleXRay" :class="['px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition border', store.isXRayActive ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.15)]' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800']">
           <Eye class="w-3.5 h-3.5" /> <span>Craft X-Ray</span>
         </button>
-
-        <button 
-          @click="store.toggleVoidMode()" 
-          class="px-2.5 py-1 bg-zinc-800/80 border border-zinc-700/50 hover:bg-zinc-800 text-zinc-300 rounded text-xs font-medium flex items-center gap-1.5 transition"
-        >
+        <button @click="store.toggleVoidMode()" class="px-2.5 py-1 bg-zinc-800/80 border border-zinc-700/50 hover:bg-zinc-800 text-zinc-300 rounded text-xs font-medium flex items-center gap-1.5 transition">
           <Moon class="w-3.5 h-3.5" /> <span>The Void</span>
         </button>
-
-        <button 
-          @click="runMasterTriage" 
-          class="px-2.5 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 rounded text-xs font-medium flex items-center gap-1.5 transition shadow-[0_0_8px_rgba(6,182,212,0.15)]"
-        >
+        <button @click="runMasterTriage" class="px-2.5 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 rounded text-xs font-medium flex items-center gap-1.5 transition shadow-[0_0_8px_rgba(6,182,212,0.15)]">
           <Wand2 class="w-3.5 h-3.5" /> <span class="hidden md:inline">Triage Draft</span>
         </button>
       </div>
     </div>
 
-    <!-- Craft X-Ray Visual Key Legend Tray -->
-    <div 
-      v-if="store.isXRayActive && !store.isVoidMode" 
-      class="bg-zinc-950/95 border-b border-zinc-800/80 px-6 py-2 flex flex-col sm:flex-row sm:items-center justify-between text-[10px] font-mono gap-2 shrink-0 animate-fade-in"
-    >
-      <!-- 4 Lens Toggle Pills -->
+    <!-- Craft X-Ray Legend Tray -->
+    <div v-if="store.isXRayActive && !store.isVoidMode" class="bg-zinc-950/95 border-b border-zinc-800/80 px-6 py-2 flex flex-col sm:flex-row sm:items-center justify-between text-[10px] font-mono gap-2 shrink-0 animate-fade-in">
       <div class="flex items-center gap-1.5 overflow-x-auto">
         <span class="text-zinc-500 uppercase tracking-wider font-bold mr-1">Lens:</span>
-        <button 
-          @click="activeXRayLens = 'energetics'" 
-          :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'energetics' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']"
-        >
-          ⚡ Energetics
-        </button>
-        <button 
-          @click="activeXRayLens = 'neuro'" 
-          :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'neuro' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']"
-        >
-          🧬 Neuro-Spectrum
-        </button>
-        <button 
-          @click="activeXRayLens = 'clutter'" 
-          :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'clutter' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']"
-        >
-          🔍 Clutter & Filters
-        </button>
-        <button 
-          @click="activeXRayLens = 'cadence'" 
-          :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'cadence' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']"
-        >
-          🎵 Cadence
-        </button>
-      </div>
-
-      <!-- Dynamic Lens Legend -->
-      <div class="flex items-center gap-3 overflow-x-auto text-[9px] text-zinc-400">
-        <!-- 1. Energetics Key -->
-        <template v-if="activeXRayLens === 'energetics'">
-          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/30 border border-rose-500"></span> Staccato (&lt;9w)</span>
-          <span class="flex items-center gap-1 text-amber-300"><span class="w-2 h-2 rounded-sm bg-amber-500/30 border border-amber-500"></span> Turning Hinge</span>
-          <span class="flex items-center gap-1 text-emerald-300"><span class="w-2 h-2 rounded-sm bg-emerald-500/30 border border-emerald-500"></span> Lyrical Flow (22w+)</span>
-          <span class="flex items-center gap-1 text-zinc-500"><span class="w-2 h-2 rounded-sm border border-zinc-700 bg-transparent"></span> Clean Baseline</span>
-        </template>
-
-        <!-- 2. Neuro-Spectrum Key -->
-        <template v-else-if="activeXRayLens === 'neuro'">
-          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/40"></span> Adrenaline</span>
-          <span class="flex items-center gap-1 text-purple-300"><span class="w-2 h-2 rounded-sm bg-purple-500/40"></span> Oxytocin</span>
-          <span class="flex items-center gap-1 text-cyan-300"><span class="w-2 h-2 rounded-sm bg-cyan-500/40"></span> Dopamine</span>
-          <span class="flex items-center gap-1 text-emerald-300"><span class="w-2 h-2 rounded-sm bg-emerald-500/40"></span> Serotonin</span>
-        </template>
-
-        <!-- 3. Clutter Key -->
-        <template v-else-if="activeXRayLens === 'clutter'">
-          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/30 border border-rose-500"></span> Filter Verbs (saw, felt)</span>
-          <span class="flex items-center gap-1 text-amber-300"><span class="w-2 h-2 rounded-sm bg-amber-500/30 border border-amber-500"></span> Crutch Words (suddenly)</span>
-        </template>
-
-        <!-- 4. Cadence Key -->
-        <template v-else-if="activeXRayLens === 'cadence'">
-          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/30"></span> Staccato (&lt;9w)</span>
-          <span class="flex items-center gap-1 text-zinc-500"><span class="w-2 h-2 rounded-sm border border-zinc-700"></span> Baseline (9-21w)</span>
-          <span class="flex items-center gap-1 text-emerald-300"><span class="w-2 h-2 rounded-sm bg-emerald-500/30"></span> Expansive (22w+)</span>
-        </template>
+        <button @click="activeXRayLens = 'energetics'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'energetics' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">⚡ Energetics</button>
+        <button @click="activeXRayLens = 'neuro'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'neuro' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🧬 Neuro-Spectrum</button>
+        <button @click="activeXRayLens = 'clutter'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'clutter' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🔍 Clutter & Filters</button>
+        <button @click="activeXRayLens = 'cadence'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'cadence' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🎵 Cadence</button>
       </div>
     </div>
 
-    <!-- Severed Causal Thread Alert Banner -->
-    <div 
-      v-if="store.activeNode?.severed_threads?.length && !store.isVoidMode" 
-      class="bg-rose-950/40 border-b border-rose-900/50 px-6 py-2 flex items-center justify-between text-xs text-rose-300 z-10 shrink-0 font-mono animate-fade-in"
-    >
-      <div class="flex items-center gap-2">
-        <Link2Off class="w-4 h-4 text-rose-400 shrink-0" />
-        <span><strong>Severed Causal Thread:</strong> Paragraph anchoring a canonical fact was excised (Entity: {{ store.activeNode.severed_threads[0].entity_id }}).</span>
-      </div>
-      <button 
-        @click="dismissSeveredThreads" 
-        class="text-[10px] text-zinc-400 hover:text-white uppercase font-bold px-2 py-0.5 rounded bg-zinc-800"
-      >
-        Acknowledge
-      </button>
-    </div>
-
-    <!-- MICRO-STALL ALERT (TEMPORARILY DISABLED) -->
-    <!--
-    <div 
-      v-if="microStallAlert" 
-      class="bg-amber-500/10 border-b border-amber-500/30 px-6 py-2 flex items-center justify-between text-xs text-amber-300 z-10 shrink-0 animate-fade-in"
-    >
-      <div class="flex items-center gap-2">
-        <RotateCcw class="w-4 h-4 text-amber-400 animate-spin" />
-        <span><strong>Micro-Stall Detected:</strong> You've rewritten this section heavily, but the story hasn't advanced.</span>
-      </div>
-      <div class="flex items-center space-x-2">
-        <button 
-          @click="insertTKProtocol" 
-          class="px-2.5 py-0.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded text-[11px] transition shadow"
-        >
-          Drop [TK] & Advance
-        </button>
-        <button @click="microStallAlert = false" class="text-zinc-500 hover:text-white">
-          <X class="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-    -->
-
-    <!-- Active Writing Canvas (with Scroll Tracker for the 3D Reading Bead) -->
-    <div 
-      ref="scrollContainer"
-      @scroll="handleEditorScroll"
-      v-if="store.activeNode?.id" 
-      :class="[
-        'flex-1 flex flex-col max-w-3xl w-full mx-auto overflow-y-auto custom-scrollbar relative',
-        store.isVoidMode ? 'p-8 md:p-20 mt-6' : 'p-6 md:p-12'
-      ]"
-    >
-      <input 
-        v-model="store.activeNode.title" 
-        @input="queueAutoSave" 
-        class="bg-transparent text-2xl md:text-4xl font-serif font-bold tracking-tight border-none focus:outline-none mb-8 placeholder-zinc-700 transition-colors"
-        :class="store.isCandlelight ? 'text-amber-100/90' : 'text-zinc-100'"
-        placeholder="Scene Title..." 
-      />
+    <!-- Active Writing Canvas -->
+    <div ref="scrollContainer" @scroll="handleEditorScroll" v-if="store.activeNode?.id" :class="['flex-1 flex flex-col max-w-3xl w-full mx-auto overflow-y-auto custom-scrollbar relative', store.isVoidMode ? 'p-8 md:p-20 mt-6' : 'p-6 md:p-12']">
+      <input v-model="store.activeNode.title" @input="queueAutoSave" class="bg-transparent text-2xl md:text-4xl font-serif font-bold tracking-tight border-none focus:outline-none mb-8 placeholder-zinc-700 transition-colors" :class="store.isCandlelight ? 'text-amber-100/90' : 'text-zinc-100'" placeholder="Scene Title..." />
+      <editor-content v-show="!store.isXRayActive" :editor="editor" class="flex-1 font-serif text-lg md:text-xl leading-relaxed outline-none min-h-[350px]" :class="store.isCandlelight ? 'text-amber-100/90' : 'text-zinc-200'" />
       
-      <!-- TipTap Rich Text Surface -->
-      <editor-content 
-        v-show="!store.isXRayActive" 
-        :editor="editor" 
-        class="flex-1 font-serif text-lg md:text-xl leading-relaxed outline-none min-h-[350px]" 
-        :class="store.isCandlelight ? 'text-amber-100/90' : 'text-zinc-200'"
-      />
-      
-      <!-- Multi-Lens Analytical Overlay: Structured Exact Paragraph Blocks -->
-      <div 
-        v-show="store.isXRayActive" 
-        class="prose-canvas flex-1 font-serif text-lg md:text-xl leading-relaxed space-y-6"
-      >
-        <div v-if="isXRayLoading" class="py-12 text-center text-xs font-mono text-amber-400 flex items-center justify-center gap-2">
-          <RotateCcw class="w-4 h-4 animate-spin" /> Analyzing prose lens...
-        </div>
-
+      <div v-show="store.isXRayActive" class="prose-canvas flex-1 font-serif text-lg md:text-xl leading-relaxed space-y-6">
+        <div v-if="isXRayLoading" class="py-12 text-center text-xs font-mono text-amber-400 flex items-center justify-center gap-2"><RotateCcw class="w-4 h-4 animate-spin" /> Analyzing prose lens...</div>
         <div v-else>
-          <p 
-            v-for="(paraBlock, pIdx) in store.xraySentences" 
-            :key="pIdx" 
-            class="xray-paragraph"
-          >
-            <span 
-              v-for="(s, sIdx) in paraBlock" 
-              :key="sIdx" 
-              :class="['xray-sentence group relative cursor-pointer', getSentenceLensClass(s)]" 
-              @click="handleXRaySentenceClick(s.text)"
-            >
-              <!-- Renders word-level clutter if available, else plain text -->
+          <p v-for="(paraBlock, pIdx) in store.xraySentences" :key="pIdx" class="xray-paragraph">
+            <span v-for="(s, sIdx) in paraBlock" :key="sIdx" :class="['xray-sentence group relative cursor-pointer', getSentenceLensClass(s)]" @click="handleXRaySentenceClick(s.text)">
               <span v-if="activeXRayLens === 'clutter' && s.clutter_html" v-html="s.clutter_html"></span>
-              <span v-else>{{ s.text }}</span>
-              {{ ' ' }}
-
-              <!-- Adaptive Tooltip -->
-              <span class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-zinc-950 text-zinc-200 text-[10px] font-mono rounded-lg shadow-2xl border border-zinc-700 z-50 whitespace-nowrap pointer-events-none">
-                {{ getSentenceTooltip(s) }}
-              </span>
+              <span v-else>{{ s.text }}</span>{{ ' ' }}
+              <span class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-zinc-950 text-zinc-200 text-[10px] font-mono rounded-lg shadow-2xl border border-zinc-700 z-50 whitespace-nowrap pointer-events-none">{{ getSentenceTooltip(s) }}</span>
             </span>
           </p>
         </div>
       </div>
     </div>
     
-    <!-- Empty State -->
     <div v-else class="flex-1 flex items-center justify-center text-zinc-600 select-none">
       <div class="text-center space-y-3">
         <Feather class="w-12 h-12 mx-auto text-zinc-800" />
@@ -249,35 +79,12 @@
       </div>
     </div>
 
-    <!-- Floating Socratic & Entity Toolbar -->
-    <div 
-      v-if="store.selectedText && !store.isVoidMode" 
-      class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-zinc-900/95 border border-amber-500/40 rounded-full px-4 py-2 shadow-2xl flex items-center space-x-2 z-30 backdrop-blur-md animate-fade-in"
-    >
-      <span class="text-xs text-zinc-300 font-mono truncate max-w-[140px] sm:max-w-[180px] mr-1">
-        "{{ store.selectedText }}"
-      </span>
-      <button 
-        @click="elevateSelection" 
-        title="Consult Socratic Mirror" 
-        class="bg-amber-600 hover:bg-amber-500 text-zinc-950 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 transition shadow"
-      >
-        <Sparkles class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Elevate</span>
-      </button>
-      <button 
-        @click="registerSelection('CHARACTER')" 
-        title="Track as Character" 
-        class="bg-zinc-800 hover:bg-zinc-700 text-amber-300 text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1 transition"
-      >
-        <UserPlus class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Character</span>
-      </button>
-      <button 
-        @click="registerSelection('ITEM')" 
-        title="Track as Artifact" 
-        class="bg-zinc-800 hover:bg-zinc-700 text-cyan-300 text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1 transition"
-      >
-        <Key class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Artifact</span>
-      </button>
+    <!-- Floating Socratic Toolbar -->
+    <div v-if="store.selectedText && !store.isVoidMode" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-zinc-900/95 border border-amber-500/40 rounded-full px-4 py-2 shadow-2xl flex items-center space-x-2 z-30 backdrop-blur-md animate-fade-in">
+      <span class="text-xs text-zinc-300 font-mono truncate max-w-[140px] sm:max-w-[180px] mr-1">"{{ store.selectedText }}"</span>
+      <button @click="elevateSelection" title="Consult Socratic Mirror" class="bg-amber-600 hover:bg-amber-500 text-zinc-950 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 transition shadow"><Sparkles class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Elevate</span></button>
+      <button @click="registerSelection('CHARACTER')" title="Track as Character" class="bg-zinc-800 hover:bg-zinc-700 text-amber-300 text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1 transition"><UserPlus class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Character</span></button>
+      <button @click="registerSelection('ITEM')" title="Track as Artifact" class="bg-zinc-800 hover:bg-zinc-700 text-cyan-300 text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1 transition"><Key class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Artifact</span></button>
     </div>
 
   </div>
@@ -286,7 +93,7 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
-import { Eye, Moon, Wand2, RotateCcw, X, Feather, Search, DoorOpen, Sparkles, UserPlus, Key, Link2Off } from 'lucide-vue-next'
+import { Eye, Moon, Wand2, RotateCcw, X, Feather, Search, DoorOpen, Sparkles, UserPlus, Key } from 'lucide-vue-next'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -294,13 +101,8 @@ import Typography from '@tiptap/extension-typography'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 
-// --- DISABLED MICRO STALL LOGIC ---
-// const microStallAlert = ref(false)
-// let lastSnapshotWordCount = 0
-// let editActionsSinceSnapshot = 0
-
 const isXRayLoading = ref(false)
-const activeXRayLens = ref('energetics') // 'energetics' | 'neuro' | 'clutter' | 'cadence'
+const activeXRayLens = ref('energetics')
 const scrollContainer = ref(null)
 let editor = null
 let scrollThrottle = null
@@ -328,13 +130,6 @@ const syncSelectionFromEditor = () => {
   store.selectedText = text.length > 3 ? text : ''
 }
 
-const dismissSeveredThreads = () => {
-  if (store.activeNode) {
-    store.activeNode.severed_threads = []
-  }
-}
-
-// Live Reading Bead Emitter
 const handleEditorScroll = () => {
   if (!scrollContainer.value || scrollThrottle) return
   scrollThrottle = setTimeout(() => {
@@ -346,21 +141,16 @@ const handleEditorScroll = () => {
 
     const containerTop = el.getBoundingClientRect().top
     let currentBeat = 1
-
     paragraphs.forEach((p, idx) => {
       const rect = p.getBoundingClientRect()
       if (rect.top - containerTop <= 160) {
         currentBeat = idx + 1
       }
     })
-
-    window.dispatchEvent(new CustomEvent('editor-scroll-beat', {
-      detail: { beat: currentBeat }
-    }))
+    window.dispatchEvent(new CustomEvent('editor-scroll-beat', { detail: { beat: currentBeat } }))
   }, 100)
 }
 
-// Precision Sniper-Scroll
 const handleSniperScroll = (e) => {
   const target = e.detail?.text
   if (!target || !editor) return
@@ -384,11 +174,9 @@ const handleSniperScroll = (e) => {
   }
 }
 
-// Lens Click Jump
 const handleLensBeatJump = (e) => {
   const beatIdx = e.detail?.beat || 1
   const snippet = e.detail?.snippet || ''
-
   if (!scrollContainer.value) return
 
   const paragraphs = scrollContainer.value.querySelectorAll('.ProseMirror p')
@@ -397,9 +185,7 @@ const handleLensBeatJump = (e) => {
   if (targetP) {
     targetP.scrollIntoView({ behavior: 'smooth', block: 'center' })
     targetP.classList.add('pulse-beat')
-    setTimeout(() => {
-      targetP.classList.remove('pulse-beat')
-    }, 2200)
+    setTimeout(() => { targetP.classList.remove('pulse-beat') }, 2200)
     showToast(`📍 Focused on Beat ${beatIdx}`, 'info')
   } else if (snippet) {
     handleSniperScroll({ detail: { text: snippet.substring(0, 30) } })
@@ -409,48 +195,19 @@ const handleLensBeatJump = (e) => {
 const initEditor = () => {
   if (editor) editor.destroy()
   
-  const initialContent = textToHtml(store.activeNode?.content) || ''
-
   editor = new Editor({
-    content: initialContent,
+    content: textToHtml(store.activeNode?.content) || '',
     extensions: [
       StarterKit, 
       Typography, 
       Placeholder.configure({ placeholder: 'Lay down the first sentence...' })
     ],
-    editorProps: { 
-      attributes: { 
-        class: 'ProseMirror outline-none prose-canvas focus:outline-none min-h-[300px]' 
-      } 
-    },
-    onUpdate: ({ transaction }) => {
+    editorProps: { attributes: { class: 'ProseMirror outline-none prose-canvas focus:outline-none min-h-[300px]' } },
+    onUpdate: () => {
       const text = htmlToText(editor.getHTML())
       if (!store.activeNode) return
       store.activeNode.content = text
-      
-      const currentWords = text.split(/\s+/).filter(Boolean).length
-      store.activeNode.word_count = currentWords
-
-      /* --- MICRO-STALL LOGIC TEMPORARILY DISABLED ---
-      if (transaction.docChanged) {
-        editActionsSinceSnapshot += 1
-      }
-
-      if (currentWords > 50) {
-        if (editActionsSinceSnapshot > 200) {
-          const wordGrowth = currentWords - lastSnapshotWordCount
-          if (Math.abs(wordGrowth) < 12) {
-            microStallAlert.value = true
-          }
-          lastSnapshotWordCount = currentWords
-          editActionsSinceSnapshot = 0
-        }
-      } else {
-        lastSnapshotWordCount = currentWords
-        editActionsSinceSnapshot = 0
-      }
-      -------------------------------------------------- */
-
+      store.activeNode.word_count = text.split(/\s+/).filter(Boolean).length
       queueAutoSave()
     },
     onSelectionUpdate: () => {
@@ -459,25 +216,17 @@ const initEditor = () => {
   })
 }
 
-// Scene switch watcher
 watch(() => store.activeNode?.id, async (newId) => {
   if (newId) {
     store.xraySentences = []
-    
-    // microStallAlert.value = false 
-
     if (!editor) {
       initEditor()
     } else {
       const currentText = htmlToText(editor.getHTML())
       if (currentText !== store.activeNode.content) {
         editor.commands.setContent(textToHtml(store.activeNode.content) || '')
-        
-        // lastSnapshotWordCount = store.activeNode.word_count || 0
-        // editActionsSinceSnapshot = 0
       }
     }
-    
     if (store.isXRayActive && store.activeNode?.content) {
       await fetchXRayAnalysis()
     }
@@ -516,7 +265,6 @@ const fetchXRayAnalysis = async () => {
     store.xraySentences = []
     return
   }
-
   isXRayLoading.value = true
   try {
     const res = await fetch(`${API_BASE}/api/craft/xray`, { 
@@ -526,7 +274,6 @@ const fetchXRayAnalysis = async () => {
     })
     if (!res.ok) throw new Error('X-Ray extraction failed')
     const data = await res.json()
-    
     if (data.paragraphs && data.paragraphs.length > 0) {
       store.xraySentences = data.paragraphs
     } else if (data.sentences && data.sentences.length > 0) {
@@ -552,7 +299,6 @@ const toggleXRay = async () => {
 
 const getSentenceLensClass = (s) => {
   if (!s) return 'text-zinc-300'
-
   if (activeXRayLens.value === 'energetics') {
     const type = s.energetics_type || s.type || ''
     switch (type) {
@@ -649,7 +395,6 @@ const runMasterTriage = async () => {
       store.activeNode.content = data.formatted_text
       let msg = 'Draft Triaged!'
       if (data.new_scenes > 0) msg += ` Splitting ${data.new_scenes} new scenes.`
-      if (data.tk_count > 0) msg += ` Found ${data.tk_count} [TK] markers.`
       store.saveStatus = msg
       showToast(msg, 'info')
       if (data.new_scenes > 0) window.dispatchEvent(new Event('refresh-tree'))
@@ -659,16 +404,6 @@ const runMasterTriage = async () => {
     showToast(e.message, 'error') 
   }
 }
-
-/* 
-const insertTKProtocol = () => {
-  if (editor) {
-    editor.chain().focus().insertContent(' [TK: Intent / Next beat] ').run()
-  }
-  microStallAlert.value = false
-  queueAutoSave()
-}
-*/
 
 onMounted(() => { 
   if (store.activeNode?.id) initEditor() 
@@ -684,104 +419,22 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-/* ProseMirror & TipTap Typography Rules */
-.ProseMirror p {
-  margin-bottom: 1.5em;
-  line-height: 1.85;
-}
+.ProseMirror p { margin-bottom: 1.5em; line-height: 1.85; }
 .ProseMirror p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
-  float: left;
-  color: #52525b;
-  pointer-events: none;
-  height: 0;
+  content: attr(data-placeholder); float: left; color: #52525b; pointer-events: none; height: 0;
 }
-
-/* Craft X-Ray Paragraph Flow (Matches TipTap 1:1) */
-.xray-paragraph {
-  margin-bottom: 1.5em;
-  line-height: 1.85;
-}
-
-.xray-sentence {
-  display: inline;
-  padding: 2px 2px;
-  border-radius: 3px;
-  transition: all 0.2s ease;
-}
-
-.xray-sentence:hover {
-  filter: brightness(1.2);
-}
-
-/* 1. Energetics Color Schemes */
-.xray-escalator {
-  background-color: rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
-  border-bottom: 2px solid rgba(239, 68, 68, 0.6);
-}
-.xray-resolver {
-  background-color: rgba(16, 185, 129, 0.2);
-  color: #6ee7b7;
-  border-bottom: 2px solid rgba(16, 185, 129, 0.6);
-}
-.xray-pivot {
-  background-color: rgba(245, 158, 11, 0.25);
-  color: #fcd34d;
-  border-bottom: 2px solid rgba(245, 158, 11, 0.7);
-}
-.xray-slack {
-  background-color: rgba(113, 113, 122, 0.2);
-  color: #a1a1aa;
-  text-decoration: underline dotted #71717a;
-}
-
-/* 2. Neuro-Spectrum Color Schemes */
-.xray-adrenaline {
-  background-color: rgba(239, 68, 68, 0.25);
-  color: #fca5a5;
-  border-bottom: 2px solid rgba(239, 68, 68, 0.8);
-}
-.xray-oxytocin {
-  background-color: rgba(168, 85, 247, 0.25);
-  color: #d8b4fe;
-  border-bottom: 2px solid rgba(168, 85, 247, 0.8);
-}
-.xray-dopamine {
-  background-color: rgba(6, 182, 212, 0.25);
-  color: #67e8f9;
-  border-bottom: 2px solid rgba(6, 182, 212, 0.8);
-}
-.xray-serotonin {
-  background-color: rgba(16, 185, 129, 0.25);
-  color: #6ee7b7;
-  border-bottom: 2px solid rgba(16, 185, 129, 0.8);
-}
-
-/* 3. Word-Level Clutter & Filter Highlights */
-.clutter-filter {
-  background-color: rgba(244, 63, 94, 0.35);
-  color: #fda4af;
-  border-bottom: 2px solid #f43f5e;
-  padding: 1px 3px;
-  border-radius: 2px;
-  font-weight: 600;
-}
-.clutter-crutch {
-  background-color: rgba(245, 158, 11, 0.35);
-  color: #fde68a;
-  border-bottom: 2px solid #f59e0b;
-  padding: 1px 3px;
-  border-radius: 2px;
-  font-weight: 600;
-}
-
-/* Beat Jump Highlight Pulse */
-.pulse-beat {
-  background-color: rgba(34, 211, 238, 0.22) !important;
-  border-left: 3px solid #22d3ee !important;
-  padding-left: 8px !important;
-  border-radius: 4px;
-  transition: all 0.5s ease;
-}
+.xray-paragraph { margin-bottom: 1.5em; line-height: 1.85; }
+.xray-sentence { display: inline; padding: 2px 2px; border-radius: 3px; transition: all 0.2s ease; }
+.xray-sentence:hover { filter: brightness(1.2); }
+.xray-escalator { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; border-bottom: 2px solid rgba(239, 68, 68, 0.6); }
+.xray-resolver { background-color: rgba(16, 185, 129, 0.2); color: #6ee7b7; border-bottom: 2px solid rgba(16, 185, 129, 0.6); }
+.xray-pivot { background-color: rgba(245, 158, 11, 0.25); color: #fcd34d; border-bottom: 2px solid rgba(245, 158, 11, 0.7); }
+.xray-slack { background-color: rgba(113, 113, 122, 0.2); color: #a1a1aa; text-decoration: underline dotted #71717a; }
+.xray-adrenaline { background-color: rgba(239, 68, 68, 0.25); color: #fca5a5; border-bottom: 2px solid rgba(239, 68, 68, 0.8); }
+.xray-oxytocin { background-color: rgba(168, 85, 247, 0.25); color: #d8b4fe; border-bottom: 2px solid rgba(168, 85, 247, 0.8); }
+.xray-dopamine { background-color: rgba(6, 182, 212, 0.25); color: #67e8f9; border-bottom: 2px solid rgba(6, 182, 212, 0.8); }
+.xray-serotonin { background-color: rgba(16, 185, 129, 0.25); color: #6ee7b7; border-bottom: 2px solid rgba(16, 185, 129, 0.8); }
+.clutter-filter { background-color: rgba(244, 63, 94, 0.35); color: #fda4af; border-bottom: 2px solid #f43f5e; padding: 1px 3px; border-radius: 2px; font-weight: 600; }
+.clutter-crutch { background-color: rgba(245, 158, 11, 0.35); color: #fde68a; border-bottom: 2px solid #f59e0b; padding: 1px 3px; border-radius: 2px; font-weight: 600; }
+.pulse-beat { background-color: rgba(34, 211, 238, 0.22) !important; border-left: 3px solid #22d3ee !important; padding-left: 8px !important; border-radius: 4px; transition: all 0.5s ease; }
 </style>
