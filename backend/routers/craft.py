@@ -4,9 +4,8 @@ import time
 import uuid
 from fastapi import APIRouter
 from pydantic import BaseModel
-import ollama
 
-from backend.config import STUDIO_MODEL, LLM_OPTIONS
+from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
 from backend.database import get_db
 from backend.socratic import elevate_prose_diagnosis, get_socratic_lesson
 from backend.telemetry import classify_sentence_energetics, classify_paragraph_energetics
@@ -82,8 +81,12 @@ async def scan_scene_disclosures(payload: ScanDisclosureRequest):
     if not payload.text or len(payload.text.strip()) < 30:
         return {"status": "empty", "disclosures": []}
 
+    if not ENABLE_AI:
+        return {"status": "error", "message": "Horizon scanner offline (Pure Math Mode active).", "disclosures": []}
+
     prompt_content = "Scene Text:\n" + str(payload.text[:3500])
     try:
+        import ollama
         resp = await asyncio.to_thread(
             ollama.chat,
             model=STUDIO_MODEL,
