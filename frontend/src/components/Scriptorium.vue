@@ -409,13 +409,16 @@ const calculateTextDiff = (oldText, newText) => {
   return Math.abs(oldText.length - newText.length)
 }
 
+// Churn Tracking State
+let lastSnapshotWordCount = 0
+let editActionsSinceSnapshot = 0
+
 const initEditor = () => {
   if (editor) editor.destroy()
   
   const initialContent = textToHtml(store.activeNode?.content) || ''
-  lastSnapshotContent = htmlToText(initialContent)
-  lastSnapshotWordCount = lastSnapshotContent.split(/\s+/).filter(Boolean).length
-  totalEditsSinceSnapshot = 0
+  lastSnapshotWordCount = htmlToText(initialContent).split(/\s+/).filter(Boolean).length
+  editActionsSinceSnapshot = 0
 
   editor = new Editor({
     content: initialContent,
@@ -438,41 +441,41 @@ const initEditor = () => {
       const currentWords = text.split(/\s+/).filter(Boolean).length
       store.activeNode.word_count = currentWords
 
-      // 2. Count this as 1 discrete edit action (ignore simple cursor movements)
-      if (!transaction.docChanged) return;
-      totalEditsSinceSnapshot += 1
+      // 2. Count discrete edit actions (ignore mouse clicks / cursor highlighting)
+      if (transaction.docChanged) {
+        editActionsSinceSnapshot += 1
+      }
 
       // 3. Evaluate Churn (Only if scene is > 50 words)
       if (currentWords > 50) {
-        // If the author has made 150 edit actions (keystrokes, cuts, pastes)
-        if (totalEditsSinceSnapshot > 150) {
+        // Wait for 200 edit actions (roughly a paragraph of typing/deleting)
+        if (editActionsSinceSnapshot > 200) {
           const wordGrowth = currentWords - lastSnapshotWordCount
           
-          // Churning: 150 keystrokes, but the net word count shifted by fewer than 10 words.
-          // This means you are deleting and rewriting the exact same sentence over and over.
-          if (Math.abs(wordGrowth) < 10) {
+          // Churning: 200 actions, but the story grew or shrank by less than 12 words.
+          if (Math.abs(wordGrowth) < 12) {
             microStallAlert.value = true
           }
 
           // Reset the snapshot baseline
           lastSnapshotWordCount = currentWords
-          totalEditsSinceSnapshot = 0
+          editActionsSinceSnapshot = 0
         }
       } else {
         // Keep baseline synced while under 50 words so it doesn't trigger unfairly
         lastSnapshotWordCount = currentWords
-        totalEditsSinceSnapshot = 0
+        editActionsSinceSnapshot = 0
       }
 
+      // NO TIME-BASED KEYSTROKE LOGIC HERE!
       queueAutoSave()
     },
-    
     onSelectionUpdate: () => {
       syncSelectionFromEditor()
     }
   })
 }
-
+  
 // Scene switch watcher
 watch(() => store.activeNode?.id, async (newId) => {
   if (newId) {
