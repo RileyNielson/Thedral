@@ -11,32 +11,24 @@ taskkill /F /IM python.exe >nul 2>&1
 
 REM 2. Check Python Environment
 if exist venv\Scripts\python.exe goto CHECK_BACKEND_PACKAGES
-echo [1/3] Setting up Python environment...
+echo [1/2] Setting up Python environment...
 python -m venv venv >nul 2>&1
 if not exist venv\Scripts\python.exe py -m venv venv >nul 2>&1
 
 :CHECK_BACKEND_PACKAGES
-if exist venv\Lib\site-packages\uvicorn goto CHECK_VITE
-echo [2/3] Installing backend requirements...
-call venv\Scripts\pip.exe install fastapi uvicorn python-docx pydantic plotly python-multipart ollama
-
-:CHECK_VITE
-if exist node_modules\vite goto LAUNCH_STUDIO
-echo [3/3] Installing interface packages, please wait...
-call npm install --legacy-peer-deps
+if exist venv\Lib\site-packages\uvicorn goto LAUNCH_STUDIO
+echo [2/2] Installing backend requirements...
+call venv\Scripts\pip.exe install fastapi uvicorn python-docx pydantic plotly python-multipart
 
 :LAUNCH_STUDIO
 set ENABLE_AI=false
 
-echo Starting Backend Server on Port 8000...
+echo Starting Thedral Core on Port 8000...
 start "" venv\Scripts\python.exe app.py
 
-echo Starting Interface on Port 5173...
-start "" cmd /c "npm run dev -- --host"
-
-timeout /t 5 /nobreak >nul
+timeout /t 3 /nobreak >nul
 echo Opening studio in browser...
-start http://localhost:5173
+start http://localhost:8000
 
 echo ===================================================
 echo   THEDRAL IS LIVE!
