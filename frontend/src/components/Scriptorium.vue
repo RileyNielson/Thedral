@@ -451,12 +451,13 @@ const initEditor = () => {
 
       // 4. Evaluate Churn (Only if scene is > 50 words)
       if (currentWords > 50) {
-        // If 250+ characters have been edited/deleted/replaced
-        if (totalEditsSinceSnapshot > 250) {
+        // Increased threshold to 400 edit actions to prevent overly aggressive alerts
+        if (totalEditsSinceSnapshot > 400) {
           const wordGrowth = currentWords - lastSnapshotWordCount
           
-          // Churning: You made 250+ character edits but the story grew by fewer than 5 words!
-          if (wordGrowth < 5) {
+          // Churning: High edit volume, but net word count barely shifted (< 12 words difference).
+          // We wrap wordGrowth in Math.abs() to ensure we DO NOT punish healthy bulk deletions!
+          if (Math.abs(wordGrowth) < 12) {
             microStallAlert.value = true
           }
 
@@ -469,7 +470,6 @@ const initEditor = () => {
         lastSnapshotWordCount = currentWords
         totalEditsSinceSnapshot = 0
       }
-
       queueAutoSave()
     },
     onSelectionUpdate: () => {
