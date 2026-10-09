@@ -3,7 +3,6 @@ import time
 import json
 import uuid
 import asyncio
-import ollama
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -11,7 +10,7 @@ from backend.database import get_db
 from backend.hashing import find_severed_threads
 from backend.telemetry import calculate_text_telemetry
 from backend.astrolabe import build_astrolabe_manifest
-from backend.config import STUDIO_MODEL
+from backend.config import STUDIO_MODEL, ENABLE_AI
 
 router = APIRouter(tags=["Binder"])
 
@@ -32,7 +31,6 @@ class NodeCreate(BaseModel):
 class AutoTitleRequest(BaseModel):
     book_id: str | None = None
 
-# Supports both /api/tree and /api/binder
 @router.get("/api/binder")
 @router.get("/api/tree")
 def get_binder_tree():
@@ -58,7 +56,6 @@ def get_binder_tree():
             root_nodes.append(node)
     return root_nodes
 
-# Supports both /api/scenes/{id} and /api/node/{id}
 @router.get("/api/scenes/{node_id}")
 @router.get("/api/node/{node_id}")
 def get_node(node_id: str):
@@ -74,7 +71,6 @@ def get_node(node_id: str):
     node["telemetry"] = calculate_text_telemetry(node["content"] or "")
     node["severed_threads"] = find_severed_threads(conn, node_id, node["content"] or "")
     
-    # Parse card_data JSON into native dictionary
     if node.get("card_data"):
         try:
             node["card"] = json.loads(node["card_data"]) if isinstance(node["card_data"], str) else node["card_data"]
@@ -128,7 +124,6 @@ def update_node(node_id: str, payload: NodeUpdate):
     conn.close()
     return {"status": "saved"}
 
-# Telemetry Endpoint Alias
 @router.get("/api/scenes/{node_id}/telemetry")
 @router.get("/api/node/{node_id}/telemetry")
 def get_node_telemetry_endpoint(node_id: str):
@@ -141,7 +136,6 @@ def get_node_telemetry_endpoint(node_id: str):
         raise HTTPException(404, "Node not found")
     return calculate_text_telemetry(row["content"] or "")
 
-# Chapter Lens Endpoint Alias
 @router.get("/api/scenes/{node_id}/lens")
 @router.get("/api/node/{node_id}/lens")
 def get_node_lens_endpoint(node_id: str):
@@ -228,6 +222,14 @@ def toggle_book_archive(book_id: str):
 
 @router.post("/api/binder/auto-title-scenes")
 async def auto_title_scenes(payload: AutoTitleRequest):
+    if not ENABLE_AI:
+        return {"status": "offline_mode", "updated_count": 0}
+
+    try:
+        import ollama
+    except ImportError:
+        return {"status": "offline_mode", "updated_count": 0}
+
     conn = get_db()
     c = conn.cursor()
     target_b = payload.book_id
@@ -285,14 +287,12 @@ async def master_triage_scene(scene_id: str):
 
     text = scene["content"]
 
-    # 1. PARAGRAPHING & TYPOGRAPHY CLEANUP
     text = re.sub(r'^[ \t]+', '', text, flags=re.MULTILINE)
     text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
     text = re.sub(r'--+', '—', text)
     text = re.sub(r'\.\.\.', '…', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
 
-    # 2. SCENE SLICING
     blocks = re.split(r'\n\n(?:(?:\*\s*){3,}|(?:#\s*){3,}|(?:~\s*){3,}|-{3,})\n\n', text)
     
     now = time.strftime("%Y-%m-%d %H:%M:%S")
