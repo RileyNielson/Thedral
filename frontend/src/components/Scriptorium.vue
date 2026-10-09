@@ -155,7 +155,8 @@
       </button>
     </div>
 
-    <!-- Micro-Stall Alert Banner -->
+    <!-- MICRO-STALL ALERT (TEMPORARILY DISABLED) -->
+    <!--
     <div 
       v-if="microStallAlert" 
       class="bg-amber-500/10 border-b border-amber-500/30 px-6 py-2 flex items-center justify-between text-xs text-amber-300 z-10 shrink-0 animate-fade-in"
@@ -176,6 +177,7 @@
         </button>
       </div>
     </div>
+    -->
 
     <!-- Active Writing Canvas (with Scroll Tracker for the 3D Reading Bead) -->
     <div 
@@ -291,17 +293,17 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
-const microStallAlert = ref(false)
+
+// --- DISABLED MICRO STALL LOGIC ---
+// const microStallAlert = ref(false)
+// let lastSnapshotWordCount = 0
+// let editActionsSinceSnapshot = 0
+
 const isXRayLoading = ref(false)
 const activeXRayLens = ref('energetics') // 'energetics' | 'neuro' | 'clutter' | 'cadence'
 const scrollContainer = ref(null)
 let editor = null
 let scrollThrottle = null
-
-// Churn Tracking State
-let lastSnapshotContent = ""
-let lastSnapshotWordCount = 0
-let totalEditsSinceSnapshot = 0
 
 const textToHtml = (text) => {
   if (!text) return ''
@@ -404,21 +406,10 @@ const handleLensBeatJump = (e) => {
   }
 }
 
-// Simple Levenshtein distance to calculate text divergence
-const calculateTextDiff = (oldText, newText) => {
-  return Math.abs(oldText.length - newText.length)
-}
-
-// Churn Tracking State
-let lastSnapshotWordCount = 0
-let editActionsSinceSnapshot = 0
-
 const initEditor = () => {
   if (editor) editor.destroy()
   
   const initialContent = textToHtml(store.activeNode?.content) || ''
-  lastSnapshotWordCount = htmlToText(initialContent).split(/\s+/).filter(Boolean).length
-  editActionsSinceSnapshot = 0
 
   editor = new Editor({
     content: initialContent,
@@ -433,7 +424,6 @@ const initEditor = () => {
       } 
     },
     onUpdate: ({ transaction }) => {
-      // 1. Get raw text and update store
       const text = htmlToText(editor.getHTML())
       if (!store.activeNode) return
       store.activeNode.content = text
@@ -441,33 +431,26 @@ const initEditor = () => {
       const currentWords = text.split(/\s+/).filter(Boolean).length
       store.activeNode.word_count = currentWords
 
-      // 2. Count discrete edit actions (ignore mouse clicks / cursor highlighting)
+      /* --- MICRO-STALL LOGIC TEMPORARILY DISABLED ---
       if (transaction.docChanged) {
         editActionsSinceSnapshot += 1
       }
 
-      // 3. Evaluate Churn (Only if scene is > 50 words)
       if (currentWords > 50) {
-        // Wait for 200 edit actions (roughly a paragraph of typing/deleting)
         if (editActionsSinceSnapshot > 200) {
           const wordGrowth = currentWords - lastSnapshotWordCount
-          
-          // Churning: 200 actions, but the story grew or shrank by less than 12 words.
           if (Math.abs(wordGrowth) < 12) {
             microStallAlert.value = true
           }
-
-          // Reset the snapshot baseline
           lastSnapshotWordCount = currentWords
           editActionsSinceSnapshot = 0
         }
       } else {
-        // Keep baseline synced while under 50 words so it doesn't trigger unfairly
         lastSnapshotWordCount = currentWords
         editActionsSinceSnapshot = 0
       }
+      -------------------------------------------------- */
 
-      // NO TIME-BASED KEYSTROKE LOGIC HERE!
       queueAutoSave()
     },
     onSelectionUpdate: () => {
@@ -475,12 +458,13 @@ const initEditor = () => {
     }
   })
 }
-  
+
 // Scene switch watcher
 watch(() => store.activeNode?.id, async (newId) => {
   if (newId) {
     store.xraySentences = []
-    microStallAlert.value = false // Reset alert on scene change
+    
+    // microStallAlert.value = false 
 
     if (!editor) {
       initEditor()
@@ -489,10 +473,8 @@ watch(() => store.activeNode?.id, async (newId) => {
       if (currentText !== store.activeNode.content) {
         editor.commands.setContent(textToHtml(store.activeNode.content) || '')
         
-        // Reset churn trackers for new scene
-        lastSnapshotContent = store.activeNode.content || ''
-        lastSnapshotWordCount = store.activeNode.word_count || 0
-        totalEditsSinceSnapshot = 0
+        // lastSnapshotWordCount = store.activeNode.word_count || 0
+        // editActionsSinceSnapshot = 0
       }
     }
     
@@ -529,7 +511,6 @@ const queueAutoSave = () => {
   }, 1200)
 }
 
-// Native Paragraph-by-Paragraph Craft X-Ray Fetch with Full Fallback
 const fetchXRayAnalysis = async () => {
   if (!store.activeNode?.content) {
     store.xraySentences = []
@@ -546,7 +527,6 @@ const fetchXRayAnalysis = async () => {
     if (!res.ok) throw new Error('X-Ray extraction failed')
     const data = await res.json()
     
-    // Accepts structured paragraphs, or wraps flat sentences if backend is older
     if (data.paragraphs && data.paragraphs.length > 0) {
       store.xraySentences = data.paragraphs
     } else if (data.sentences && data.sentences.length > 0) {
@@ -570,7 +550,6 @@ const toggleXRay = async () => {
   }
 }
 
-// Resilient Lens Highlighting Classes
 const getSentenceLensClass = (s) => {
   if (!s) return 'text-zinc-300'
 
@@ -603,7 +582,6 @@ const getSentenceLensClass = (s) => {
   return 'text-zinc-300'
 }
 
-// Adaptive Tooltips
 const getSentenceTooltip = (s) => {
   if (activeXRayLens.value === 'energetics') return s.energetics_reason || s.reason
   if (activeXRayLens.value === 'neuro') return s.neuro_reason
@@ -682,6 +660,7 @@ const runMasterTriage = async () => {
   }
 }
 
+/* 
 const insertTKProtocol = () => {
   if (editor) {
     editor.chain().focus().insertContent(' [TK: Intent / Next beat] ').run()
@@ -689,6 +668,7 @@ const insertTKProtocol = () => {
   microStallAlert.value = false
   queueAutoSave()
 }
+*/
 
 onMounted(() => { 
   if (store.activeNode?.id) initEditor() 
