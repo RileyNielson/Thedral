@@ -25,7 +25,7 @@
           Words: <strong class="text-zinc-300 font-medium">{{ store.activeNode?.word_count || 0 }}</strong>
         </span>
         <span v-if="store.saveStatus" class="text-[10px] font-mono tracking-wider uppercase text-zinc-500">
-          ● {{ store.saveStatus }}
+           {{ store.saveStatus }}
         </span>
       </div>
 
