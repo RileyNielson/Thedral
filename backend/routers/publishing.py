@@ -9,6 +9,7 @@ from backend.publishing import (
     generate_manuscript_genome
 )
 from backend.compiler import compile_book_to_docx
+from backend.config import ENABLE_AI
 
 router = APIRouter(tags=["Publishing"])
 
@@ -25,6 +26,8 @@ def get_authorship_proof(book_id: str | None = None):
 
 @router.post("/api/publishing/synopsis")
 def get_synopsis(payload: SynopsisRequest):
+    if not ENABLE_AI:
+        return {"synopsis": "Query Synopsis requires local AI (Pure Math Mode active)."}
     return {"synopsis": generate_query_synopsis(payload.book_id)}
 
 @router.get("/api/publishing/genome")
