@@ -4,8 +4,7 @@ import time
 from fastapi import APIRouter
 from pydantic import BaseModel
 from backend.database import get_db
-from backend.config import STUDIO_MODEL, LLM_OPTIONS
-import ollama
+from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
 
 router = APIRouter(tags=["Lore & Lexicon"])
 
@@ -26,7 +25,6 @@ class AuditLoreRequest(BaseModel):
 
 @router.get("/api/lore")
 def get_all_lore():
-    """Fetches the Living Style Sheet and Worldbuilding Axioms."""
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT * FROM style_sheet ORDER BY category ASC, term ASC")
@@ -36,7 +34,6 @@ def get_all_lore():
 
 @router.post("/api/lore")
 def add_lore_rule(payload: LoreRule):
-    """Adds or updates a rule in the Living Style Sheet."""
     conn = get_db()
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with conn:
@@ -57,7 +54,6 @@ def delete_lore_rule(term: str):
 
 @router.post("/api/ask")
 def ask_the_universe(payload: AskRequest):
-    """Answers a natural language question using FTS5 manuscript retrieval (Local RAG)."""
     q = payload.question.strip()
     if not q: return {"answer": "Ask a question."}
 
@@ -84,6 +80,9 @@ def ask_the_universe(payload: AskRequest):
 
     context_blocks = chr(10).join([f"--- Excerpt from {r['title']} ---\n{r['content'][:1000]}" for r in results])
     
+    if not ENABLE_AI:
+        return {"answer": f"[Pure Math Mode Active - Raw Results]:\n\n{context_blocks}"}
+
     prompt = (
         f"You are the Librarian of this fictional universe.\n"
         f"Answer the author's question using ONLY the provided manuscript excerpts below.\n"
@@ -94,6 +93,7 @@ def ask_the_universe(payload: AskRequest):
     )
 
     try:
+        import ollama
         resp = ollama.chat(model=STUDIO_MODEL, messages=[{"role": "user", "content": prompt}], options=LLM_OPTIONS)
         return {"answer": resp["message"]["content"].strip()}
     except Exception as e:
@@ -101,8 +101,10 @@ def ask_the_universe(payload: AskRequest):
 
 @router.post("/api/lore/extract")
 def auto_extract_lore(payload: ExtractLoreRequest):
-    """Scans scene prose to propose new worldbuilding rules and lexicon terms."""
     if not payload.scene_text or len(payload.scene_text) < 100:
+        return {"proposed_lore": []}
+    
+    if not ENABLE_AI:
         return {"proposed_lore": []}
 
     prompt = (
@@ -113,6 +115,7 @@ def auto_extract_lore(payload: ExtractLoreRequest):
     )
     
     try:
+        import ollama
         resp = ollama.chat(
             model=STUDIO_MODEL, 
             messages=[
@@ -126,13 +129,15 @@ def auto_extract_lore(payload: ExtractLoreRequest):
         if isinstance(data, dict):
             data = data.get("lore", data.get("terms", []))
         return {"proposed_lore": data if isinstance(data, list) else []}
-    except Exception as e:
+    except Exception:
         return {"proposed_lore": []}
 
 @router.post("/api/lore/audit")
 def audit_scene_lore(payload: AuditLoreRequest):
-    """Cross-examines the active scene prose against the established Living Lexicon for contradictions."""
     if not payload.scene_text or len(payload.scene_text.strip()) < 50:
+        return {"discrepancies": []}
+
+    if not ENABLE_AI:
         return {"discrepancies": []}
 
     conn = get_db()
@@ -156,6 +161,7 @@ def audit_scene_lore(payload: AuditLoreRequest):
     )
 
     try:
+        import ollama
         resp = ollama.chat(
             model=STUDIO_MODEL, 
             messages=[
