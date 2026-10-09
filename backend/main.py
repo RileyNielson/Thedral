@@ -71,21 +71,25 @@ def search_manuscript(q: str):
     return results
 
 # =============================================================================
-# FRONTEND SPA MOUNTING
+# FRONTEND SPA MOUNTING (Compiled Vue/Vite App)
 # =============================================================================
+
+# Resolve the absolute path to the compiled frontend/dist directory
 BASE_DIR = Path(__file__).resolve().parent.parent
-DIST_DIR = BASE_DIR / "dist"
+DIST_DIR = BASE_DIR / "frontend" / "dist"
 
 @app.get("/")
 def serve_index():
     index_file = DIST_DIR / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
-    return {"status": "Thedral Studio Backend Online. Run 'npm run build' in root to see interface."}
+    return {"status": "Thedral Studio Backend Online. Run 'npm run build' inside frontend/ to see interface."}
 
+# Mount Vite's compiled assets folder (/assets/js, /assets/css)
 assets_dir = DIST_DIR / "assets"
 if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
+# Catch-all to serve any other static files in the root (like favicon.ico)
 if DIST_DIR.exists():
     app.mount("/", StaticFiles(directory=DIST_DIR, html=False), name="dist_root")
