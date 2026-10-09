@@ -438,40 +438,35 @@ const initEditor = () => {
       const currentWords = text.split(/\s+/).filter(Boolean).length
       store.activeNode.word_count = currentWords
 
-      // 2. Measure actual document changes using TipTap's transaction engine
-      let charsChangedThisKeystroke = 0
-      transaction.steps.forEach(step => {
-        // Calculate the absolute size of the text inserted or deleted
-        const stepSize = Math.abs((step.to || 0) - (step.from || 0)) + Math.abs((step.slice?.size || 0))
-        charsChangedThisKeystroke += stepSize
-      })
+      // 2. Count this as 1 discrete edit action (ignore simple cursor movements)
+      if (!transaction.docChanged) return;
+      totalEditsSinceSnapshot += 1
 
-      // 3. Accumulate changes
-      totalEditsSinceSnapshot += charsChangedThisKeystroke
-
-      // 4. Evaluate Churn (Only if scene is > 50 words)
+      // 3. Evaluate Churn (Only if scene is > 50 words)
       if (currentWords > 50) {
-        // Increased threshold to 400 edit actions to prevent overly aggressive alerts
-        if (totalEditsSinceSnapshot > 400) {
+        // If the author has made 150 edit actions (keystrokes, cuts, pastes)
+        if (totalEditsSinceSnapshot > 150) {
           const wordGrowth = currentWords - lastSnapshotWordCount
           
-          // Churning: High edit volume, but net word count barely shifted (< 12 words difference).
-          // We wrap wordGrowth in Math.abs() to ensure we DO NOT punish healthy bulk deletions!
-          if (Math.abs(wordGrowth) < 12) {
+          // Churning: 150 keystrokes, but the net word count shifted by fewer than 10 words.
+          // This means you are deleting and rewriting the exact same sentence over and over.
+          if (Math.abs(wordGrowth) < 10) {
             microStallAlert.value = true
           }
 
-          // Reset the snapshot baseline so it doesn't keep triggering
+          // Reset the snapshot baseline
           lastSnapshotWordCount = currentWords
           totalEditsSinceSnapshot = 0
         }
       } else {
-        // Keep baseline synced while under 50 words so it doesn't instantly trigger later
+        // Keep baseline synced while under 50 words so it doesn't trigger unfairly
         lastSnapshotWordCount = currentWords
         totalEditsSinceSnapshot = 0
       }
+
       queueAutoSave()
     },
+    
     onSelectionUpdate: () => {
       syncSelectionFromEditor()
     }
