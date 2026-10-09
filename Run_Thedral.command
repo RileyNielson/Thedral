@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Thedral Sovereign Studio — 1-Click Desktop Launcher
+# Thedral Sovereign Studio — 1-Click Mac Launcher
 # =============================================================================
 
 # Resolve project directory
@@ -9,65 +9,43 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
 
 echo "================================================================="
-echo "   🚀 LAUNCHING THEDRAL SOVEREIGN STUDIO"
+echo "   🚀 LAUNCHING THEDRAL SOVEREIGN STUDIO (MAC)"
 echo "================================================================="
-echo "Directory: $DIR"
 
-# 1. Activate Python Virtual Environment
-if [ -d "$DIR/venv" ]; then
-    source "$DIR/venv/bin/activate"
-    PYTHON_CMD="$DIR/venv/bin/python"
-elif [ -d "$DIR/.venv" ]; then
-    source "$DIR/.venv/bin/activate"
-    PYTHON_CMD="$DIR/.venv/bin/python"
-else
-    PYTHON_CMD="python3"
+# 1. Self-Installing Python Environment
+if [ ! -f "$DIR/venv/bin/python" ]; then
+    echo "[1/2] First-time setup: Creating Python virtual environment..."
+    python3 -m venv venv
+    
+    echo "[2/2] Installing Python requirements..."
+    "$DIR/venv/bin/pip" install fastapi uvicorn python-docx pydantic plotly python-multipart
 fi
 
-# 2. Check for Ollama (Local AI)
-if command -v ollama >/dev/null 2>&1; then
-    if ! pgrep -x "ollama" > /dev/null; then
-        echo "🧠 Starting local Ollama engine..."
-        ollama serve >/dev/null 2>&1 &
-        sleep 2
-    else
-        echo "🧠 Local Ollama engine is already running."
-    fi
-else
-    echo "⚠️ Ollama not detected in PATH. Studio running in offline math mode."
-fi
+export ENABLE_AI=false
 
-# 3. Start Thedral FastAPI Backend
-echo "⚡ Starting Thedral Backend Core (Port 8000)..."
-$PYTHON_CMD app.py > /dev/null 2>&1 &
+# 2. Start Thedral Backend Core
+echo "⚡ Starting Thedral Core on Port 8000..."
+"$DIR/venv/bin/python" app.py > /dev/null 2>&1 &
 BACKEND_PID=$!
 
-# 4. Start Vite Frontend Server
-echo "🎨 Starting Studio Interface (Port 5173)..."
-npm run dev -- --host > /dev/null 2>&1 &
-FRONTEND_PID=$!
-
-# Trap Ctrl+C or terminal close to shut down both processes cleanly
+# Trap Ctrl+C or terminal close to shut down process cleanly
 cleanup() {
     echo ""
     echo "🛑 Shutting down Thedral Studio..."
     kill $BACKEND_PID 2>/dev/null
-    kill $FRONTEND_PID 2>/dev/null
     exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# Wait for servers to spin up
-sleep 2
-
-# 5. Open Default Web Browser
+# 3. Wait for server to spin up and open Browser
+sleep 3
 echo "🌐 Opening Thedral in browser..."
-open "http://localhost:5173"
+open "http://localhost:8000"
 
 echo ""
 echo "✨ THEDRAL IS LIVE!"
-echo "   Desktop:  http://localhost:5173"
-echo "   Close this window to stop the studio."
+echo "   Desktop:  http://localhost:8000"
+echo "   Close this terminal window to stop the studio."
 echo "================================================================="
 
 # Keep launcher alive
