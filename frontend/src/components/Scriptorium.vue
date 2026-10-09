@@ -429,7 +429,8 @@ const initEditor = () => {
         class: 'ProseMirror outline-none prose-canvas focus:outline-none min-h-[300px]' 
       } 
     },
-    onUpdate: () => {
+    onUpdate: ({ transaction }) => {
+      // 1. Get raw text and update store
       const text = htmlToText(editor.getHTML())
       if (!store.activeNode) return
       store.activeNode.content = text
@@ -437,28 +438,37 @@ const initEditor = () => {
       const currentWords = text.split(/\s+/).filter(Boolean).length
       store.activeNode.word_count = currentWords
 
-      // Only check for churning if the scene is larger than 50 words (ignore new scenes)
-      if (currentWords > 50) {
-        totalEditsSinceSnapshot += calculateTextDiff(lastSnapshotContent, text)
+      // 2. Measure actual document changes using TipTap's transaction engine
+      let charsChangedThisKeystroke = 0
+      transaction.steps.forEach(step => {
+        // Calculate the absolute size of the text inserted or deleted
+        const stepSize = Math.abs((step.to || 0) - (step.from || 0)) + Math.abs((step.slice?.size || 0))
+        charsChangedThisKeystroke += stepSize
+      })
 
-        // Once 250+ characters have been edited/rewritten
+      // 3. Accumulate changes
+      totalEditsSinceSnapshot += charsChangedThisKeystroke
+
+      // 4. Evaluate Churn (Only if scene is > 50 words)
+      if (currentWords > 50) {
+        // If 250+ characters have been edited/deleted/replaced
         if (totalEditsSinceSnapshot > 250) {
           const wordGrowth = currentWords - lastSnapshotWordCount
           
-          // Churning: You made 250 edits but the story grew by fewer than 5 words!
+          // Churning: You made 250+ character edits but the story grew by fewer than 5 words!
           if (wordGrowth < 5) {
             microStallAlert.value = true
           }
 
           // Reset the snapshot baseline so it doesn't keep triggering
-          lastSnapshotContent = text
           lastSnapshotWordCount = currentWords
           totalEditsSinceSnapshot = 0
         }
+      } else {
+        // Keep baseline synced while under 50 words so it doesn't instantly trigger later
+        lastSnapshotWordCount = currentWords
+        totalEditsSinceSnapshot = 0
       }
-
-      // Keep the rolling snapshot updated for the next delta check
-      lastSnapshotContent = text
 
       queueAutoSave()
     },
