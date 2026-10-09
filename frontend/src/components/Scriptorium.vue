@@ -71,7 +71,7 @@
       </div>
     </div>
 
-    <!-- 4-Channel X-Ray Lens Switcher & Dynamic Legend -->
+    <!-- Craft X-Ray Visual Key Legend Tray -->
     <div 
       v-if="store.isXRayActive && !store.isVoidMode" 
       class="bg-zinc-950/95 border-b border-zinc-800/80 px-6 py-2 flex flex-col sm:flex-row sm:items-center justify-between text-[10px] font-mono gap-2 shrink-0 animate-fade-in"
@@ -162,14 +162,14 @@
     >
       <div class="flex items-center gap-2">
         <RotateCcw class="w-4 h-4 text-amber-400 animate-spin" />
-        <span><strong>Micro-Stall Detected:</strong> You've rewritten this section repeatedly without forward velocity.</span>
+        <span><strong>Micro-Stall Detected:</strong> You've rewritten this section heavily, but the story hasn't advanced.</span>
       </div>
       <div class="flex items-center space-x-2">
         <button 
           @click="insertTKProtocol" 
           class="px-2.5 py-0.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded text-[11px] transition shadow"
         >
-          Insert [TK] & Advance
+          Drop [TK] & Advance
         </button>
         <button @click="microStallAlert = false" class="text-zinc-500 hover:text-white">
           <X class="w-3.5 h-3.5" />
@@ -203,7 +203,7 @@
         :class="store.isCandlelight ? 'text-amber-100/90' : 'text-zinc-200'"
       />
       
-      <!-- Multi-Lens Analytical Overlay -->
+      <!-- Multi-Lens Analytical Overlay: Structured Exact Paragraph Blocks -->
       <div 
         v-show="store.isXRayActive" 
         class="prose-canvas flex-1 font-serif text-lg md:text-xl leading-relaxed space-y-6"
@@ -282,7 +282,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
 import { Eye, Moon, Wand2, RotateCcw, X, Feather, Search, DoorOpen, Sparkles, UserPlus, Key, Link2Off } from 'lucide-vue-next'
 import { Editor, EditorContent } from '@tiptap/vue-3'
@@ -297,6 +297,11 @@ const activeXRayLens = ref('energetics') // 'energetics' | 'neuro' | 'clutter' |
 const scrollContainer = ref(null)
 let editor = null
 let scrollThrottle = null
+
+// Churn Tracking State
+let lastSnapshotContent = ""
+let lastSnapshotWordCount = 0
+let totalEditsSinceSnapshot = 0
 
 const textToHtml = (text) => {
   if (!text) return ''
@@ -327,7 +332,7 @@ const dismissSeveredThreads = () => {
   }
 }
 
-// Live Reading Bead Emitter: computes paragraph index while scrolling
+// Live Reading Bead Emitter
 const handleEditorScroll = () => {
   if (!scrollContainer.value || scrollThrottle) return
   scrollThrottle = setTimeout(() => {
@@ -353,7 +358,7 @@ const handleEditorScroll = () => {
   }, 100)
 }
 
-// Precision Sniper-Scroll: Traverses ProseMirror nodes to find exact pos
+// Precision Sniper-Scroll
 const handleSniperScroll = (e) => {
   const target = e.detail?.text
   if (!target || !editor) return
@@ -377,7 +382,7 @@ const handleSniperScroll = (e) => {
   }
 }
 
-// Lens Click Jump: Scrolls to the clicked paragraph and pulses in Cyan
+// Lens Click Jump
 const handleLensBeatJump = (e) => {
   const beatIdx = e.detail?.beat || 1
   const snippet = e.detail?.snippet || ''
@@ -399,11 +404,21 @@ const handleLensBeatJump = (e) => {
   }
 }
 
+// Simple Levenshtein distance to calculate text divergence
+const calculateTextDiff = (oldText, newText) => {
+  return Math.abs(oldText.length - newText.length)
+}
+
 const initEditor = () => {
   if (editor) editor.destroy()
   
+  const initialContent = textToHtml(store.activeNode?.content) || ''
+  lastSnapshotContent = htmlToText(initialContent)
+  lastSnapshotWordCount = lastSnapshotContent.split(/\s+/).filter(Boolean).length
+  totalEditsSinceSnapshot = 0
+
   editor = new Editor({
-    content: textToHtml(store.activeNode?.content) || '',
+    content: initialContent,
     extensions: [
       StarterKit, 
       Typography, 
@@ -421,41 +436,43 @@ const initEditor = () => {
       
       const currentWords = text.split(/\s+/).filter(Boolean).length
       store.activeNode.word_count = currentWords
-      
-      const now = Date.now()
-      
-      // If you pause typing for more than 4 seconds, reset the baseline
-      if (now - store.editorState.lastKeystrokeTime > 4000) {
-        store.editorState.keystrokeRepeatCount = 0
-        store.editorState.previousWordCount = currentWords
-      } else {
-        store.editorState.keystrokeRepeatCount++
-      }
 
-      // Evaluate for churning every 75 keystrokes
-      if (store.editorState.keystrokeRepeatCount > 75) {
-        const netGrowth = currentWords - store.editorState.previousWordCount
-        
-        // If you typed 75 characters but gained fewer than 4 words, you are churning!
-        if (netGrowth < 4) {
-          microStallAlert.value = true
+      // Only check for churning if the scene is larger than 50 words (ignore new scenes)
+      if (currentWords > 50) {
+        totalEditsSinceSnapshot += calculateTextDiff(lastSnapshotContent, text)
+
+        // Once 250+ characters have been edited/rewritten
+        if (totalEditsSinceSnapshot > 250) {
+          const wordGrowth = currentWords - lastSnapshotWordCount
+          
+          // Churning: You made 250 edits but the story grew by fewer than 5 words!
+          if (wordGrowth < 5) {
+            microStallAlert.value = true
+          }
+
+          // Reset the snapshot baseline so it doesn't keep triggering
+          lastSnapshotContent = text
+          lastSnapshotWordCount = currentWords
+          totalEditsSinceSnapshot = 0
         }
-        
-        // Reset tracker so it doesn't spam you
-        store.editorState.keystrokeRepeatCount = 0
-        store.editorState.previousWordCount = currentWords
       }
 
-      store.editorState.lastKeystrokeTime = now
+      // Keep the rolling snapshot updated for the next delta check
+      lastSnapshotContent = text
+
       queueAutoSave()
     },
+    onSelectionUpdate: () => {
+      syncSelectionFromEditor()
+    }
   })
 }
 
-// Scene switch watcher: purges old X-Ray text immediately, then re-analyzes
+// Scene switch watcher
 watch(() => store.activeNode?.id, async (newId) => {
   if (newId) {
     store.xraySentences = []
+    microStallAlert.value = false // Reset alert on scene change
 
     if (!editor) {
       initEditor()
@@ -463,6 +480,11 @@ watch(() => store.activeNode?.id, async (newId) => {
       const currentText = htmlToText(editor.getHTML())
       if (currentText !== store.activeNode.content) {
         editor.commands.setContent(textToHtml(store.activeNode.content) || '')
+        
+        // Reset churn trackers for new scene
+        lastSnapshotContent = store.activeNode.content || ''
+        lastSnapshotWordCount = store.activeNode.word_count || 0
+        totalEditsSinceSnapshot = 0
       }
     }
     
@@ -499,7 +521,7 @@ const queueAutoSave = () => {
   }, 1200)
 }
 
-/// Native Paragraph-by-Paragraph Craft X-Ray Fetch with Full Fallback
+// Native Paragraph-by-Paragraph Craft X-Ray Fetch with Full Fallback
 const fetchXRayAnalysis = async () => {
   if (!store.activeNode?.content) {
     store.xraySentences = []
@@ -540,7 +562,7 @@ const toggleXRay = async () => {
   }
 }
 
-// Resilient Lens Highlighting Classes (with fallback to s.type)
+// Resilient Lens Highlighting Classes
 const getSentenceLensClass = (s) => {
   if (!s) return 'text-zinc-300'
 
@@ -687,7 +709,7 @@ onBeforeUnmount(() => {
   height: 0;
 }
 
-/* Craft X-Ray Paragraph Flow */
+/* Craft X-Ray Paragraph Flow (Matches TipTap 1:1) */
 .xray-paragraph {
   margin-bottom: 1.5em;
   line-height: 1.85;
