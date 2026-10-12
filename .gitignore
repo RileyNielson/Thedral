@@ -10,3 +10,6 @@
 # Local JavaScript dependencies
 /node_modules/
 /frontend/node_modules/
+
+# Local manuscript database
+/studio_vault.db*
