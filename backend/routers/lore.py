@@ -4,6 +4,7 @@ import time
 from fastapi import APIRouter
 from pydantic import BaseModel
 from backend.database import get_db
+from backend.text_utils import html_to_text
 from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
 
 router = APIRouter(tags=["Lore & Lexicon"])
@@ -78,7 +79,7 @@ def ask_the_universe(payload: AskRequest):
     if not results:
         return {"answer": "I cannot find any references to that in the current manuscript."}
 
-    context_blocks = chr(10).join([f"--- Excerpt from {r['title']} ---\n{r['content'][:1000]}" for r in results])
+    context_blocks = chr(10).join([f"--- Excerpt from {r['title']} ---\n{html_to_text(r['content'])[:1000]}" for r in results])
     
     if not ENABLE_AI:
         return {"answer": f"[Pure Math Mode Active - Raw Results]:\n\n{context_blocks}"}
@@ -101,7 +102,8 @@ def ask_the_universe(payload: AskRequest):
 
 @router.post("/api/lore/extract")
 def auto_extract_lore(payload: ExtractLoreRequest):
-    if not payload.scene_text or len(payload.scene_text) < 100:
+    scene_text = html_to_text(payload.scene_text)
+    if len(scene_text) < 100:
         return {"proposed_lore": []}
     
     if not ENABLE_AI:
@@ -120,7 +122,7 @@ def auto_extract_lore(payload: ExtractLoreRequest):
             model=STUDIO_MODEL, 
             messages=[
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": payload.scene_text[:3500]}
+                {"role": "user", "content": scene_text[:3500]}
             ], 
             format="json", 
             options=LLM_OPTIONS
@@ -134,7 +136,8 @@ def auto_extract_lore(payload: ExtractLoreRequest):
 
 @router.post("/api/lore/audit")
 def audit_scene_lore(payload: AuditLoreRequest):
-    if not payload.scene_text or len(payload.scene_text.strip()) < 50:
+    scene_text = html_to_text(payload.scene_text)
+    if len(scene_text) < 50:
         return {"discrepancies": []}
 
     if not ENABLE_AI:
@@ -166,7 +169,7 @@ def audit_scene_lore(payload: AuditLoreRequest):
             model=STUDIO_MODEL, 
             messages=[
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": f"Scene Text:\n{payload.scene_text[:4000]}"}
+                {"role": "user", "content": f"Scene Text:\n{scene_text[:4000]}"}
             ],
             format="json",
             options=LLM_OPTIONS

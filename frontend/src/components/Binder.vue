@@ -5,7 +5,7 @@
         <BookMarked class="w-3.5 h-3.5 text-amber-500" />
         <span>Binder</span>
         <button @click="store.toggleModal('vault', true)" class="px-1.5 py-0.5 bg-zinc-800/80 hover:bg-zinc-700 text-amber-400/90 rounded text-[10px] font-mono flex items-center gap-1 transition border border-zinc-700/50">
-          <Library class="w-3 h-3" /> Vault
+          <Library class="w-3 h-3" /> Bookcase
         </button>
       </div>
       <div class="flex items-center space-x-1">
@@ -14,14 +14,20 @@
         <button @click="addScene" title="Add Scene" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"><FilePlus class="w-4 h-4" /></button>
       </div>
     </div>
+    <div v-if="store.tree.length" class="px-3 py-2 border-b border-zinc-800/70">
+      <label class="block text-[9px] uppercase tracking-wider text-zinc-500 mb-1" for="active-manuscript">Working manuscript</label>
+      <select id="active-manuscript" :value="store.activeBookId" @change="store.setActiveBook($event.target.value)" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-[11px] text-zinc-300 focus:outline-none focus:border-amber-500/50">
+        <option v-for="book in store.tree" :key="book.id" :value="book.id">{{ book.title }}</option>
+      </select>
+    </div>
     <div class="flex-1 overflow-y-auto p-2 space-y-1 text-sm custom-scrollbar">
       <div v-if="!store.tree || store.tree.length === 0" class="py-12 px-4 text-center text-zinc-600 space-y-3">
         <BookOpen class="w-8 h-8 mx-auto text-zinc-800" />
         <p class="text-xs">No manuscripts loaded.</p>
-        <button @click="createManuscript" class="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded transition">Initialize Manuscript</button>
+        <button @click="store.createManuscript()" class="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded transition">Create Manuscript</button>
       </div>
       <template v-for="book in store.tree" :key="book.id">
-        <div class="font-bold text-zinc-200 text-xs px-2 py-1.5 flex items-center justify-between group hover:bg-zinc-800/40 rounded cursor-pointer transition-colors" @click="toggleCollapse(book.id)">
+        <div class="font-bold text-zinc-200 text-xs px-2 py-1.5 flex items-center justify-between group hover:bg-zinc-800/40 rounded cursor-pointer transition-colors" @click="store.setActiveBook(book.id); toggleCollapse(book.id)">
           <div class="flex items-center gap-1.5 truncate flex-1 mr-2" @dblclick.stop="startRename(book, $event)">
             <ChevronRight v-if="isCollapsed(book.id)" class="w-3.5 h-3.5 text-zinc-500 shrink-0" />
             <ChevronDown v-else class="w-3.5 h-3.5 text-zinc-500 shrink-0" />
@@ -31,7 +37,7 @@
           </div>
           <div class="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition">
             <button @click.stop="startRename(book, $event)" title="Rename" class="p-0.5 hover:text-amber-400 text-zinc-600 transition"><Pencil class="w-3 h-3" /></button>
-            <button @click.stop="closeBook(book)" title="Archive to Vault" class="p-0.5 hover:text-amber-400 text-zinc-600 transition"><Archive class="w-3.5 h-3.5" /></button>
+            <button @click.stop="checkInBook(book)" title="Check in to Bookcase" class="p-0.5 hover:text-amber-400 text-zinc-600 transition"><Archive class="w-3.5 h-3.5" /></button>
             <button @click.stop="deleteNode(book)" title="Delete" class="p-0.5 hover:text-rose-400 text-zinc-600 transition"><Trash2 class="w-3.5 h-3.5" /></button>
           </div>
         </div>
@@ -88,42 +94,43 @@ const fetchTree = async () => { await store.fetchTree() }
 
 const selectNode = async (id) => {
   if (!id) return
-  await store.loadScene(id)
-  store.viewMode = 'editor'
-  store.modals.mobileBinder = false
-}
-
-const createManuscript = async () => {
-  try {
-    const res = await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ node_type: 'BOOK', title: 'Manuscript' }) })
-    const book = await res.json()
-    const chRes = await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: book.id, node_type: 'CHAPTER', title: 'Chapter 1' }) })
-    const ch = await chRes.json()
-    await addSceneTo(ch.id)
-  } catch (e) { showToast("Failed to initialize manuscript.", "error") }
+  if (await store.loadScene(id)) {
+    store.viewMode = 'editor'
+    store.modals.mobileBinder = false
+  }
 }
 
 const addChapter = async () => {
-  const bookId = store.tree[0]?.id
-  if (!bookId) return
+  const bookId = store.activeBookId
+  if (!bookId) {
+    showToast('Create or select a manuscript first.', 'info')
+    return
+  }
   try {
-    await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: bookId, node_type: 'CHAPTER', title: 'New Chapter' }) })
+    const response = await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: bookId, node_type: 'CHAPTER', title: 'New Chapter' }) })
+    if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to create chapter`)
+    collapsed.value[bookId] = false
     await fetchTree()
-  } catch (e) { showToast("Failed to create chapter", "error") }
+  } catch (e) { showToast(e.message, "error") }
 }
 
 const addScene = async () => {
-  const chId = store.tree[0]?.children?.[0]?.id
-  if (chId) { addSceneTo(chId) } else { showToast("Create a chapter first.", "info") }
+  if (!store.getBook()) {
+    showToast('Create or select a manuscript first.', 'info')
+    return
+  }
+  const chapterId = store.getBook()?.children?.find(node => node.node_type === 'CHAPTER')?.id
+  if (chapterId) { addSceneTo(chapterId) } else { showToast("Create a chapter first.", "info") }
 }
 
 const addSceneTo = async (chId) => {
   try {
     const res = await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: chId, node_type: 'SCENE', title: 'New Scene' }) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to create scene`)
     const data = await res.json()
     await fetchTree()
     await selectNode(data.id)
-  } catch (e) { showToast("Failed to create scene", "error") }
+  } catch (e) { showToast(e.message, "error") }
 }
 
 const startRename = (node, event) => {
@@ -146,13 +153,13 @@ const saveRename = async (node) => {
   } catch(e) { showToast("Rename failed.", "error") }
 }
 
-const closeBook = async (book) => {
-  if (!window.confirm(`Close "${book.title}"?\n\nThis removes it from the active Binder, keeping all data safe in your Vault.`)) return
+const checkInBook = async (book) => {
+if (!window.confirm(`Check in "${book.title}" to the Bookcase?\n\nIt will be removed from the active Binder and kept safe until you check it out again.`)) return
   try {
     await fetch(`${API_BASE}/api/vault/${book.id}/toggle`, { method: 'POST' })
     if (store.activeNode?.book_id === book.id || store.activeNode?.id === book.id || store.activeNode?.parent_id === book.id) { store.activeNode = null }
     await fetchTree()
-  } catch (e) { showToast("Could not archive book.", "error") }
+} catch (e) { showToast("Could not check in the book.", "error") }
 }
 
 const deleteNode = async (node) => {
@@ -173,7 +180,7 @@ const deleteNode = async (node) => {
 const autoTitleScenes = async () => {
   store.saveStatus = 'Local AI generating titles...'
   try {
-    const bId = store.tree[0]?.id || null
+    const bId = store.activeBookId || null
     const res = await fetch(`${API_BASE}/api/binder/auto-title-scenes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ book_id: bId }) })
     if (!res.ok) throw new Error('Auto-titling failed')
     await fetchTree()

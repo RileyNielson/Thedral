@@ -1,10 +1,8 @@
 import re
 import math
 from backend.config import FILTER_VERBS, CRUTCH_WORDS, TENSION_KEYWORDS
-from backend.spectrometer import (
-    analyze_neuro_spectrum, OXYTOCIN_KEYWORDS, 
-    DOPAMINE_KEYWORDS, SEROTONIN_KEYWORDS
-)
+from backend.text_utils import html_to_text
+from backend.spectrometer import SIGNAL_LEXICONS, analyze_text_signals
 
 COMPOUND_IDIOM_PATTERNS = [
     r"\bblood[- ]orange\b", r"\bbad blood\b", r"\bblood is thicker\b",
@@ -24,14 +22,15 @@ def scrub_idioms(text: str) -> str:
     return scrubbed
 
 def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> dict:
+    text = html_to_text(text)
     if not text or not text.strip():
         return {
             "words": 0, "avg_sentence": 0.0, "cadence_stdev": 0.0,
             "dialogue_ratio": 0.0, "tension_elevation": 0.35,
             "pacing_velocity": 0.0, "pacing_momentum": 0.0,
-            "pacing_slope": 0.0, "slope_diagnosis": "STABLE_FLOW",
+            "pacing_slope": 0.0, "slope_diagnosis": "NO_PREVIOUS_SCENE",
             "filters": {}, "crutches": {},
-            "spectrometer": analyze_neuro_spectrum("")
+            "text_signals": analyze_text_signals("")
         }
 
     words = len(text.split())
@@ -72,7 +71,7 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
     tension_elevation = round(max(0.05, min(0.95, elev)), 2)
 
     pacing_slope = 0.0
-    slope_diagnosis = "STABLE_FLOW"
+    slope_diagnosis = "NO_PREVIOUS_SCENE"
     pacing_momentum = stdev
 
     if prev_tension is not None:
@@ -81,13 +80,13 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
         pacing_momentum = round(stdev * (1.0 + delta_z), 1)
 
         if abs(delta_z) < 0.03 and words > 700:
-            slope_diagnosis = "SUSTAINED_BASELINE"
+            slope_diagnosis = "NEARLY_UNCHANGED_ESTIMATE"
         elif delta_z > 0.45:
-            slope_diagnosis = "MELODRAMATIC_WHIPLASH"
+            slope_diagnosis = "LARGE_ESTIMATE_INCREASE"
         elif delta_z > 0.12:
-            slope_diagnosis = "RISING_MOMENTUM"
+            slope_diagnosis = "ESTIMATE_INCREASE"
         elif delta_z < -0.15:
-            slope_diagnosis = "CATHARTIC_VALLEY"
+            slope_diagnosis = "ESTIMATE_DECREASE"
 
     return {
         "words": words,
@@ -101,7 +100,7 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
         "slope_diagnosis": slope_diagnosis,
         "filters": dict(sorted(filters_found.items(), key=lambda i: i[1], reverse=True)[:5]),
         "crutches": dict(sorted(crutches_found.items(), key=lambda i: i[1], reverse=True)[:5]),
-        "spectrometer": analyze_neuro_spectrum(text)
+        "text_signals": analyze_text_signals(text)
     }
 
 # =============================================================================
@@ -128,10 +127,21 @@ def highlight_clutter_words(sentence_text: str) -> tuple[str, list, list]:
 
     return html, filters_hit, crutches_hit
 
-def classify_multi_lens_sentence(s: str) -> dict:
+def classify_multi_lens_sentence(s: str, thresholds: dict | None = None) -> dict:
+    options = {
+        "staccato_threshold": 9,
+        "expansive_threshold": 22,
+        "clutter_sensitivity": 2,
+    }
+    if thresholds:
+        options.update({k: v for k, v in thresholds.items() if v is not None})
+
     words = len(s.split())
     s_lower = s.lower()
     scrubbed_s = scrub_idioms(s).lower()
+    staccato_limit = max(4, int(options["staccato_threshold"]))
+    expansive_limit = max(staccato_limit + 5, int(options["expansive_threshold"]))
+    clutter_cutoff = max(1, int(options["clutter_sensitivity"]))
 
     # 1. LENS: ENERGETICS (Pacing Physics)
     has_tension_kw = any(k in scrubbed_s for k in TENSION_KEYWORDS)
@@ -139,13 +149,12 @@ def classify_multi_lens_sentence(s: str) -> dict:
         "locked", "struck", "skid", "dragged", "snapped", 
         "blood", "frost", "cold", "grip", "teeth", "muscle", "bone"
     ])
-    is_staccato = 0 < words <= 8
-    is_long = words >= 22
+    is_staccato = 0 < words <= staccato_limit
+    is_long = words >= expansive_limit
     has_resolver_kw = any(k in s_lower for k in [
         "waited", "quiet", "exhaled", "breathed", "paused", 
         "realized", "sat", "rested", "fade", "stillness"
     ])
-    has_mystery_kw = any(k in s_lower for k in DOPAMINE_KEYWORDS)
     is_pivot = bool(re.match(r'^(?:but|yet|the runner rug|suddenly|and then|instead|except|then)\b', s_lower)) or "gave out" in s_lower or "gave way" in s_lower
 
     filters_in_s = [v for v in FILTER_VERBS if re.search(r'\b' + v + r'\b', s_lower)]
@@ -153,57 +162,50 @@ def classify_multi_lens_sentence(s: str) -> dict:
 
     if is_pivot:
         energetics_type = "PIVOT"
-        energetics_reason = "🟡 Turning Hinge: Shifts dramatic direction or complicates the scene"
+        energetics_reason = "A configured transition phrase appears; review whether it changes direction."
     elif (has_tension_kw or has_somatic) and (is_staccato or has_tension_kw):
         energetics_type = "ESCALATOR"
-        energetics_reason = f"🔴 Staccato Impact ({words}w): Tightens physical pressure and heart rate"
+        energetics_reason = f"Selected action cues or a short sentence pattern matched ({words} words)."
     elif (has_resolver_kw or is_long) and not has_tension_kw:
         energetics_type = "RESOLVER"
-        intrigue_note = " • Carries narrative intrigue ('secret')" if has_mystery_kw else ""
-        energetics_reason = f"🟢 Lyrical Flow ({words}w): Dilation / Breathing room for reflection{intrigue_note}"
-    elif len(filters_in_s) >= 2 or len(crutches_in_s) >= 2:
+        energetics_reason = f"A configured pause or long-sentence pattern matched ({words} words)."
+    elif len(filters_in_s) >= clutter_cutoff or len(crutches_in_s) >= clutter_cutoff:
         energetics_type = "SLACK"
-        energetics_reason = f"⚪ Clutter / Slack: Multiple filter verbs ({', '.join(filters_in_s)}) weaken psychic distance"
+        energetics_reason = f"Multiple configured filter or crutch terms matched ({', '.join(filters_in_s + crutches_in_s)}); review in context."
     else:
         energetics_type = "NEUTRAL"
-        energetics_reason = f"Grounded Baseline ({words}w): Clean narrative backbone (60-70% of healthy prose)"
+        energetics_reason = f"No configured transition, action, or pause pattern matched ({words} words)."
 
-    # 2. LENS: NEURO-SPECTRUM (Emotional Fuel)
-    has_oxytocin = any(k in s_lower for k in OXYTOCIN_KEYWORDS) or ('"' in s or '“' in s)
-    has_dopamine = any(k in s_lower for k in DOPAMINE_KEYWORDS) or '?' in s or '...' in s or '…' in s
-    has_serotonin = any(k in s_lower for k in SEROTONIN_KEYWORDS) or is_long
-
-    if has_tension_kw or (is_staccato and not has_oxytocin):
-        neuro_type = "ADRENALINE"
-        neuro_reason = "🔴 Adrenaline: Kinetic survival, staccato urgency, physical consequence"
-    elif has_oxytocin and not has_tension_kw:
-        neuro_type = "OXYTOCIN"
-        neuro_reason = "🟣 Oxytocin: Interpersonal intimacy, dialogue friction, somatic vulnerability"
-    elif has_dopamine:
-        neuro_type = "DOPAMINE"
-        neuro_reason = "🔵 Dopamine: Epistemic question, secret planted, puzzle/clue revelation"
-    elif has_serotonin:
-        neuro_type = "SEROTONIN"
-        neuro_reason = "🟢 Serotonin: Atmospheric sensory grounding, aesthetic immersion, mythic weight"
-    else:
-        neuro_type = "NEUTRAL"
-        neuro_reason = "Balanced Flow: Narrative transitional beat"
+    signal_counts = {
+        name: sum(
+            len(re.findall(r"\b" + re.escape(term) + r"\b", s_lower))
+            for term in terms
+        )
+        for name, terms in SIGNAL_LEXICONS.items()
+    }
+    signal_type = max(signal_counts, key=signal_counts.get) if any(signal_counts.values()) else "none"
+    signal_reason = (
+        f"Most selected cue matches: {signal_type.replace('_', ' ')} ({signal_counts[signal_type]}). "
+        "Cue counts do not measure reader response."
+        if signal_type != "none"
+        else "No selected word cues matched. This does not measure reader response."
+    )
 
     # 3. LENS: CADENCE RHYTHM (Sentence Length)
     if is_staccato:
         cadence_type = "STACCATO"
-        cadence_reason = f"Staccato Burst ({words}w): High velocity / rapid impact"
+        cadence_reason = f"Short sentence pattern ({words} words)."
     elif is_long:
         cadence_type = "EXPANSIVE"
-        cadence_reason = f"Expansive Flow ({words}w): Atmospheric breath and contemplative room"
+        cadence_reason = f"Long sentence pattern ({words} words)."
     else:
         cadence_type = "BASELINE"
-        cadence_reason = f"Grounded Baseline ({words}w): Steady narrative tempo"
+        cadence_reason = f"Sentence length falls between the configured thresholds ({words} words)."
 
     # 4. LENS: CLUTTER & FILTERS (Cleanse)
     clutter_html, f_hits, c_hits = highlight_clutter_words(s)
     has_clutter = len(f_hits) > 0 or len(c_hits) > 0
-    clutter_reason = f"Flagged: {', '.join(f_hits + c_hits)}" if has_clutter else "Clean sentence: Zero filter verbs or crutch words"
+    clutter_reason = f"Matched configured terms: {', '.join(f_hits + c_hits)}" if has_clutter else "No configured filter verbs or crutch words matched."
 
     return {
         "text": s,
@@ -212,8 +214,9 @@ def classify_multi_lens_sentence(s: str) -> dict:
         "reason": energetics_reason,      # Backwards-compatible
         "energetics_type": energetics_type,
         "energetics_reason": energetics_reason,
-        "neuro_type": neuro_type,
-        "neuro_reason": neuro_reason,
+        "signal_type": signal_type,
+        "signal_counts": signal_counts,
+        "signal_reason": signal_reason,
         "cadence_type": cadence_type,
         "cadence_reason": cadence_reason,
         "has_clutter": has_clutter,
@@ -221,7 +224,7 @@ def classify_multi_lens_sentence(s: str) -> dict:
         "clutter_reason": clutter_reason
     }
 
-def classify_sentence_energetics(text: str) -> list[dict]:
+def classify_sentence_energetics(text: str, thresholds: dict | None = None) -> list[dict]:
     """Single-pass flat list parser (backwards compatible for test suite)."""
     if not text or not text.strip():
         return []
@@ -233,9 +236,9 @@ def classify_sentence_energetics(text: str) -> list[dict]:
             sentences.append(s.strip())
     if len(raw_chunks) % 2 == 1 and raw_chunks[-1].strip():
         sentences.append(raw_chunks[-1].strip())
-    return [classify_multi_lens_sentence(s) for s in sentences]
+    return [classify_multi_lens_sentence(s, thresholds) for s in sentences]
 
-def classify_paragraph_energetics(text: str) -> list[list[dict]]:
+def classify_paragraph_energetics(text: str, thresholds: dict | None = None) -> list[list[dict]]:
     """Native paragraph-by-paragraph multi-lens parser."""
     if not text or not text.strip():
         return []
@@ -250,7 +253,7 @@ def classify_paragraph_energetics(text: str) -> list[list[dict]]:
                 sentences.append(s.strip())
         if len(raw_chunks) % 2 == 1 and raw_chunks[-1].strip():
             sentences.append(raw_chunks[-1].strip())
-        classified = [classify_multi_lens_sentence(s) for s in sentences]
+        classified = [classify_multi_lens_sentence(s, thresholds) for s in sentences]
         if classified:
             structured_blocks.append(classified)
     return structured_blocks

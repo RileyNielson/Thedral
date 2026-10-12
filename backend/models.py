@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 import json
 import time
@@ -159,6 +160,7 @@ def init_db(custom_path: str | Path | None = None) -> None:
             scene_id TEXT NOT NULL,
             timeline_tick REAL DEFAULT 1.0,
             detected_entity_name TEXT NOT NULL,
+            entity_type TEXT DEFAULT 'CHARACTER',
             matched_entity_id TEXT,
             proposed_delta TEXT NOT NULL,
             confidence REAL DEFAULT 0.8,
@@ -168,6 +170,10 @@ def init_db(custom_path: str | Path | None = None) -> None:
             collision_warning TEXT,
             status TEXT DEFAULT 'PENDING'
         )""")
+        c.execute("PRAGMA table_info(staged_proposals)")
+        staged_cols = [r[1] for r in c.fetchall()]
+        if "entity_type" not in staged_cols:
+            c.execute("ALTER TABLE staged_proposals ADD COLUMN entity_type TEXT DEFAULT 'CHARACTER'")
 
         # =====================================================================
         # 7. READER EPISTEMIC HORIZON
@@ -181,10 +187,60 @@ def init_db(custom_path: str | Path | None = None) -> None:
             disclosure_type TEXT NOT NULL, -- 'DIRECT', 'INFERRED', 'DELAYED'
             narrative_claim TEXT NOT NULL,
             clue_evidence TEXT DEFAULT '',
+            source_excerpt TEXT DEFAULT '',
+            confidence REAL,
+            source TEXT DEFAULT 'AI',
             target_reveal_ch INTEGER,
             status TEXT DEFAULT 'ACTIVE',
             created_at TEXT
         )""")
+        c.execute("PRAGMA table_info(reader_disclosures)")
+        disclosure_cols = [r[1] for r in c.fetchall()]
+        for col, ctype in [
+            ("source_excerpt", "TEXT DEFAULT ''"),
+            ("confidence", "REAL"),
+            ("source", "TEXT DEFAULT 'AI'"),
+        ]:
+            if col not in disclosure_cols:
+                c.execute(f"ALTER TABLE reader_disclosures ADD COLUMN {col} {ctype}")
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS reader_simulations (
+            id TEXT PRIMARY KEY,
+            scene_id TEXT NOT NULL,
+            revision_ref TEXT NOT NULL,
+            source_content_hash TEXT NOT NULL,
+            analyzed_content_hash TEXT NOT NULL,
+            intended_takeaway_hash TEXT NOT NULL,
+            prompt_version TEXT NOT NULL,
+            source_text TEXT NOT NULL,
+            analyzed_text TEXT NOT NULL,
+            intended_takeaway TEXT NOT NULL DEFAULT '',
+            system_prompt TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            reused_from_id TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(scene_id) REFERENCES binder_nodes(id) ON DELETE CASCADE,
+            UNIQUE(scene_id, source_content_hash, intended_takeaway_hash, prompt_version)
+        )""")
+        c.execute("PRAGMA table_info(reader_simulations)")
+        simulation_cols = {row[1] for row in c.fetchall()}
+        for column, definition in [
+            ("analyzed_content_hash", "TEXT NOT NULL DEFAULT ''"),
+            ("reused_from_id", "TEXT"),
+        ]:
+            if column not in simulation_cols:
+                c.execute(f"ALTER TABLE reader_simulations ADD COLUMN {column} {definition}")
+        for row in c.execute("""
+            SELECT id, analyzed_text FROM reader_simulations
+            WHERE analyzed_content_hash = ''
+        """).fetchall():
+            analyzed_hash = hashlib.sha256(row["analyzed_text"].encode("utf-8")).hexdigest()
+            c.execute(
+                "UPDATE reader_simulations SET analyzed_content_hash = ? WHERE id = ?",
+                (analyzed_hash, row["id"]),
+            )
 
         # =====================================================================
         # 8. CHEKHOV FORESHADOWING GRAVITY WELLS
@@ -212,6 +268,7 @@ def init_db(custom_path: str | Path | None = None) -> None:
             category TEXT DEFAULT 'LORE', -- 'CHARACTER_NAME', 'LOCATION', 'SPELLING', 'DIALECT'
             rule_definition TEXT NOT NULL,
             pronunciation TEXT DEFAULT '',
+            metadata_json TEXT DEFAULT '{}',
             created_at TEXT
         )""")
 
@@ -220,7 +277,8 @@ def init_db(custom_path: str | Path | None = None) -> None:
         for col, ctype in [
             ("rule_definition", "TEXT DEFAULT ''"),
             ("category", "TEXT DEFAULT 'LORE'"),
-            ("pronunciation", "TEXT DEFAULT ''")
+            ("pronunciation", "TEXT DEFAULT ''"),
+            ("metadata_json", "TEXT DEFAULT '{}'")
         ]:
             if col not in existing_style_cols:
                 c.execute(f"ALTER TABLE style_sheet ADD COLUMN {col} {ctype};")
@@ -335,6 +393,71 @@ def init_db(custom_path: str | Path | None = None) -> None:
             created_at TEXT
         )""")
 
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS publishing_profiles (
+            book_id TEXT PRIMARY KEY,
+            author_name TEXT DEFAULT '',
+            subtitle TEXT DEFAULT '',
+            dedication TEXT DEFAULT '',
+            genre TEXT DEFAULT '',
+            logline TEXT DEFAULT '',
+            author_bio TEXT DEFAULT '',
+            query_text TEXT DEFAULT '',
+            sample_scene_ids TEXT DEFAULT '[]',
+            included_chapter_ids TEXT,
+            updated_at TEXT,
+            FOREIGN KEY(book_id) REFERENCES binder_nodes(id) ON DELETE CASCADE
+        )""")
+        c.execute("PRAGMA table_info(publishing_profiles)")
+        profile_cols = [r[1] for r in c.fetchall()]
+        if "included_chapter_ids" not in profile_cols:
+            c.execute("ALTER TABLE publishing_profiles ADD COLUMN included_chapter_ids TEXT")
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS export_history (
+            id TEXT PRIMARY KEY,
+            book_id TEXT NOT NULL,
+            book_title TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            included_chapter_ids TEXT NOT NULL,
+            word_count INTEGER NOT NULL DEFAULT 0,
+            content_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(book_id) REFERENCES binder_nodes(id) ON DELETE CASCADE
+        )""")
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS submission_records (
+            id TEXT PRIMARY KEY,
+            book_id TEXT NOT NULL,
+            recipient TEXT NOT NULL,
+            sent_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'SENT',
+            response_due TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(book_id) REFERENCES binder_nodes(id) ON DELETE CASCADE
+        )""")
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS reader_feedback (
+            id TEXT PRIMARY KEY,
+            book_id TEXT NOT NULL,
+            scene_id TEXT NOT NULL,
+            revision_ref TEXT NOT NULL DEFAULT 'CURRENT',
+            reader_label TEXT DEFAULT '',
+            confusion_rating INTEGER,
+            engagement_rating INTEGER,
+            tension_rating INTEGER,
+            empathy_rating INTEGER,
+            response TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(book_id) REFERENCES binder_nodes(id) ON DELETE CASCADE,
+            FOREIGN KEY(scene_id) REFERENCES binder_nodes(id) ON DELETE CASCADE
+        )""")
+
         # =====================================================================
         # PERFORMANCE INDEXES
         # =====================================================================
@@ -344,6 +467,9 @@ def init_db(custom_path: str | Path | None = None) -> None:
         c.execute("CREATE INDEX IF NOT EXISTS idx_worldlines_flow ON canonical_worldlines (entity_id, timeline_tick);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_rel_source ON entity_relationships (source_id);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_revisions_lookup ON node_revisions (node_id, version_num);")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_reader_feedback_scene ON reader_feedback (scene_id, created_at);")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_reader_feedback_book ON reader_feedback (book_id, scene_id);")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_reader_simulations_scene ON reader_simulations (scene_id, created_at);")
 
         # =====================================================================
         # INITIAL SEED DATA (If Database is Clean)

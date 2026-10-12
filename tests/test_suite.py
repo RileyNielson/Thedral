@@ -9,7 +9,7 @@ Executes end-to-end integration tests across:
 6. Scrivener & Word Importer Paragraph Normalization
 7. Voice Profile & Modern Anachronism Detection
 8. FastAPI Router API Contracts & Endpoints
-9. Dual-Tier Neuro-Narrative Spectrometer & Comps Engine
+9. Transparent text-pattern signal analysis
 """
 
 import sys
@@ -18,6 +18,9 @@ import re
 import json
 import sqlite3
 import tempfile
+import types
+import uuid
+from unittest.mock import patch
 from pathlib import Path
 
 # Add project root and current directory to Python sys.path
@@ -70,7 +73,8 @@ try:
     tables = [r[0] for r in c.fetchall()]
     required_tables = [
         "binder_nodes", "binder_fts", "canonical_entities", "canonical_worldlines",
-        "entity_relationships", "style_sheet", "node_revisions", "promises_ledger"
+        "entity_relationships", "style_sheet", "node_revisions", "promises_ledger",
+        "publishing_profiles", "export_history", "submission_records"
     ]
     all_tables_present = all(t in tables for t in required_tables)
     record_test("Database Schema & Self-Healing Migrations", all_tables_present)
@@ -249,11 +253,75 @@ astro_conn.close()
 # =============================================================================
 print(f"\n{BOLD}6. Importer Paragraph Normalization & Scene Assembly{RESET}")
 
-from backend.importer import normalize_paragraphs, build_binder_from_manifest
+from backend.importer import (
+    normalize_paragraphs, strip_rtf_native, parse_docx, build_binder_from_manifest,
+    parse_scrivener_project, build_import_report, inspect_docx_import
+)
+from backend.text_utils import html_to_formatted_paragraphs, html_to_text
 
 single_newline_rtf = "Line one of paragraph.\nLine two of paragraph that continues.\nAnother distinct paragraph entirely."
 paras = normalize_paragraphs(single_newline_rtf)
 record_test("Normalizes textutil Single-Newline Streams", len(paras) == 3)
+rtf_text = strip_rtf_native(r"{\rtf1\ansi Caf\'e9 \u8217?{ \b bold} prose\par next line}")
+record_test("Decodes Scrivener RTF accents, Unicode, and paragraphs", rtf_text == "Café ’ bold prose\nnext line")
+formatted_rtf = strip_rtf_native(r"{\rtf1 A {\b bold} and {\i italic}.}", preserve_formatting=True)
+record_test("Preserves RTF bold and italic runs", formatted_rtf == "A <strong>bold</strong> and <em>italic</em>.")
+formatted_html = "<p>A <strong>bold</strong> line.</p><p>An <em>italic</em> sentence.</p>"
+formatted_paragraphs = html_to_formatted_paragraphs(formatted_html)
+record_test(
+    "Rich text stays readable to analysis and word counts",
+    html_to_text(formatted_html) == "A bold line.\n\nAn italic sentence."
+    and len(html_to_text(formatted_html).split()) == 6
+    and len(formatted_paragraphs) == 2
+    and any(text == "bold" and bold for text, bold, _ in formatted_paragraphs[0])
+    and any(text == "italic" and italic for text, _, italic in formatted_paragraphs[1])
+)
+
+with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp_docx:
+    formatted_docx_path = tmp_docx.name
+try:
+    from docx import Document
+    formatted_doc = Document()
+    paragraph = formatted_doc.add_paragraph()
+    paragraph.add_run("Bold").bold = True
+    paragraph.add_run(" and ")
+    paragraph.add_run("italic").italic = True
+    formatted_doc.save(formatted_docx_path)
+    docx_manifest = parse_docx(formatted_docx_path)
+    formatted_doc.add_table(rows=1, cols=1).cell(0, 0).text = "Tabular content"
+    formatted_doc.save(formatted_docx_path)
+    docx_warnings = inspect_docx_import(formatted_docx_path)
+    record_test(
+        "Preserves DOCX bold and italic runs",
+        docx_manifest == [("<strong>Bold</strong> and <em>italic</em>", False, "", "", "")]
+    )
+    record_test("Reports unsupported DOCX tables", any("table" in warning.lower() for warning in docx_warnings))
+finally:
+    os.remove(formatted_docx_path)
+
+preview_report = build_import_report({
+    "manuscript": [
+        ("Chapter: Act I", True, "Act I", "Chapter summary", ""),
+        ("### SCENE_TITLE: Opening", False, "Opening", "", "Scene notes"),
+        ("<p><strong>Bold</strong> opening.</p>", False, "Opening", "", ""),
+        ("### SCENE_TITLE: Outline card", False, "Outline card", "A scene synopsis.", ""),
+    ],
+    "characters": [{"name": "Ellie"}],
+    "locations": [{"name": "Dock"}],
+    "lore": [{"term": "Aether"}],
+})
+record_test(
+    "Import report summarizes scenes, prose, formatting, notes, and outline cards",
+    preview_report["chapters"] == 1
+    and preview_report["scenes"] == 2
+    and preview_report["outline_only"] == 1
+    and preview_report["paragraphs"] == 1
+    and preview_report["words"] == 2
+    and preview_report["formatted_paragraphs"] == 1
+    and preview_report["notes"] == 1
+    and preview_report["synopses"] == 2
+    and preview_report["characters"] == 1
+)
 
 mock_manifest = {
     "manuscript": [
@@ -262,9 +330,9 @@ mock_manifest = {
         ("Beat one prose.", False, "The Infiltration", "", ""),
         ("Beat two prose.", False, "The Infiltration", "", "")
     ],
-    "characters": [{"name": "Ellie", "bio": "Master of locks.", "synopsis": "Tallow smell"}],
+    "characters": [{"name": "Ellie", "bio": "Master of locks." + ("A" * 2100), "synopsis": "Tallow smell"}],
     "locations": [{"name": "Aethelgard Docks", "desc": "Salt and cold iron."}],
-    "lore": [{"term": "Aetherite", "definition": "Volatile blue crystal."}]
+    "lore": [{"term": "Aetherite", "definition": "Volatile blue crystal." + ("L" * 900), "metadata": {"uuid": "lore-a"}}]
 }
 
 with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_import:
@@ -286,17 +354,92 @@ try:
     c.execute("SELECT synopsis, notes, content FROM binder_nodes WHERE id = ?", (first_scene_id,))
     sc_row = c.fetchone()
 
-    c.execute("SELECT name FROM canonical_entities WHERE entity_id = 'ellie'")
+    c.execute("SELECT name, axioms FROM canonical_entities WHERE entity_id = 'ellie'")
     ent_row = c.fetchone()
 
-    c.execute("SELECT term FROM style_sheet WHERE term = 'Aetherite'")
+    c.execute("SELECT term, rule_definition, metadata_json FROM style_sheet WHERE term = 'Aetherite'")
     lore_row = c.fetchone()
 
     record_test("Importer Commits Scenes with Preserved Synopses & Notes", sc_row is not None and sc_row["synopsis"] == "Ellie slips in." and "Beat two prose." in sc_row["content"])
-    record_test("Importer Extracts Character Sheets to Cast Directory", ent_row is not None and ent_row["name"] == "Ellie")
-    record_test("Importer Extracts Worldbuilding to Living Style Sheet", lore_row is not None and lore_row["term"] == "Aetherite")
+    record_test("Importer Extracts Full Character Sheet to Cast Directory", ent_row is not None and ent_row["name"] == "Ellie" and len(json.loads(ent_row["axioms"])["bio"]) == 2116)
+    record_test("Importer Preserves Full Lore and Its Metadata", lore_row is not None and lore_row["term"] == "Aetherite" and len(lore_row["rule_definition"]) == 922 and json.loads(lore_row["metadata_json"])["scrivener"]["uuid"] == "lore-a")
 
     verify_conn.close()
+
+    with tempfile.TemporaryDirectory(suffix=".scriv") as scriv_dir:
+        scriv_root = Path(scriv_dir)
+        (scriv_root / "Sample.scrivx").write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<ScrivenerProject Version="2.0"><Binder><BinderItem Type="Folder" UUID="draft"><Title>Draft</Title><Children>
+  <BinderItem Type="Folder" UUID="chapter"><Title>Chapter One</Title><Synopsis>Chapter plan.</Synopsis><MetaData><MetaDataItem Key="Label">Blue</MetaDataItem></MetaData><Children>
+    <BinderItem Type="Text" UUID="scene-a"><Title>Opening</Title><MetaData><MetaDataItem Key="Status">Revised</MetaDataItem><MetaDataItem Key="Keyword">storm</MetaDataItem><CustomField Name="POV">Mara</CustomField></MetaData><Children/></BinderItem>
+    <BinderItem Type="Text" UUID="scene-b"><Title>Opening</Title><Children/></BinderItem>
+    <BinderItem Type="Text" UUID="outline-only"><Title>Unwritten Turn</Title><Synopsis>A discovery changes the plan.</Synopsis><Notes>Keep the reveal quiet.</Notes><Children/></BinderItem>
+  </Children></BinderItem>
+</Children></BinderItem></Binder></ScrivenerProject>""",
+            encoding="utf-8"
+        )
+        data_dir = scriv_root / "Files" / "Data"
+        for doc_id, content, synopsis, notes in [
+            ("scene-a", r"{\rtf1 First {\i scene} {\b content}.}", "Opening synopsis.", "Opening notes."),
+            ("scene-b", "Second scene content.", "", ""),
+            ("outline-only", "", "A discovery changes the plan.", "Keep the reveal quiet."),
+        ]:
+            doc_dir = data_dir / doc_id
+            doc_dir.mkdir(parents=True)
+            if content:
+                filename = "content.rtf" if content.startswith(r"{\rtf") else "content.txt"
+                (doc_dir / filename).write_text(content, encoding="utf-8")
+            if synopsis:
+                (doc_dir / "synopsis.txt").write_text(synopsis, encoding="utf-8")
+            if notes:
+                (doc_dir / "notes.txt").write_text(notes, encoding="utf-8")
+        (data_dir / "scene-a" / "annotations.txt").write_text("Author annotation preserved.", encoding="utf-8")
+
+        scriv_manifest = parse_scrivener_project(scriv_dir)
+        scriv_first_scene = build_binder_from_manifest(scriv_manifest, "Sample")
+        verify_conn = sqlite3.connect(import_db_path)
+        verify_conn.row_factory = sqlite3.Row
+        scenes = verify_conn.execute(
+            "SELECT id, title, synopsis, notes, content, card_data FROM binder_nodes WHERE node_type = 'SCENE' ORDER BY rowid DESC LIMIT 3"
+        ).fetchall()
+        scene_data = [dict(row) for row in scenes]
+        contents = {html_to_text(row["content"]): row for row in scenes}
+        first_scene = contents.get("First scene content.")
+        second_scene = contents.get("Second scene content.")
+        outline_scene = next((row for row in scenes if row["title"] == "Unwritten Turn"), None)
+        first_metadata = json.loads(first_scene["card_data"])["scrivener"]["metadata"] if first_scene else {}
+        first_external_files = json.loads(first_scene["card_data"])["scrivener"].get("external_files", {}) if first_scene else {}
+        outline_metadata = json.loads(outline_scene["card_data"])["scrivener"] if outline_scene else {}
+        chapter_metadata = verify_conn.execute(
+            "SELECT card_data FROM binder_nodes WHERE node_type = 'CHAPTER' ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        project_metadata = verify_conn.execute(
+            "SELECT card_data FROM binder_nodes WHERE node_type = 'BOOK' ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        saved_project_metadata = json.loads(project_metadata["card_data"])["scrivener"] if project_metadata else {}
+        record_test(
+            "Scrivener maps content and notes by UUID without title collisions",
+            len(scene_data) == 3 and first_scene is not None and first_scene["synopsis"] == "Opening synopsis."
+            and first_scene["notes"] == "Opening notes." and second_scene is not None
+            and "<em>scene</em>" in first_scene["content"] and "<strong>content</strong>" in first_scene["content"]
+        )
+        record_test(
+            "Scrivener preserves outline-only documents and item metadata",
+            outline_scene is not None and outline_scene["synopsis"] == "A discovery changes the plan."
+            and outline_scene["notes"] == "Keep the reveal quiet."
+            and first_metadata.get("MetaData") and outline_metadata.get("uuid") == "outline-only"
+            and first_external_files.get("annotations") == "Author annotation preserved."
+        )
+        record_test(
+            "Scrivener preserves chapter and project metadata",
+            chapter_metadata is not None and "scrivener" in json.loads(chapter_metadata["card_data"])
+            and verify_conn.execute("SELECT synopsis FROM binder_nodes WHERE id = (SELECT parent_id FROM binder_nodes WHERE id = ?)", (scriv_first_scene,)).fetchone()["synopsis"] == "Chapter plan."
+            and saved_project_metadata.get("scrivx_file") == "Sample.scrivx"
+            and any(folder["title"] == "Draft" for folder in saved_project_metadata.get("binder_folders", []))
+            and scriv_first_scene in {row["id"] for row in scenes}
+        )
+        verify_conn.close()
 finally:
     if os.path.exists(import_db_path):
         os.remove(import_db_path)
@@ -323,6 +466,15 @@ from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
+health_res = client.get("/api/health")
+record_test(
+    "GET /api/health Reports Active AI Mode",
+    health_res.status_code == 200
+    and health_res.json().get("app") == "Thedral Studio"
+    and health_res.json().get("mode") in {"LITE", "FULL"}
+    and health_res.json().get("ai_enabled") == (health_res.json().get("mode") == "FULL"),
+)
+
 net_res = client.get("/api/network_info")
 record_test("GET /api/network_info Returns Local LAN IP", net_res.status_code == 200 and "url" in net_res.json())
 
@@ -338,38 +490,227 @@ record_test("GET /api/lore Returns Living Lexicon", lore_res.status_code == 200 
 authorship_res = client.get("/api/publishing/authorship-proof")
 record_test("GET /api/publishing/authorship-proof Generates Cryptographic Hash", authorship_res.status_code == 200 and "verification_hash" in authorship_res.json())
 
-genome_res = client.get("/api/publishing/genome")
-record_test("GET /api/publishing/genome Computes Macro Audience DNA", genome_res.status_code == 200 and "spectrum" in genome_res.json())
+signals_res = client.get("/api/publishing/prose-signals")
+record_test("GET /api/publishing/prose-signals Returns Measured Text Patterns", signals_res.status_code == 200 and "text_signals" in signals_res.json())
+
+api_books = tree_res.json()
+if api_books:
+    active_test_book = api_books[0]["id"]
+    review_res = client.get(f"/api/publishing/review/{active_test_book}")
+    record_test("GET /api/publishing/review Returns Manuscript Checks", review_res.status_code == 200 and "empty_scenes" in review_res.json())
+
+    profile_res = client.get(f"/api/publishing/profile/{active_test_book}")
+    record_test("GET /api/publishing/profile Returns Saved Export Settings", profile_res.status_code == 200 and "included_chapter_ids" in profile_res.json())
+
+    history_res = client.get(f"/api/publishing/drafting-history?book_id={active_test_book}")
+    history_text = history_res.json().get("report_text", "").lower() if history_res.status_code == 200 else ""
+    record_test("GET /api/publishing/drafting-history Avoids Authorship Claims", history_res.status_code == 200 and "sha-256" in history_text and "does not" in history_text)
+
+    proposals_res = client.get(f"/api/narrative/proposals?book_id={active_test_book}")
+    record_test("GET /api/narrative/proposals Returns Pending Survey Suggestions", proposals_res.status_code == 200 and isinstance(proposals_res.json(), list))
+
+    from backend.database import get_db
+    feedback_conn = get_db()
+    feedback_scene = feedback_conn.execute("""
+        SELECT s.id
+        FROM binder_nodes s JOIN binder_nodes ch ON ch.id = s.parent_id
+        WHERE ch.parent_id = ? AND s.node_type = 'SCENE'
+        ORDER BY ch.sort_order, s.sort_order LIMIT 1
+    """, (active_test_book,)).fetchone()
+    feedback_conn.close()
+    if feedback_scene:
+        feedback_post = client.post("/api/reader-feedback", json={
+            "scene_id": feedback_scene["id"],
+            "revision_ref": "CURRENT",
+            "reader_label": "Test reader",
+            "engagement_rating": 4,
+            "response": "The scene held my attention.",
+        })
+        feedback_id = feedback_post.json().get("id") if feedback_post.status_code == 200 else None
+        scene_feedback = client.get(f"/api/reader-feedback/scene/{feedback_scene['id']}")
+        book_feedback = client.get(f"/api/reader-feedback/book/{active_test_book}")
+        feedback_visible = (
+            feedback_id
+            and scene_feedback.status_code == 200
+            and any(entry["id"] == feedback_id for entry in scene_feedback.json())
+            and book_feedback.status_code == 200
+            and any(entry["id"] == feedback_id for entry in book_feedback.json())
+        )
+        if feedback_id:
+            client.delete(f"/api/reader-feedback/{feedback_id}")
+        record_test("Reader feedback is linked to its scene and manuscript", bool(feedback_visible))
+
+        valid_ai_response = {
+            "direct": [{
+                "claim": "The reader sees that a passage is being validated.",
+                "evidence": "sufficiently long passage",
+                "confidence": 0.9,
+            }]
+        }
+        response_items = iter((
+            [],
+            {"direct": "not a list"},
+            valid_ai_response,
+            valid_ai_response,
+        ))
+        ai_call_count = []
+        mock_ollama = types.SimpleNamespace(
+            chat=lambda **_kwargs: (
+                ai_call_count.append(True)
+                or {"message": {"content": json.dumps(next(response_items))}}
+            )
+        )
+        with patch("backend.routers.craft.ENABLE_AI", True), patch.dict(sys.modules, {"ollama": mock_ollama}):
+            invalid_root = client.post("/api/disclosures/scan", json={
+                "scene_id": feedback_scene["id"],
+                "text": "A sufficiently long passage for validating the scanner response.",
+            })
+            invalid_category = client.post("/api/disclosures/scan", json={
+                "scene_id": feedback_scene["id"],
+                "text": "A sufficiently long passage for validating the scanner response.",
+            })
+            previous_simulation_count = len(client.get(
+                f"/api/reader-simulations/scene/{feedback_scene['id']}"
+            ).json().get("simulations", []))
+            simulation_payload = {
+                "scene_id": feedback_scene["id"],
+                "text": (
+                    f"A sufficiently long passage for validating the scanner response {uuid.uuid4().hex}. "
+                    + ("The surrounding prose remains unchanged. " * 120)
+                ),
+                "intended_takeaway": "The reader sees that a passage is being validated.",
+            }
+            first_simulation = client.post("/api/disclosures/scan", json=simulation_payload)
+            repeated_simulation = client.post("/api/disclosures/scan", json=simulation_payload)
+            revised_payload = {
+                **simulation_payload,
+                "text": simulation_payload["text"].replace(
+                    "scanner response", "revised scanner response"
+                ),
+            }
+            revised_simulation = client.post("/api/disclosures/scan", json=revised_payload)
+            outside_excerpt_edit = client.post("/api/disclosures/scan", json={
+                **revised_payload,
+                "text": revised_payload["text"] + " An ending beat was added outside the analyzed excerpt.",
+            })
+            simulation_history = client.get(
+                f"/api/reader-simulations/scene/{feedback_scene['id']}"
+            )
+        record_test(
+            "Reader Horizon rejects malformed AI response shapes",
+            invalid_root.json().get("status") == "error"
+            and invalid_category.json().get("status") == "error"
+        )
+        first_saved_sim = first_simulation.json().get("simulation", {})
+        repeated_saved_sim = repeated_simulation.json().get("simulation", {})
+        snapshot_conn = get_db()
+        persisted_source = snapshot_conn.execute(
+            "SELECT source_text FROM reader_simulations WHERE id = ?",
+            (first_saved_sim.get("id"),),
+        ).fetchone()
+        snapshot_conn.close()
+        snapshot_checks = {
+            "status": first_simulation.status_code == 200,
+            "grounded excerpt": first_saved_sim.get("items", [{}])[0].get("source_excerpt") == "sufficiently long passage",
+            "analyzed input": first_saved_sim.get("analyzed_text") == html_to_text(simulation_payload["text"])[:3500],
+            "prompt/model/version": bool(
+                first_saved_sim.get("system_prompt")
+                and first_saved_sim.get("model_name")
+                and first_saved_sim.get("prompt_version")
+            ),
+            "three new snapshots": len(simulation_history.json().get("simulations", [])) == previous_simulation_count + 3,
+            "source length": first_saved_sim.get("source_characters") == len(html_to_text(simulation_payload["text"])),
+            "source persisted": bool(
+                persisted_source and persisted_source["source_text"] == html_to_text(simulation_payload["text"])
+            ),
+            "new result": first_simulation.json().get("reused") is False,
+        }
+        record_test(
+            "Reader simulation snapshots persist exact text and AI output",
+            all(snapshot_checks.values()),
+            str({name: value for name, value in snapshot_checks.items() if not value}),
+        )
+        record_test(
+            "Unchanged text and intent reuse the fixed simulation",
+            first_saved_sim.get("id") == repeated_saved_sim.get("id")
+            and repeated_simulation.json().get("reused") is True
+            and revised_simulation.json().get("simulation", {}).get("id") != first_saved_sim.get("id")
+            and revised_simulation.json().get("reused") is False
+            and outside_excerpt_edit.json().get("reused") is True
+            and outside_excerpt_edit.json().get("simulation", {}).get("reused_from_id")
+            == revised_simulation.json().get("simulation", {}).get("id")
+            and len(ai_call_count) == 4
+        )
+        cleanup_conn = get_db()
+        with cleanup_conn:
+            for simulation_id in (
+                first_saved_sim.get("id"),
+                revised_simulation.json().get("simulation", {}).get("id"),
+                outside_excerpt_edit.json().get("simulation", {}).get("id"),
+            ):
+                if simulation_id:
+                    cleanup_conn.execute("DELETE FROM reader_simulations WHERE id = ?", (simulation_id,))
+        cleanup_conn.close()
+
+        from backend.routers.craft import _reader_loop_signal
+        repeated_observation = [{
+            "narrative_claim": "The reader understands the clear message in the scene.",
+        }]
+        loop_fixture = [
+            {
+                "source_content_hash": f"revision-{number}",
+                "analyzed_content_hash": f"analysis-{number}",
+                "items": repeated_observation,
+            }
+            for number in range(3)
+        ]
+        record_test(
+            "Revision-loop signal requires three distinct versions with repeated observations",
+            _reader_loop_signal(loop_fixture)["active"]
+            and not _reader_loop_signal(loop_fixture[:2])["active"]
+        )
+
+with tempfile.NamedTemporaryFile(suffix=".txt", mode="w", encoding="utf-8", delete=False) as preview_file:
+    preview_file.write("A preview manuscript paragraph.")
+    preview_path = preview_file.name
+try:
+    tree_before_preview = client.get("/api/tree").json()
+    local_preview = client.post("/api/import/preview/local-path", json={"path": preview_path})
+    upload_preview = client.post(
+        "/api/import/preview/upload",
+        files={"file": ("Preview.txt", b"A preview manuscript paragraph.", "text/plain")},
+    )
+    tree_after_preview = client.get("/api/tree").json()
+    record_test(
+        "Import previews report content without changing the Binder",
+        local_preview.status_code == 200
+        and local_preview.json()["report"]["words"] == 4
+        and upload_preview.status_code == 200
+        and upload_preview.json()["report"]["scenes"] == 1
+        and tree_before_preview == tree_after_preview
+    )
+finally:
+    os.remove(preview_path)
 
 # =============================================================================
-# 9. DUAL-TIER NEURO-NARRATIVE SPECTROMETER & COMPS ENGINE
+# 9. TEXT-PATTERN SIGNAL ANALYSIS
 # =============================================================================
-print(f"\n{BOLD}9. Dual-Tier Neuro-Narrative Spectrometer & Comps Engine{RESET}")
+print(f"\n{BOLD}9. Text-pattern Signal Analysis{RESET}")
 
-from backend.spectrometer import analyze_neuro_spectrum, calculate_manuscript_comps
+from backend.spectrometer import analyze_text_signals
 
-# Test Intimate / Somatic Romance Prose
-romance_prose = (
-    "\"Don't look at me like that,\" she whispered, her pulse hammering in her throat. "
-    "His fingers brushed her collarbone. The cold heat of his touch made her shiver. "
-    "\"Tell me the truth,\" he said, leaning closer until her breath caught."
+signal_fixture = (
+    "The blade struck the iron gate."
+    "\n\nHis gaze lingered as their fingers touched."
+    "\n\nA hidden secret changed everything."
+    "\n\nRain tapped stone beneath the cold night sky."
 )
-romance_spec = analyze_neuro_spectrum(romance_prose)
-record_test("Detects High Oxytocin in Intimate Proximity Dialogue", romance_spec["oxytocin"] >= 40)
-
-# Test Kinetic Action Prose
-action_prose = (
-    "Blade struck iron! Sparks showered the stone. "
-    "She dodged left. The pavement splintered under the impact. "
-    "Run! Her lungs burned as the whistle screamed across the dark rooftops."
-)
-action_spec = analyze_neuro_spectrum(action_prose)
-record_test("Detects High Adrenaline in Staccato Combat Prose", action_spec["adrenaline"] >= 40)
-
-# Test Canonical Comps Matching
-mock_book_spec = {"adrenaline": 20, "oxytocin": 45, "dopamine": 15, "serotonin": 20}
-comps = calculate_manuscript_comps(mock_book_spec)
-record_test("Calculates Vector Cosine Similarity Against Canonical Comps", len(comps) == 3 and comps[0]["author"] == "Robin Hobb")
+signals = analyze_text_signals(signal_fixture)
+record_test("Counts selected action cues", signals["signals"]["action_cues_per_1000_words"]["count"] > 0)
+record_test("Counts selected relational cues", signals["signals"]["relational_cues_per_1000_words"]["count"] > 0)
+record_test("Counts selected mystery cues", signals["signals"]["mystery_cues_per_1000_words"]["count"] > 0)
+record_test("Counts selected sensory cues", signals["signals"]["sensory_cues_per_1000_words"]["count"] > 0)
+record_test("Signal report disclaims reader-response measurement", "do not measure reader emotions" in signals["limitations"])
 
 # =============================================================================
 # SUMMARY REPORT

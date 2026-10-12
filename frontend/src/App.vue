@@ -2,13 +2,33 @@
   <div 
     class="flex flex-col h-screen w-screen overflow-hidden select-none font-sans transition-colors duration-500"
     :class="[
-      store.isCandlelight 
+      store.colorScheme === 'candlelight'
         ? 'bg-[#0c0a09] text-amber-100/90 selection:bg-amber-900/50' 
-        : 'bg-zinc-950 text-zinc-100 selection:bg-indigo-900/50'
+        : store.colorScheme === 'forest'
+          ? 'bg-[#07140e] text-emerald-50 selection:bg-emerald-900/50'
+          : store.colorScheme === 'violet'
+            ? 'bg-[#140d1e] text-violet-50 selection:bg-violet-900/50'
+            : 'bg-zinc-950 text-zinc-100 selection:bg-indigo-900/50'
     ]"
   >
     <!-- Top Global Command & Navigation Bar -->
     <TopNav v-if="!store.isVoidMode" />
+
+    <div
+      v-if="store.runtimeStatus && !store.isVoidMode"
+      class="flex-shrink-0 border-b px-4 py-1.5 text-center text-[10px]"
+      :class="store.runtimeStatus.mode === 'LITE'
+        ? 'border-amber-900/40 bg-amber-950/30 text-amber-200/80'
+        : 'border-emerald-900/40 bg-emerald-950/20 text-emerald-200/70'"
+      role="status"
+    >
+      <template v-if="store.runtimeStatus.mode === 'LITE'">
+        Lite mode is active. Writing, organization, and text analysis work locally; AI-assisted features are unavailable.
+      </template>
+      <template v-else>
+        Full mode is active. Local AI features use {{ store.runtimeStatus.model }} and require Ollama to be running.
+      </template>
+    </div>
 
     <!-- Main Workspace Container -->
     <div 
@@ -95,6 +115,9 @@
     <CareerModal v-if="store.modals.career" />
     <ConnectModal v-if="store.modals.connect" />
     <ImportModal v-if="store.modals.import" />
+    <ExportModal v-if="store.modals.export" />
+    <ReviewModal v-if="store.modals.review" />
+    <SubmissionModal v-if="store.modals.submission" />
 
   </div>
 </template>
@@ -119,14 +142,20 @@ const VaultModal = defineAsyncComponent(() => import('./components/Modals/VaultM
 const CareerModal = defineAsyncComponent(() => import('./components/Modals/CareerModal.vue'))
 const ConnectModal = defineAsyncComponent(() => import('./components/Modals/ConnectModal.vue'))
 const ImportModal = defineAsyncComponent(() => import('./components/Modals/ImportModal.vue'))
+const ExportModal = defineAsyncComponent(() => import('./components/Modals/ExportModal.vue'))
+const ReviewModal = defineAsyncComponent(() => import('./components/Modals/ReviewModal.vue'))
+const SubmissionModal = defineAsyncComponent(() => import('./components/Modals/SubmissionModal.vue'))
 
 const dismissToast = (id) => {
   const index = toasts.findIndex(t => t.id === id)
   if (index > -1) toasts.splice(index, 1)
 }
 
-watch(() => store.isCandlelight, (val) => {
-  document.body.classList.toggle('candlelight-mode', val)
+watch(() => store.colorScheme, (theme) => {
+  document.body.dataset.theme = theme
+  document.body.classList.toggle('candlelight-mode', theme === 'candlelight')
+  document.body.classList.toggle('forest-mode', theme === 'forest')
+  document.body.classList.toggle('violet-mode', theme === 'violet')
 })
 
 const handleKeydown = (e) => {
@@ -150,6 +179,24 @@ const handleKeydown = (e) => {
     return
   }
 
+  if (isMeta && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    store.flushPendingSave?.()
+    return
+  }
+
+  if (isMeta && e.altKey && e.key === 'ArrowLeft') {
+    e.preventDefault()
+    store.navigateScene(-1)
+    return
+  }
+
+  if (isMeta && e.altKey && e.key === 'ArrowRight') {
+    e.preventDefault()
+    store.navigateScene(1)
+    return
+  }
+
   if (e.key === 'Escape') {
     const openModalKey = Object.keys(store.modals).find(key => store.modals[key])
     if (openModalKey) {
@@ -164,7 +211,12 @@ const handleKeydown = (e) => {
 }
 
 onMounted(async () => {
+  document.body.dataset.theme = store.colorScheme
+  document.body.classList.toggle('candlelight-mode', store.colorScheme === 'candlelight')
+  document.body.classList.toggle('forest-mode', store.colorScheme === 'forest')
+  document.body.classList.toggle('violet-mode', store.colorScheme === 'violet')
   window.addEventListener('keydown', handleKeydown)
+  store.fetchRuntimeStatus()
   await store.fetchTree()
   store.fetchCast()
   store.fetchLore()
@@ -204,11 +256,29 @@ onUnmounted(() => {
   background: #3f3f46;
 }
 
+body[data-theme='midnight'] {
+  background-color: #09090f !important;
+  color: #e2e8f0 !important;
+}
+
 body.candlelight-mode {
   background-color: #0c0a09 !important;
   color: #fef3c7 !important;
 }
-body.candlelight-mode .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #443224;
+
+body.forest-mode {
+  background-color: #07140e !important;
+  color: #dcfce7 !important;
+}
+
+body.violet-mode {
+  background-color: #140d1e !important;
+  color: #f3e8ff !important;
+}
+
+body.candlelight-mode .custom-scrollbar::-webkit-scrollbar-thumb,
+body.forest-mode .custom-scrollbar::-webkit-scrollbar-thumb,
+body.violet-mode .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.6);
 }
 </style>

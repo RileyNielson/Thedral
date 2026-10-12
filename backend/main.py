@@ -7,9 +7,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from backend.config import STATIC_DIR
+from backend.config import STATIC_DIR, ENABLE_AI, STUDIO_MODEL, PORT
 from backend.database import get_db
 from backend.models import init_db
+
+allowed_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
+    if origin.strip()
+]
 
 # Import ALL 7 modular domain routers
 from backend.routers.binder import router as binder_router
@@ -24,7 +33,7 @@ app = FastAPI(title="Thedral Studio Core", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,6 +50,16 @@ app.include_router(importer_router)
 app.include_router(publishing_router)
 app.include_router(lore_router)
 
+@app.get("/api/health")
+def get_health():
+    return {
+        "status": "ok",
+        "app": "Thedral Studio",
+        "mode": "FULL" if ENABLE_AI else "LITE",
+        "ai_enabled": ENABLE_AI,
+        "model": STUDIO_MODEL if ENABLE_AI else None,
+    }
+
 @app.get("/api/network_info")
 def get_network_info():
     try:
@@ -50,7 +69,7 @@ def get_network_info():
         s.close()
     except Exception:
         ip = "localhost"
-    return {"local_ip": ip, "port": 8000, "url": f"http://{ip}:8000"}
+    return {"local_ip": ip, "port": PORT, "url": f"http://{ip}:{PORT}"}
 
 @app.get("/api/search")
 def search_manuscript(q: str):

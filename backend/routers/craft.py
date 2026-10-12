@@ -1,16 +1,25 @@
 import asyncio
+import hashlib
 import json
+import sqlite3
 import time
 import uuid
-from fastapi import APIRouter
-from pydantic import BaseModel
+import re
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
 from backend.database import get_db
 from backend.socratic import elevate_prose_diagnosis, get_socratic_lesson
 from backend.telemetry import classify_sentence_energetics, classify_paragraph_energetics
+from backend.text_utils import html_to_text
 
 router = APIRouter(tags=["Craft"])
+READER_SIMULATION_PROMPT_VERSION = "first-read-v1"
+READER_SIMULATION_SYSTEM_PROMPT = """Simulate a careful first-time reader encountering this scene. This is an AI hypothesis to help the author revise before recruiting readers; it is not actual reader feedback and must not be presented as representative or certain. Consider what a reader is likely to understand, infer or feel, wonder about, and where they might lose the thread. If the author supplied an intended takeaway, compare the scene's evidence with that intent and identify any possible gap without assuming the intent is correct.
+Every item MUST cite an exact, short verbatim excerpt from the supplied scene. Keep claims specific to that excerpt. Provide no item when there is no useful observation. Revision experiments should be optional and open-ended, not prescriptive rewrites. Confidence is confidence in the interpretation of the text, not a probability that readers will react that way.
+Return strict JSON:
+{"direct":[{"claim":"What a first-time reader may clearly understand","evidence":"Exact quote","confidence":0.0}],"inferred":[{"claim":"Possible reader inference or reaction","evidence":"Exact quote","confidence":0.0}],"delayed":[{"claim":"Question or expectation a reader may carry forward","evidence":"Exact quote","confidence":0.0}],"friction":[{"claim":"A possible point of confusion or attention break","evidence":"Exact quote","confidence":0.0}],"revision_focus":[{"claim":"An optional revision experiment or question for the author","evidence":"Exact quote","confidence":0.0}]}"""
 
 class ElevateRequest(BaseModel):
     passage: str
@@ -19,12 +28,15 @@ class ElevateRequest(BaseModel):
 
 class XRayRequest(BaseModel):
     text: str
+    staccato_threshold: int = 9
+    expansive_threshold: int = 22
+    clutter_sensitivity: int = 2
 
 @router.post("/api/craft/elevate")
 def elevate_prose(payload: ElevateRequest):
     critique = elevate_prose_diagnosis(
-        passage=payload.passage,
-        surrounding=payload.surrounding,
+        passage=html_to_text(payload.passage),
+        surrounding=html_to_text(payload.surrounding),
         scene_id=payload.scene_id
     )
     
@@ -45,16 +57,23 @@ def elevate_prose(payload: ElevateRequest):
 @router.post("/api/craft/xray")
 def get_craft_xray(payload: XRayRequest):
     """Returns multi-lens paragraph data with zero document scrambling."""
-    paragraphs = classify_paragraph_energetics(payload.text)
+    thresholds = {
+        "staccato_threshold": payload.staccato_threshold,
+        "expansive_threshold": payload.expansive_threshold,
+        "clutter_sensitivity": payload.clutter_sensitivity,
+    }
+    paragraphs = classify_paragraph_energetics(html_to_text(payload.text), thresholds)
     flat_sentences = [s for p in paragraphs for s in p]
     return {
         "paragraphs": paragraphs,
-        "sentences": flat_sentences
+        "sentences": flat_sentences,
+        "thresholds": thresholds
     }
 
 class ScanDisclosureRequest(BaseModel):
     scene_id: str
     text: str
+    intended_takeaway: str = Field(default="", max_length=1000)
 
 class AddDisclosureRequest(BaseModel):
     scene_id: str
@@ -62,12 +81,146 @@ class AddDisclosureRequest(BaseModel):
     narrative_claim: str
     clue_evidence: str = ""
 
+
+class ReaderFeedbackCreate(BaseModel):
+    scene_id: str
+    revision_ref: str = "CURRENT"
+    reader_label: str = Field(default="", max_length=80)
+    confusion_rating: int | None = Field(default=None, ge=1, le=5)
+    engagement_rating: int | None = Field(default=None, ge=1, le=5)
+    tension_rating: int | None = Field(default=None, ge=1, le=5)
+    empathy_rating: int | None = Field(default=None, ge=1, le=5)
+    response: str = Field(default="", max_length=4000)
+
+
+class AuthorHorizonNote(BaseModel):
+    scene_id: str
+    disclosure_type: str
+    narrative_claim: str = Field(min_length=1, max_length=1000)
+    source_excerpt: str = Field(default="", max_length=1000)
+    clue_evidence: str = Field(default="", max_length=1000)
+
+
+def _quoted_excerpt(text: str, excerpt: str) -> str:
+    excerpt = " ".join((excerpt or "").split())
+    if not excerpt:
+        return ""
+    normalized_text = " ".join(text.split())
+    match = re.search(re.escape(excerpt), normalized_text, flags=re.IGNORECASE)
+    return match.group(0) if match else ""
+
+
+def _serialize_simulation(row: sqlite3.Row | dict) -> dict:
+    result = dict(row)
+    result["items"] = json.loads(result.pop("result_json"))
+    source_text = result.pop("source_text")
+    result["source_characters"] = len(source_text)
+    result["analyzed_characters"] = len(result["analyzed_text"])
+    return result
+
+
+def _scene_revision_ref(conn, scene_id: str, content: str, plain_text: str) -> str:
+    current = conn.execute(
+        "SELECT content FROM binder_nodes WHERE id = ? AND node_type = 'SCENE'",
+        (scene_id,),
+    ).fetchone()
+    if current and html_to_text(current["content"] or "") == plain_text:
+        return "CURRENT"
+    matching_revision = conn.execute("""
+        SELECT version_num FROM node_revisions
+        WHERE node_id = ? AND content = ?
+        ORDER BY version_num DESC LIMIT 1
+    """, (scene_id, content)).fetchone()
+    return f"V{matching_revision['version_num']}" if matching_revision else "UNSAVED"
+
+
+def _store_reader_simulation(
+    conn,
+    *,
+    simulation_id: str,
+    scene_id: str,
+    revision_ref: str,
+    source_content_hash: str,
+    analyzed_content_hash: str,
+    intended_takeaway_hash: str,
+    source_text: str,
+    analyzed_text: str,
+    intended_takeaway: str,
+    system_prompt: str,
+    result_json: str,
+    model_name: str,
+    reused_from_id: str | None,
+) -> sqlite3.Row:
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with conn:
+        conn.execute("""
+            INSERT INTO reader_simulations
+            (id, scene_id, revision_ref, source_content_hash, analyzed_content_hash,
+             intended_takeaway_hash, prompt_version, source_text, analyzed_text,
+             intended_takeaway, system_prompt, result_json, model_name, reused_from_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(scene_id, source_content_hash, intended_takeaway_hash, prompt_version) DO NOTHING
+        """, (
+            simulation_id, scene_id, revision_ref, source_content_hash, analyzed_content_hash,
+            intended_takeaway_hash, READER_SIMULATION_PROMPT_VERSION, source_text,
+            analyzed_text, intended_takeaway, system_prompt, result_json, model_name,
+            reused_from_id, now,
+        ))
+    return conn.execute("""
+        SELECT id, scene_id, revision_ref, source_content_hash, analyzed_content_hash,
+               intended_takeaway_hash, prompt_version, source_text, analyzed_text,
+               intended_takeaway, system_prompt, result_json, model_name, reused_from_id, created_at
+        FROM reader_simulations
+        WHERE scene_id = ? AND source_content_hash = ? AND intended_takeaway_hash = ?
+          AND prompt_version = ?
+    """, (
+        scene_id, source_content_hash, intended_takeaway_hash, READER_SIMULATION_PROMPT_VERSION
+    )).fetchone()
+
+
+def _reader_loop_signal(simulations: list[dict]) -> dict:
+    distinct_revisions = []
+    seen_hashes = set()
+    for simulation in simulations:
+        content_hash = simulation["analyzed_content_hash"]
+        if content_hash not in seen_hashes:
+            distinct_revisions.append(simulation)
+            seen_hashes.add(content_hash)
+        if len(distinct_revisions) == 3:
+            break
+
+    claim_sets = [
+        {
+            token
+            for item in simulation["items"]
+            for token in re.findall(r"\w+", item["narrative_claim"].lower())
+        }
+        for simulation in distinct_revisions
+    ]
+    similarity = None
+    if len(claim_sets) == 3 and all(claim_sets):
+        pair_scores = []
+        for index, first in enumerate(claim_sets):
+            for second in claim_sets[index + 1:]:
+                pair_scores.append(len(first & second) / len(first | second))
+        similarity = round(sum(pair_scores) / len(pair_scores), 2)
+
+    active = similarity is not None and similarity >= 0.8
+    return {
+        "active": active,
+        "similarity": similarity,
+        "revisions_compared": len(distinct_revisions),
+        "method": "token Jaccard overlap across AI observation text",
+        "threshold": 0.8,
+    }
+
+
 @router.get("/api/disclosures/scene/{scene_id}")
 def get_scene_disclosures(scene_id: str):
     conn = get_db()
     c = conn.cursor()
     c.execute("""
-        SELECT id, disclosure_type, narrative_claim, clue_evidence, target_reveal_ch, status 
+        SELECT id, disclosure_type, narrative_claim, clue_evidence, source_excerpt, confidence, source, target_reveal_ch, status
         FROM reader_disclosures 
         WHERE scene_id = ? 
         ORDER BY id ASC
@@ -81,64 +234,201 @@ async def scan_scene_disclosures(payload: ScanDisclosureRequest):
     if not payload.text or len(payload.text.strip()) < 30:
         return {"status": "empty", "disclosures": []}
 
-    if not ENABLE_AI:
-        return {"status": "error", "message": "Horizon scanner offline (Pure Math Mode active).", "disclosures": []}
-
-    prompt_content = "Scene Text:\n" + str(payload.text[:3500])
-    try:
-        import ollama
-        resp = await asyncio.to_thread(
-            ollama.chat,
-            model=STUDIO_MODEL,
-            messages=[
-                {"role": "system", "content": "Analyze this scene prose and categorize the information flow to the READER into strict JSON:\n{\n  \"direct\": [\"Direct factual statements\"],\n  \"inferred\": [{\"claim\": \"Subtext\", \"clue\": \"Quote\"}],\n  \"delayed\": [\"Open dramatic mysteries\"]\n}\nOUTPUT STRICT JSON ONLY."},
-                {"role": "user", "content": prompt_content}
-            ],
-            format="json",
-            options=LLM_OPTIONS
-        )
-        data = json.loads(resp["message"]["content"])
-    except Exception as e:
-        return {"status": "error", "message": str(e), "disclosures": []}
-
     conn = get_db()
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    with conn:
-        c = conn.cursor()
-        for d in data.get("direct", []):
-            claim = d if isinstance(d, str) else d.get("claim", "")
-            if claim:
-                c.execute("""
-                    INSERT INTO reader_disclosures 
-                    (scene_id, disclosure_type, narrative_claim, clue_evidence, status, created_at)
-                    VALUES (?, 'DIRECT', ?, '', 'CONFIRMED', ?)
-                """, (payload.scene_id, claim, now))
+    scene = conn.execute(
+        "SELECT 1 FROM binder_nodes WHERE id = ? AND node_type = 'SCENE'",
+        (payload.scene_id,),
+    ).fetchone()
+    conn.close()
+    if not scene:
+        raise HTTPException(404, "Scene not found")
 
-        for inf in data.get("inferred", []):
-            claim = inf.get("claim", "") if isinstance(inf, dict) else str(inf)
-            clue = inf.get("clue", "") if isinstance(inf, dict) else ""
-            if claim:
-                c.execute("""
-                    INSERT INTO reader_disclosures 
-                    (scene_id, disclosure_type, narrative_claim, clue_evidence, status, created_at)
-                    VALUES (?, 'INFERRED', ?, ?, 'ACTIVE', ?)
-                """, (payload.scene_id, claim, clue, now))
-
-        for del_q in data.get("delayed", []):
-            claim = del_q if isinstance(del_q, str) else del_q.get("question", "")
-            if claim:
-                c.execute("""
-                    INSERT INTO reader_disclosures 
-                    (scene_id, disclosure_type, narrative_claim, clue_evidence, status, created_at)
-                    VALUES (?, 'DELAYED', ?, '', 'ACTIVE', ?)
-                """, (payload.scene_id, claim, now))
-
-    c = conn.cursor()
-    c.execute("SELECT * FROM reader_disclosures WHERE scene_id = ? ORDER BY id ASC", (payload.scene_id,))
-    updated_rows = [dict(r) for r in c.fetchall()]
+    source_text = html_to_text(payload.text)
+    intended_takeaway = payload.intended_takeaway.strip()
+    content_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    analyzed_text = source_text[:3500]
+    analyzed_hash = hashlib.sha256(analyzed_text.encode("utf-8")).hexdigest()
+    takeaway_hash = hashlib.sha256(intended_takeaway.encode("utf-8")).hexdigest()
+    conn = get_db()
+    cached = conn.execute("""
+        SELECT id, scene_id, revision_ref, source_content_hash, analyzed_content_hash,
+               intended_takeaway_hash, prompt_version, source_text, analyzed_text,
+               intended_takeaway, system_prompt, result_json, model_name, reused_from_id, created_at
+        FROM reader_simulations
+        WHERE scene_id = ? AND source_content_hash = ? AND intended_takeaway_hash = ?
+          AND prompt_version = ?
+    """, (
+        payload.scene_id, content_hash, takeaway_hash, READER_SIMULATION_PROMPT_VERSION
+    )).fetchone()
+    if cached:
+        conn.close()
+        return {
+            "status": "success",
+            "simulation": _serialize_simulation(cached),
+            "reused": True,
+            "warnings": [],
+        }
+    reusable = conn.execute("""
+        SELECT id, system_prompt, result_json, model_name
+        FROM reader_simulations
+        WHERE scene_id = ? AND analyzed_content_hash = ? AND intended_takeaway_hash = ?
+          AND prompt_version = ? AND model_name = ?
+        ORDER BY created_at DESC, rowid DESC LIMIT 1
+    """, (
+        payload.scene_id, analyzed_hash, takeaway_hash,
+        READER_SIMULATION_PROMPT_VERSION, STUDIO_MODEL,
+    )).fetchone()
     conn.close()
 
-    return {"status": "success", "disclosures": updated_rows}
+    if reusable:
+        system_prompt = reusable["system_prompt"]
+        result_json = reusable["result_json"]
+        model_name = reusable["model_name"]
+        reused_from_id = reusable["id"]
+        warnings = []
+    elif not ENABLE_AI:
+        return {"status": "error", "message": "Reader simulation unavailable (local AI is disabled)."}
+    else:
+        prompt_content = (
+            "Scene excerpt (only this excerpt is supplied to this pass):\n"
+            + analyzed_text
+            + "\n\nAuthor's intended reader takeaway:\n"
+            + (intended_takeaway or "Not provided.")
+        )
+        try:
+            import ollama
+            resp = await asyncio.to_thread(
+                ollama.chat,
+                model=STUDIO_MODEL,
+                messages=[
+                    {"role": "system", "content": READER_SIMULATION_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt_content}
+                ],
+                format="json",
+                options=LLM_OPTIONS
+            )
+            data = json.loads(resp["message"]["content"])
+        except Exception as e:
+            return {"status": "error", "message": f"Reader simulation failed: {e}"}
+
+        if not isinstance(data, dict):
+            return {"status": "error", "message": "Reader simulation returned an invalid response object."}
+        disclosure_types = ("direct", "inferred", "delayed", "friction", "revision_focus")
+        for disclosure_type in disclosure_types:
+            if disclosure_type not in data:
+                data[disclosure_type] = []
+            elif not isinstance(data[disclosure_type], list):
+                return {
+                    "status": "error",
+                    "message": f"Reader simulation returned an invalid {disclosure_type} list.",
+                }
+
+        warnings = []
+        items = []
+        for disclosure_type in disclosure_types:
+            for item in data[disclosure_type]:
+                if not isinstance(item, dict):
+                    warnings.append(f"Skipped an ungrounded {disclosure_type} item.")
+                    continue
+                claim = str(item.get("claim", "")).strip()
+                evidence = _quoted_excerpt(analyzed_text, str(item.get("evidence", "")))
+                if not claim or not evidence:
+                    warnings.append(f"Skipped a {disclosure_type} item without a matching text excerpt.")
+                    continue
+                try:
+                    confidence = max(0.0, min(1.0, float(item.get("confidence", 0.5))))
+                except (TypeError, ValueError):
+                    confidence = 0.5
+                items.append({
+                    "disclosure_type": disclosure_type.upper(),
+                    "narrative_claim": claim,
+                    "source_excerpt": evidence,
+                    "confidence": confidence,
+                })
+        system_prompt = READER_SIMULATION_SYSTEM_PROMPT
+        result_json = json.dumps(items)
+        model_name = STUDIO_MODEL
+        reused_from_id = None
+
+    conn = get_db()
+    revision_ref = _scene_revision_ref(conn, payload.scene_id, payload.text, source_text)
+    simulation_id = f"sim_{uuid.uuid4().hex}"
+    saved = _store_reader_simulation(
+        conn,
+        simulation_id=simulation_id,
+        scene_id=payload.scene_id,
+        revision_ref=revision_ref,
+        source_content_hash=content_hash,
+        analyzed_content_hash=analyzed_hash,
+        intended_takeaway_hash=takeaway_hash,
+        source_text=source_text,
+        analyzed_text=analyzed_text,
+        intended_takeaway=intended_takeaway,
+        system_prompt=system_prompt,
+        result_json=result_json,
+        model_name=model_name,
+        reused_from_id=reused_from_id,
+    )
+    conn.close()
+
+    return {
+        "status": "success",
+        "simulation": _serialize_simulation(saved),
+        "reused": reused_from_id is not None or saved["id"] != simulation_id,
+        "warnings": warnings,
+    }
+
+
+@router.get("/api/reader-simulations/scene/{scene_id}")
+def get_scene_reader_simulations(scene_id: str):
+    conn = get_db()
+    if not conn.execute(
+        "SELECT 1 FROM binder_nodes WHERE id = ? AND node_type = 'SCENE'",
+        (scene_id,),
+    ).fetchone():
+        conn.close()
+        raise HTTPException(404, "Scene not found")
+    rows = conn.execute("""
+        SELECT id, scene_id, revision_ref, source_content_hash, analyzed_content_hash,
+               intended_takeaway_hash, prompt_version, source_text, analyzed_text,
+               intended_takeaway, system_prompt, result_json, model_name, reused_from_id, created_at
+        FROM reader_simulations
+        WHERE scene_id = ?
+        ORDER BY created_at DESC, rowid DESC
+    """, (scene_id,)).fetchall()
+    conn.close()
+    simulations = [_serialize_simulation(row) for row in rows]
+    return {
+        "simulations": simulations,
+        "loop_signal": _reader_loop_signal(simulations),
+    }
+
+
+@router.post("/api/disclosures/author-note")
+def add_author_horizon_note(payload: AuthorHorizonNote):
+    allowed_types = {"INTENDED", "DIRECT", "INFERRED", "DELAYED"}
+    if payload.disclosure_type not in allowed_types:
+        raise HTTPException(400, "Unsupported Reader Horizon note type")
+    conn = get_db()
+    scene = conn.execute(
+        "SELECT id FROM binder_nodes WHERE id = ? AND node_type = 'SCENE'",
+        (payload.scene_id,),
+    ).fetchone()
+    if not scene:
+        conn.close()
+        raise HTTPException(404, "Scene not found")
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with conn:
+        conn.execute("""
+            INSERT INTO reader_disclosures
+            (scene_id, disclosure_type, narrative_claim, clue_evidence, source_excerpt, confidence, source, status, created_at)
+            VALUES (?, ?, ?, ?, ?, NULL, 'AUTHOR', 'ACTIVE', ?)
+        """, (
+            payload.scene_id, payload.disclosure_type, payload.narrative_claim.strip(),
+            payload.clue_evidence.strip(), payload.source_excerpt.strip(), now,
+        ))
+    conn.close()
+    return {"status": "created"}
 
 @router.delete("/api/disclosures/{item_id}")
 def delete_disclosure(item_id: int):
@@ -146,6 +436,100 @@ def delete_disclosure(item_id: int):
     with conn:
         conn.execute("DELETE FROM reader_disclosures WHERE id = ?", (item_id,))
     conn.close()
+    return {"status": "deleted"}
+
+
+@router.get("/api/reader-feedback/book/{book_id}")
+def get_book_reader_feedback(book_id: str):
+    conn = get_db()
+    if not conn.execute(
+        "SELECT 1 FROM binder_nodes WHERE id = ? AND node_type = 'BOOK'",
+        (book_id,),
+    ).fetchone():
+        conn.close()
+        raise HTTPException(404, "Manuscript not found")
+    rows = conn.execute("""
+        SELECT f.id, f.scene_id, f.revision_ref, f.reader_label, f.confusion_rating,
+               f.engagement_rating, f.tension_rating, f.empathy_rating, f.response, f.created_at,
+               s.title AS scene_title, ch.title AS chapter_title
+        FROM reader_feedback f
+        JOIN binder_nodes s ON s.id = f.scene_id AND s.node_type = 'SCENE'
+        JOIN binder_nodes ch ON ch.id = s.parent_id AND ch.node_type = 'CHAPTER'
+        WHERE f.book_id = ?
+        ORDER BY ch.sort_order, s.sort_order, f.created_at, f.id
+    """, (book_id,)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+@router.get("/api/reader-feedback/scene/{scene_id}")
+def get_scene_reader_feedback(scene_id: str):
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT id, revision_ref, reader_label, confusion_rating, engagement_rating,
+               tension_rating, empathy_rating, response, created_at
+        FROM reader_feedback WHERE scene_id = ?
+        ORDER BY created_at DESC, id DESC
+    """, (scene_id,)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+@router.post("/api/reader-feedback")
+def create_reader_feedback(payload: ReaderFeedbackCreate):
+    revision_ref = payload.revision_ref.strip().upper()
+    if revision_ref != "CURRENT" and not re.fullmatch(r"V[1-9]\d*", revision_ref):
+        raise HTTPException(400, "Revision must be CURRENT or a saved version such as v3")
+    if not any((
+        payload.confusion_rating is not None,
+        payload.engagement_rating is not None,
+        payload.tension_rating is not None,
+        payload.empathy_rating is not None,
+        payload.response.strip(),
+    )):
+        raise HTTPException(400, "Add at least one rating or written response")
+    conn = get_db()
+    scene = conn.execute("""
+        SELECT s.id, ch.parent_id AS book_id
+        FROM binder_nodes s JOIN binder_nodes ch ON ch.id = s.parent_id
+        WHERE s.id = ? AND s.node_type = 'SCENE' AND ch.node_type = 'CHAPTER'
+    """, (payload.scene_id,)).fetchone()
+    if not scene:
+        conn.close()
+        raise HTTPException(404, "Scene not found")
+    if revision_ref != "CURRENT":
+        version_num = int(revision_ref[1:])
+        if not conn.execute(
+            "SELECT 1 FROM node_revisions WHERE node_id = ? AND version_num = ?",
+            (payload.scene_id, version_num),
+        ).fetchone():
+            conn.close()
+            raise HTTPException(400, "That saved scene revision does not exist")
+    feedback_id = f"reader_{uuid.uuid4().hex}"
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with conn:
+        conn.execute("""
+            INSERT INTO reader_feedback
+            (id, book_id, scene_id, revision_ref, reader_label, confusion_rating, engagement_rating,
+             tension_rating, empathy_rating, response, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            feedback_id, scene["book_id"], payload.scene_id, revision_ref, payload.reader_label.strip(),
+            payload.confusion_rating, payload.engagement_rating, payload.tension_rating,
+            payload.empathy_rating, payload.response.strip(), now,
+        ))
+    conn.close()
+    return {"id": feedback_id, "status": "saved"}
+
+
+@router.delete("/api/reader-feedback/{feedback_id}")
+def delete_reader_feedback(feedback_id: str):
+    conn = get_db()
+    with conn:
+        result = conn.execute("DELETE FROM reader_feedback WHERE id = ?", (feedback_id,))
+    conn.close()
+    if not result.rowcount:
+        raise HTTPException(404, "Reader feedback entry not found")
     return {"status": "deleted"}
 
 class CritiqueStatusUpdate(BaseModel):

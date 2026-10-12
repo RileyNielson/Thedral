@@ -24,6 +24,20 @@
 
       <span class="hidden md:inline text-zinc-700">|</span>
 
+      <div v-if="store.recentSceneIds.length" class="relative">
+        <button @click="recentOpen = !recentOpen" class="hidden sm:flex items-center gap-1 rounded px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition" aria-label="Open recent scenes">
+          <Clock3 class="w-3 h-3" /> Continue
+        </button>
+        <div v-if="recentOpen" class="absolute left-0 top-full mt-2 w-56 rounded-xl border border-zinc-700/70 bg-zinc-950/95 p-2 shadow-2xl z-50">
+          <div class="px-2 pb-1 text-[9px] uppercase tracking-wider text-zinc-500">Recent scenes</div>
+          <button v-for="scene in recentScenes" :key="scene.id" @click="openRecentScene(scene.id)" class="w-full rounded-lg px-2 py-1.5 text-left hover:bg-zinc-800 transition">
+            <span class="block truncate text-xs text-zinc-200">{{ scene.title }}</span>
+            <span class="block truncate text-[9px] text-zinc-500">{{ store.findBookForNode(scene.id)?.title || 'Manuscript' }}</span>
+          </button>
+          <p v-if="!recentScenes.length" class="px-2 py-2 text-[10px] text-zinc-500">No recent scenes in active manuscripts.</p>
+        </div>
+      </div>
+
       <!-- Hierarchy Breadcrumb -->
       <div class="hidden md:flex items-center text-xs text-zinc-400 font-mono gap-1.5">
         <span class="text-zinc-500">{{ store.activeNode?.book_title || "Manuscript" }}</span>
@@ -85,16 +99,27 @@
         ● {{ store.saveStatus }}
       </span>
 
-      <button 
-        @click="toggleCandlelight" 
-        :class="[
-          'px-2 py-1 rounded flex items-center gap-1 transition text-xs border', 
-          store.isCandlelight ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.2)]' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-white'
-        ]" 
-        title="Circadian Candlelight Mode"
-      >
-        <Flame class="w-3.5 h-3.5 text-amber-500" />
-      </button>
+      <div class="relative">
+        <button
+          @click="themeMenuOpen = !themeMenuOpen"
+          :class="[
+            'px-2 py-1 rounded flex items-center gap-1 transition text-xs border',
+            store.colorScheme === 'candlelight' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.2)]' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-white'
+          ]"
+          title="Choose Color Scheme"
+        >
+          <Palette class="w-3.5 h-3.5 text-amber-500" />
+          <span class="hidden sm:inline">Theme</span>
+        </button>
+
+        <div v-if="themeMenuOpen" class="absolute right-0 top-full mt-2 w-40 rounded-xl border border-zinc-700/70 bg-zinc-950/95 p-2 shadow-2xl backdrop-blur-md z-50">
+          <div class="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-2 px-1">Palette</div>
+          <button v-for="option in themeOptions" :key="option.id" @click="applyTheme(option.id)" class="w-full flex items-center justify-between rounded-lg px-2 py-1.5 text-xs text-left transition" :class="store.colorScheme === option.id ? 'bg-zinc-800 text-amber-300' : 'text-zinc-300 hover:bg-zinc-800/80'">
+            <span>{{ option.label }}</span>
+            <span class="inline-block w-2.5 h-2.5 rounded-full border border-white/20" :style="{ background: option.color }"></span>
+          </button>
+        </div>
+      </div>
 
       <button 
         @click="store.toggleModal('lore', true)" 
@@ -122,6 +147,15 @@
         <span class="hidden sm:inline">Publish</span>
       </button>
 
+      <button
+        @click="store.toggleModal('review', true)"
+        class="px-2 py-1 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700/50 flex items-center gap-1.5 transition text-xs font-medium"
+        title="Manuscript-wide revision and continuity checks"
+      >
+        <ClipboardCheck class="w-3.5 h-3.5 text-amber-500" />
+        <span class="hidden sm:inline">Review</span>
+      </button>
+
       <button 
         @click="store.toggleModal('import', true)" 
         class="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded flex items-center gap-1 transition font-medium text-xs"
@@ -138,14 +172,13 @@
         <span class="hidden lg:inline">Phone</span>
       </button>
 
-      <a 
-        :href="`${API_BASE}/api/compile/docx`" 
-        download 
+      <button
+        @click="store.toggleModal('export', true)"
         class="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-zinc-950 font-bold rounded flex items-center gap-1.5 transition text-xs shadow"
       >
         <Download class="w-3.5 h-3.5" /> 
-        <span class="hidden sm:inline">.docx</span>
-      </a>
+        <span class="hidden sm:inline">Export</span>
+      </button>
 
       <button 
         @click="store.modals.mobileInspector = !store.modals.mobileInspector" 
@@ -158,16 +191,32 @@
 </template>
 
 <script setup>
+import { ref, computed } from 'vue'
 import { store } from '../store.js'
 import { 
-  Menu as MenuIcon, Feather, PenTool, ListTree, LayoutGrid, Globe, Flame, 
-  BookOpenCheck, Users, Award, Upload, Smartphone, Download, Sliders 
+  Menu as MenuIcon, Feather, PenTool, ListTree, LayoutGrid, Globe, Palette,
+  BookOpenCheck, Users, Award, Upload, Smartphone, Download, Sliders, Clock3, ClipboardCheck
 } from 'lucide-vue-next'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const themeMenuOpen = ref(false)
+const recentOpen = ref(false)
+const recentScenes = computed(() => store.getRecentScenes())
+const themeOptions = [
+  { id: 'midnight', label: 'Midnight', color: '#5b5bd6' },
+  { id: 'candlelight', label: 'Candlelight', color: '#f59e0b' },
+  { id: 'forest', label: 'Forest', color: '#22c55e' },
+  { id: 'violet', label: 'Violet', color: '#a78bfa' }
+]
 
-const toggleCandlelight = () => {
-  store.toggleCandlelight()
-  document.body.classList.toggle('candlelight-mode', store.isCandlelight)
+const applyTheme = (themeId) => {
+  store.setColorScheme(themeId)
+  themeMenuOpen.value = false
+}
+
+const openRecentScene = async (sceneId) => {
+  if (await store.loadScene(sceneId)) {
+    store.viewMode = 'editor'
+    recentOpen.value = false
+  }
 }
 </script>

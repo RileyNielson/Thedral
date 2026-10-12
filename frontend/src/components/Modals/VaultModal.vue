@@ -7,7 +7,7 @@
     <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl flex flex-col max-h-[85vh] animate-fade-in">
       <div class="flex items-center justify-between border-b border-zinc-800 pb-3 shrink-0">
         <h3 class="text-base font-bold text-white flex items-center gap-2">
-          <Library class="w-5 h-5 text-amber-500" /> The Library Vault
+          <Library class="w-5 h-5 text-amber-500" /> Bookcase
         </h3>
         <button @click="store.modals.vault = false" class="text-zinc-500 hover:text-white transition">
           <X class="w-5 h-5" />
@@ -20,7 +20,7 @@
             <div class="flex items-center gap-2 mb-1">
               <span class="text-sm font-bold text-zinc-100 truncate">{{ b.title }}</span>
               <span :class="['px-2 py-0.5 rounded text-[10px] font-mono', b.is_archived ? 'bg-zinc-800 text-zinc-400' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30']">
-                {{ b.is_archived ? 'Archived' : 'Active' }}
+                {{ b.is_archived ? 'Checked in' : 'Checked out' }}
               </span>
             </div>
             <div class="text-xs text-zinc-500 font-mono flex gap-3">
@@ -29,17 +29,17 @@
           </div>
           <div class="flex items-center space-x-2 shrink-0">
             <button @click="toggleBook(b)" :class="['px-3 py-1.5 rounded-lg text-xs font-semibold transition', b.is_archived ? 'bg-amber-600 hover:bg-amber-500 text-zinc-950 font-bold shadow' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300']">
-              {{ b.is_archived ? 'Open in Binder' : 'Close Book' }}
+              {{ b.is_archived ? 'Check out' : 'Check in' }}
             </button>
             <button @click="deleteBook(b)" title="Delete Book" class="p-1.5 hover:bg-zinc-800 text-zinc-600 hover:text-rose-400 rounded transition opacity-50 group-hover:opacity-100">
               <Trash2 class="w-4 h-4" />
             </button>
           </div>
         </div>
-        <div v-if="!store.vaultBooks?.length" class="text-center py-10 text-xs text-zinc-500 italic">No manuscripts found in the vault.</div>
+        <div v-if="!store.vaultBooks?.length" class="text-center py-10 text-xs text-zinc-500 italic">No manuscripts on your bookcase yet.</div>
       </div>
       <div class="border-t border-zinc-800 pt-3 flex justify-between items-center text-xs text-zinc-500 font-mono shrink-0">
-        <span>Archived manuscripts remain safe on disk.</span>
+        <span>Checked-in manuscripts stay safe here, outside the active Binder.</span>
         <button @click="store.modals.vault = false" class="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-lg transition">Done</button>
       </div>
     </div>
@@ -70,7 +70,7 @@ const toggleBook = async (b) => {
     }
     window.dispatchEvent(new Event('refresh-tree'))
     await fetchVault()
-    showToast(`Updated "${b.title}"`, 'info')
+    showToast(`"${b.title}" checked ${b.is_archived ? 'out' : 'in'}`, 'info')
   } catch(e) { showToast(e.message, 'error') }
 }
 

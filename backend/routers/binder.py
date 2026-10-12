@@ -1,4 +1,5 @@
 import re
+import html
 import time
 import json
 import uuid
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 from backend.database import get_db
 from backend.hashing import find_severed_threads
 from backend.telemetry import calculate_text_telemetry
+from backend.text_utils import html_to_formatted_paragraphs, html_to_text
 from backend.astrolabe import build_astrolabe_manifest
 from backend.config import STUDIO_MODEL, ENABLE_AI
 
@@ -70,6 +72,12 @@ def get_node(node_id: str):
     node = dict(row)
     node["telemetry"] = calculate_text_telemetry(node["content"] or "")
     node["severed_threads"] = find_severed_threads(conn, node_id, node["content"] or "")
+    node["revisions"] = [
+        dict(r) for r in c.execute(
+            "SELECT id, version_num, content, change_summary, created_at FROM node_revisions WHERE node_id = ? ORDER BY version_num DESC LIMIT 10",
+            (node_id,),
+        ).fetchall()
+    ]
     
     if node.get("card_data"):
         try:
@@ -101,7 +109,7 @@ def update_node(node_id: str, payload: NodeUpdate):
             values.append(v or "{}")
 
     if "content" in data and data["content"] is not None:
-        wc = len(data["content"].split()) if data["content"] else 0
+        wc = len(html_to_text(data["content"]).split()) if data["content"] else 0
         fields.append("word_count = ?")
         values.append(wc)
 
@@ -123,6 +131,62 @@ def update_node(node_id: str, payload: NodeUpdate):
 
     conn.close()
     return {"status": "saved"}
+
+class RestoreRevisionRequest(BaseModel):
+    version_num: int
+
+@router.post("/api/node/{node_id}/restore")
+@router.post("/api/scenes/{node_id}/restore")
+def restore_node_revision(node_id: str, payload: RestoreRevisionRequest):
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute(
+        "SELECT content FROM node_revisions WHERE node_id = ? AND version_num = ? ORDER BY id DESC LIMIT 1",
+        (node_id, payload.version_num),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Revision not found")
+
+    restored_content = row["content"]
+    current = c.execute("SELECT content FROM binder_nodes WHERE id = ?", (node_id,)).fetchone()
+    if not current:
+        conn.close()
+        raise HTTPException(404, "Scene not found")
+    current_content = current["content"] or ""
+    word_count = len(html_to_text(restored_content).split()) if restored_content else 0
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with conn:
+        max_v = c.execute("SELECT MAX(version_num) FROM node_revisions WHERE node_id = ?", (node_id,)).fetchone()[0] or 0
+        if current_content != (restored_content or ""):
+            max_v += 1
+            c.execute(
+                "INSERT INTO node_revisions (node_id, version_num, content, change_summary, created_at) VALUES (?, ?, ?, 'Pre-restore snapshot', ?)",
+                (node_id, max_v, current_content, now),
+            )
+        c.execute(
+            "UPDATE binder_nodes SET content = ?, word_count = ?, updated_at = ? WHERE id = ?",
+            (restored_content, word_count, now, node_id),
+        )
+        c.execute(
+            "INSERT INTO node_revisions (node_id, version_num, content, change_summary, created_at) VALUES (?, ?, ?, ?, ?)",
+            (node_id, max_v + 1, restored_content, f"Restored from revision v{payload.version_num}", now),
+        )
+    conn.close()
+    return {"status": "restored", "version_num": payload.version_num, "word_count": word_count}
+
+@router.get("/api/node/{node_id}/revisions")
+@router.get("/api/scenes/{node_id}/revisions")
+def get_node_revisions(node_id: str):
+    conn = get_db()
+    rows = [
+        dict(r) for r in conn.execute(
+            "SELECT id, version_num, content, change_summary, created_at FROM node_revisions WHERE node_id = ? ORDER BY version_num DESC LIMIT 10",
+            (node_id,),
+        ).fetchall()
+    ]
+    conn.close()
+    return rows
 
 @router.get("/api/scenes/{node_id}/telemetry")
 @router.get("/api/node/{node_id}/telemetry")
@@ -251,7 +315,7 @@ async def auto_title_scenes(payload: AutoTitleRequest):
     prompt_tpl = "Read this scene opening and give it a punchy 2-to-4 word cinematic title. OUTPUT ONLY THE TITLE - NO QUOTES.\n\nScene Opening:\n"
 
     for sc in scenes:
-        text = (sc["content"] or "").strip()
+        text = html_to_text(sc["content"] or "").strip()
         if len(text) < 30: continue
         if not re.match(r"^Scene\s+\d+$", sc["title"], re.I): continue
 
@@ -285,34 +349,59 @@ async def master_triage_scene(scene_id: str):
         conn.close()
         return {"status": "empty"}
 
-    text = scene["content"]
+    paragraphs = html_to_formatted_paragraphs(scene["content"])
+    blocks = [[]]
+    divider_pattern = re.compile(r"^(?:(?:\*\s*){3,}|(?:#\s*){3,}|(?:~\s*){3,}|-{3,})$")
+    for paragraph in paragraphs:
+        plain_paragraph = "".join(text for text, _, _ in paragraph).strip()
+        if divider_pattern.fullmatch(plain_paragraph):
+            if blocks[-1]:
+                blocks.append([])
+            continue
+        if plain_paragraph:
+            blocks[-1].append(paragraph)
+    blocks = [block for block in blocks if block]
 
-    text = re.sub(r'^[ \t]+', '', text, flags=re.MULTILINE)
-    text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
-    text = re.sub(r'--+', '—', text)
-    text = re.sub(r'\.\.\.', '…', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    def render_block(block):
+        rendered_paragraphs = []
+        for paragraph in block:
+            runs = []
+            for run_text, bold, italic in paragraph:
+                clean = re.sub(r'\.\.\.', '…', re.sub(r'--+', '—', run_text))
+                rendered = html.escape(clean, quote=False)
+                if bold and italic:
+                    rendered = f"<strong><em>{rendered}</em></strong>"
+                elif bold:
+                    rendered = f"<strong>{rendered}</strong>"
+                elif italic:
+                    rendered = f"<em>{rendered}</em>"
+                runs.append(rendered)
+            rendered_paragraphs.append(f"<p>{''.join(runs)}</p>")
+        return "".join(rendered_paragraphs)
 
-    blocks = re.split(r'\n\n(?:(?:\*\s*){3,}|(?:#\s*){3,}|(?:~\s*){3,}|-{3,})\n\n', text)
+    if not blocks:
+        conn.close()
+        return {"status": "empty"}
     
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     parent_id = scene["parent_id"]
     base_sort = float(scene["sort_order"])
     
-    first_block = blocks[0].strip()
+    first_block = render_block(blocks[0])
     new_scene_ids = []
 
     with conn:
         conn.execute("UPDATE binder_nodes SET content = ?, word_count = ? WHERE id = ?", 
-                    (first_block, len(first_block.split()), scene_id))
+                    (first_block, len(html_to_text(first_block).split()), scene_id))
 
         for idx, block in enumerate(blocks[1:], 1):
-            clean_block = block.strip()
-            if not clean_block: continue
-            
+            clean_block = render_block(block)
+            if not clean_block:
+                continue
+
             new_id = f"scene_{uuid.uuid4().hex[:8]}"
             new_sort = base_sort + (idx * 1.0)
-            wc = len(clean_block.split())
+            wc = len(html_to_text(clean_block).split())
             
             conn.execute("""
                 INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, content, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
@@ -320,7 +409,7 @@ async def master_triage_scene(scene_id: str):
             """, (new_id, parent_id, f"Sliced Scene {idx}", new_sort, clean_block, wc, now, now))
             new_scene_ids.append(new_id)
 
-    tk_count = len(re.findall(r'\[TK[^\]]*\]', first_block, re.IGNORECASE))
+    tk_count = len(re.findall(r'\[TK[^\]]*\]', html_to_text(first_block), re.IGNORECASE))
 
     if new_scene_ids:
         c.execute("SELECT id FROM binder_nodes WHERE node_type = 'BOOK' LIMIT 1")

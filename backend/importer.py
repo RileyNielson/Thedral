@@ -4,10 +4,13 @@ import sys
 import time
 import uuid
 import json
+import html
 import docx
+import zipfile
 import subprocess
 import xml.etree.ElementTree as ET
 from backend.database import get_db
+from backend.text_utils import html_to_text
 
 def sanitize_text(text: str) -> str:
     if not text:
@@ -16,43 +19,202 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r'[\x00-\x08\x0e-\x1f]', '', text)
     return text.strip()
 
-def strip_rtf_native(rtf_text: str) -> str:
+def strip_rtf_native(rtf_text: str, preserve_formatting: bool = False) -> str:
     """
     Cross-Platform RTF Stripper for Windows and Linux:
-    Strips RTF control words, fonts, and headers without external dependencies.
+    Removes RTF formatting while decoding common ANSI and Unicode escapes.
     """
     if not rtf_text:
         return ""
-    # Strip RTF groups and control words
-    text = re.sub(r'[{\\][^{}\\]*?[}]', '', rtf_text)
-    text = re.sub(r'\\[a-z]{1,32}(-?\d+)? ?', '', text)
-    text = re.sub(r'\\\'[0-9a-fA-F]{2}', '', text)
-    return sanitize_text(text)
 
-def read_file_content(fp: str) -> str:
+    codepage_match = re.search(r'\\ansicpg(\d+)', rtf_text)
+    encoding = f"cp{codepage_match.group(1)}" if codepage_match else "cp1252"
+    output = []
+    group_stack = []
+    skip_group = False
+    bold = False
+    italic = False
+    unicode_fallback_count = 1
+    fallback_remaining = 0
+    pending_high_surrogate = None
+    index = 0
+
+    def emit(text):
+        if text:
+            output.append((text, bold, italic))
+
+    def append_unicode_unit(unit):
+        nonlocal pending_high_surrogate
+        if 0xD800 <= unit <= 0xDBFF:
+            if pending_high_surrogate is not None:
+                emit("\ufffd")
+            pending_high_surrogate = unit
+        elif 0xDC00 <= unit <= 0xDFFF and pending_high_surrogate is not None:
+            emit(chr(0x10000 + ((pending_high_surrogate - 0xD800) << 10) + unit - 0xDC00))
+            pending_high_surrogate = None
+        else:
+            if pending_high_surrogate is not None:
+                emit("\ufffd")
+                pending_high_surrogate = None
+            emit(chr(unit))
+
+    while index < len(rtf_text):
+        char = rtf_text[index]
+        if char == "{":
+            prefix = rtf_text[index + 1:index + 80]
+            destination = re.match(
+                r"\\(?:\*\\)?([a-zA-Z]+)",
+                prefix
+            )
+            destination_name = destination.group(1).lower() if destination else ""
+            known_destinations = {
+                "fonttbl", "colortbl", "stylesheet", "info", "pict", "object",
+                "header", "headerl", "headerr", "footer", "footerl", "footerr",
+                "footnote", "annotation", "datastore", "themedata",
+                "colorschememapping",
+            }
+            starred_match = re.match(r"\\\*\\([a-zA-Z]+)", prefix)
+            is_unknown_starred_destination = bool(starred_match and starred_match.group(1).lower() not in known_destinations)
+            group_stack.append((skip_group, unicode_fallback_count, bold, italic))
+            skip_group = skip_group or destination_name in known_destinations or is_unknown_starred_destination
+            index += 1
+            continue
+        if char == "}":
+            if group_stack:
+                skip_group, unicode_fallback_count, bold, italic = group_stack.pop()
+            index += 1
+            continue
+        if char != "\\":
+            if fallback_remaining:
+                fallback_remaining -= 1
+            elif not skip_group:
+                emit(char)
+            index += 1
+            continue
+
+        index += 1
+        if index >= len(rtf_text):
+            break
+        symbol = rtf_text[index]
+        if symbol in "\\{}":
+            if fallback_remaining:
+                fallback_remaining -= 1
+            elif not skip_group:
+                emit(symbol)
+            index += 1
+            continue
+        if symbol == "'":
+            match = re.match(r"'([0-9a-fA-F]{2})", rtf_text[index:])
+            if match:
+                if fallback_remaining:
+                    fallback_remaining -= 1
+                elif not skip_group:
+                    try:
+                        emit(bytes.fromhex(match.group(1)).decode(encoding, errors="replace"))
+                    except LookupError:
+                        emit(bytes.fromhex(match.group(1)).decode("cp1252", errors="replace"))
+                index += len(match.group(0))
+            else:
+                index += 1
+            continue
+        if not symbol.isalpha():
+            if not skip_group and not fallback_remaining:
+                emit({"~": "\u00a0", "_": "\u2011", "-": ""}.get(symbol, ""))
+            elif fallback_remaining:
+                fallback_remaining -= 1
+            index += 1
+            continue
+
+        start = index
+        while index < len(rtf_text) and rtf_text[index].isalpha():
+            index += 1
+        word = rtf_text[start:index].lower()
+        number_match = re.match(r"-?\d+", rtf_text[index:])
+        number = int(number_match.group(0)) if number_match else None
+        if number_match:
+            index += len(number_match.group(0))
+        if index < len(rtf_text) and rtf_text[index] == " ":
+            index += 1
+
+        if word == "uc" and number is not None:
+            unicode_fallback_count = max(0, number)
+        elif word == "u" and number is not None:
+            if not skip_group and not fallback_remaining:
+                append_unicode_unit(number if number >= 0 else number + 65536)
+            fallback_remaining = unicode_fallback_count
+        elif word == "b":
+            bold = number != 0
+        elif word == "i":
+            italic = number != 0
+        elif word in ("par", "line") and not skip_group:
+            emit("\n")
+        elif word == "tab" and not skip_group:
+            emit("\t")
+        elif word in ("emdash", "endash", "lquote", "rquote", "ldblquote", "rdblquote") and not skip_group:
+            emit({
+                "emdash": "\u2014", "endash": "\u2013", "lquote": "\u2018",
+                "rquote": "\u2019", "ldblquote": "\u201c", "rdblquote": "\u201d",
+            }[word])
+        elif word == "bin" and number is not None:
+            index += max(0, number)
+
+    if pending_high_surrogate is not None:
+        emit("\ufffd")
+
+    if not preserve_formatting:
+        return sanitize_text("".join(text for text, _, _ in output))
+
+    paragraphs = [[]]
+    for text, token_bold, token_italic in output:
+        fragments = text.split("\n")
+        for fragment_index, fragment in enumerate(fragments):
+            if fragment:
+                paragraphs[-1].append((fragment, token_bold, token_italic))
+            if fragment_index < len(fragments) - 1:
+                paragraphs.append([])
+
+    rendered_paragraphs = []
+    for paragraph in paragraphs:
+        runs = []
+        for text, token_bold, token_italic in paragraph:
+            if runs and runs[-1][1:] == (token_bold, token_italic):
+                runs[-1] = (runs[-1][0] + text, token_bold, token_italic)
+            else:
+                runs.append((text, token_bold, token_italic))
+        rendered = []
+        for text, token_bold, token_italic in runs:
+            escaped = html.escape(text, quote=False)
+            if token_bold and token_italic:
+                escaped = f"<strong><em>{escaped}</em></strong>"
+            elif token_bold:
+                escaped = f"<strong>{escaped}</strong>"
+            elif token_italic:
+                escaped = f"<em>{escaped}</em>"
+            rendered.append(escaped)
+        rendered_paragraphs.append("".join(rendered))
+    return "\n\n".join(rendered_paragraphs).strip()
+
+def read_file_content(fp: str, preserve_formatting: bool = False) -> str:
     """Reads RTF, TXT, or MD files across macOS, Windows 10, and Linux."""
     if not fp or not os.path.exists(fp):
         return ""
-    try:
-        if fp.lower().endswith('.rtf'):
-            # If on macOS, use textutil
-            if sys.platform == 'darwin':
-                try:
-                    res = subprocess.run(['textutil', '-convert', 'txt', fp, '-stdout'], capture_output=True, text=True)
-                    if res.returncode == 0 and res.stdout:
-                        return res.stdout
-                except Exception:
-                    pass
-            
-            # Windows 10 / Linux native fallback
-            with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
-                return strip_rtf_native(f.read())
+    if fp.lower().endswith('.rtf'):
+        if preserve_formatting:
+            with open(fp, 'r', encoding='utf-8', errors='replace') as f:
+                return strip_rtf_native(f.read(), preserve_formatting=True)
+        if sys.platform == 'darwin':
+            try:
+                res = subprocess.run(['textutil', '-convert', 'txt', fp, '-stdout'], capture_output=True, text=True)
+                if res.returncode == 0 and res.stdout:
+                    return res.stdout
+            except OSError:
+                pass
+        with open(fp, 'r', encoding='utf-8', errors='replace') as f:
+            return strip_rtf_native(f.read())
 
-        elif fp.lower().endswith(('.txt', '.md')):
-            with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read()
-    except Exception:
-        pass
+    if fp.lower().endswith(('.txt', '.md')):
+        with open(fp, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
     return ""
 
 def normalize_paragraphs(raw_text: str) -> list[str]:
@@ -69,6 +231,14 @@ def normalize_paragraphs(raw_text: str) -> list[str]:
         if p and not p.startswith("{\\rtf"):
             paragraphs.append(p)
     return paragraphs
+
+def _safe_inline_markup(value: str) -> str:
+    pieces = re.split(r"(<\/?(?:strong|em)>)", value, flags=re.IGNORECASE)
+    return "".join(
+        piece if re.fullmatch(r"<\/?(?:strong|em)>", piece, flags=re.IGNORECASE)
+        else html.escape(html.unescape(piece), quote=False)
+        for piece in pieces
+    )
 
 def is_chapter_heading(text: str, is_heading_style: bool = False, is_bold: bool = False) -> tuple[bool, str]:
     t = text.strip()
@@ -135,8 +305,106 @@ def parse_docx(fpath: str) -> list[tuple[str, bool, str, str, str]]:
         elif is_scene_divider(txt):
             output.append(("* * *", False, "", "", ""))
         else:
-            output.append((txt, False, "", "", ""))
+            formatted_runs = []
+            for run in p.runs:
+                if not run.text:
+                    continue
+                value = html.escape(run.text, quote=False)
+                if run.italic:
+                    value = f"<em>{value}</em>"
+                if run.bold:
+                    value = f"<strong>{value}</strong>"
+                formatted_runs.append(value)
+            output.append(("".join(formatted_runs) or html.escape(txt, quote=False), False, "", "", ""))
     return output
+
+def inspect_docx_import(fpath: str) -> list[str]:
+    document = docx.Document(fpath)
+    warnings = []
+    if document.tables:
+        warnings.append(f"{len(document.tables)} table(s) found; table layout is not imported into the writing editor.")
+    if document.inline_shapes:
+        warnings.append(f"{len(document.inline_shapes)} image(s) found; images are not imported into the writing editor.")
+    if document.part.element.xpath(".//w:hyperlink"):
+        warnings.append("Hyperlinks were found; their text and link targets are not imported into the writing editor.")
+    part_names = {part.partname.lower() for part in document.part.package.parts}
+    if any("footnotes" in name or "endnotes" in name for name in part_names):
+        warnings.append("Footnotes or endnotes were found; they are not imported into the writing editor.")
+    if any("comments" in name for name in part_names):
+        warnings.append("Word comments were found; they are not imported into the writing editor.")
+    return warnings
+
+def build_import_report(manifest: dict, warnings: list[str] | None = None) -> dict:
+    tuples = manifest.get("manuscript", [])
+    scene_titles = [item for item in tuples if item[0].startswith("### SCENE_TITLE: ")]
+    outline_only = 0
+    scene_count = 0
+    scene_open = False
+    synopses = 0
+    notes = 0
+    prose_count = 0
+    for position, item in enumerate(tuples):
+        text = item[0]
+        is_scene_title = text.startswith("### SCENE_TITLE: ")
+        is_chapter = text.startswith("Chapter: ")
+        synopsis = item[3].strip() if len(item) > 3 and isinstance(item[3], str) else ""
+        note = item[4].strip() if len(item) > 4 and isinstance(item[4], str) else ""
+        if is_scene_title or is_chapter:
+            synopses += bool(synopsis)
+            notes += bool(note)
+        if is_chapter:
+            scene_open = False
+            continue
+        if is_scene_title:
+            scene_count += 1
+            scene_open = True
+        elif is_scene_divider(text):
+            scene_open = False
+        elif text.strip():
+            prose_count += 1
+            if not scene_open:
+                scene_count += 1
+                scene_open = True
+
+    scene_count = max(len(scene_titles), scene_count)
+    for position, item in enumerate(tuples):
+        if not item[0].startswith("### SCENE_TITLE: "):
+            continue
+        has_prose = False
+        for entry in tuples[position + 1:]:
+            if entry[0].startswith(("### SCENE_TITLE: ", "Chapter: ")):
+                break
+            if not is_scene_divider(entry[0]) and entry[0].strip():
+                has_prose = True
+                break
+        if not has_prose:
+            outline_only += 1
+    paragraphs = [
+        item[0] for item in tuples
+        if not item[0].startswith(("### SCENE_TITLE: ", "Chapter: "))
+        and not is_scene_divider(item[0])
+    ]
+    formatted_count = sum(
+        1 for paragraph in paragraphs
+        if re.search(r"</?(?:strong|em)>", paragraph, re.IGNORECASE)
+    )
+    word_count = len(html_to_text("\n".join(paragraphs)).split())
+    report_warnings = list(warnings or [])
+    report_warnings.extend(manifest.get("import_warnings", []))
+    return {
+        "chapters": sum(item[0].startswith("Chapter: ") for item in tuples),
+        "scenes": scene_count,
+        "outline_only": outline_only,
+        "paragraphs": len(paragraphs),
+        "words": word_count,
+        "formatted_paragraphs": formatted_count,
+        "characters": len(manifest.get("characters", [])),
+        "locations": len(manifest.get("locations", [])),
+        "lore": len(manifest.get("lore", [])),
+        "synopses": synopses,
+        "notes": notes,
+        "warnings": list(dict.fromkeys(report_warnings)),
+    }
 
 def parse_plaintext(fpath: str) -> list[tuple[str, bool, str, str, str]]:
     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
@@ -156,116 +424,244 @@ def parse_scrivener_project(scriv_path: str) -> dict:
     files_map = {}
     for root, _, files in os.walk(scriv_path):
         low_root = root.lower()
-        if any(x in low_root for x in ['settings', 'quicklook', 'snapshots', 'annotations']):
+        if any(x in low_root for x in ['settings', 'quicklook', 'snapshots']):
             continue
-        parent_dir = os.path.basename(root)
+        data_id = os.path.basename(root)
         for f in files:
             full_p = os.path.join(root, f)
             fl = f.lower()
-            file_stem = os.path.splitext(f)[0]
+            if fl in ('content.rtf', 'content.txt'):
+                files_map.setdefault(data_id, {})['content'] = full_p
+            elif fl in ('synopsis.rtf', 'synopsis.txt'):
+                files_map.setdefault(data_id, {})['synopsis'] = full_p
+            elif fl in ('notes.rtf', 'notes.txt', 'note.rtf', 'note.txt'):
+                files_map.setdefault(data_id, {})['notes'] = full_p
+            elif fl in ('annotations.rtf', 'annotations.txt', 'annotation.rtf', 'annotation.txt'):
+                files_map.setdefault(data_id, {})['annotations'] = full_p
+            elif fl in ('comments.rtf', 'comments.txt', 'comment.rtf', 'comment.txt'):
+                files_map.setdefault(data_id, {})['comments'] = full_p
+            elif fl in ('references.rtf', 'references.txt'):
+                files_map.setdefault(data_id, {})['references'] = full_p
 
-            for key in [parent_dir, file_stem]:
-                if key not in files_map:
-                    files_map[key] = {}
-                if fl in ['content.rtf', 'content.txt'] or fl.endswith(('.rtf', '.txt')):
-                    if 'content' not in files_map[key]:
-                        files_map[key]['content'] = full_p
-                if 'synopsis' in fl:
-                    files_map[key]['synopsis'] = full_p
-                if 'notes' in fl or 'note' in fl:
-                    files_map[key]['notes'] = full_p
-
-    scrivx_files = [f for f in os.listdir(scriv_path) if f.endswith('.scrivx')]
+    scrivx_files = sorted(f for f in os.listdir(scriv_path) if f.lower().endswith('.scrivx'))
     manuscript_tuples = []
     characters = []
     locations = []
     lore_entries = []
+    project_metadata = {}
 
     if scrivx_files:
         scrivx_path = os.path.join(scriv_path, scrivx_files[0])
         try:
             tree = ET.parse(scrivx_path)
             root = tree.getroot()
+            project_metadata.update({
+                "scrivx_file": os.path.basename(scrivx_path),
+                "project_attributes": dict(root.attrib),
+            })
 
-            def traverse_folder(item_node, current_folder=""):
+            def xml_value(element):
+                children = list(element)
+                value = (element.text or "").strip()
+                if not children and not element.attrib:
+                    return value
+                result = {}
+                if element.attrib:
+                    result["@attributes"] = dict(element.attrib)
+                if value:
+                    result["#text"] = value
+                for child in children:
+                    child_value = xml_value(child)
+                    if child.tag in result:
+                        if not isinstance(result[child.tag], list):
+                            result[child.tag] = [result[child.tag]]
+                        result[child.tag].append(child_value)
+                    else:
+                        result[child.tag] = child_value
+                return result
+
+            def item_metadata(item_node, title, uuid_val, itype, source_path):
+                metadata = {}
+                for child in item_node:
+                    if child.tag in ("Title", "Children"):
+                        continue
+                    value = xml_value(child)
+                    if child.tag in metadata:
+                        if not isinstance(metadata[child.tag], list):
+                            metadata[child.tag] = [metadata[child.tag]]
+                        metadata[child.tag].append(value)
+                    else:
+                        metadata[child.tag] = value
+                return {
+                    "uuid": uuid_val,
+                    "type": itype,
+                    "title": title,
+                    "source_path": source_path,
+                    "metadata": metadata,
+                }
+
+            project_metadata["metadata"] = {
+                child.tag: xml_value(child)
+                for child in root
+                if child.tag != "Binder"
+            }
+
+            def attach_auxiliary_files(metadata, bundle):
+                extras = {
+                    role: read_file_content(bundle[role])
+                    for role in ("annotations", "comments", "references")
+                    if bundle.get(role)
+                }
+                if extras:
+                    metadata["external_files"] = extras
+                return metadata
+
+            def traverse_folder(item_node, path=()):
                 nonlocal manuscript_tuples, characters, locations, lore_entries
                 title_node = item_node.find('Title')
                 raw_title = title_node.text.strip() if title_node is not None and title_node.text else ""
                 title_lower = raw_title.lower()
                 itype = item_node.attrib.get('Type', '')
                 uuid_val = str(item_node.attrib.get('UUID') or item_node.attrib.get('Id') or "")
+                item_path = (*path, raw_title) if raw_title else path
+                source_metadata = item_metadata(item_node, raw_title, uuid_val, itype, list(item_path))
 
                 is_char_folder = "character" in title_lower or "cast" in title_lower or "people" in title_lower
                 is_loc_folder = "place" in title_lower or "location" in title_lower or "setting" in title_lower
                 is_lore_folder = "research" in title_lower or "lore" in title_lower or "glossary" in title_lower or "world" in title_lower
 
                 file_bundle = files_map.get(uuid_val, {})
-                content_text = read_file_content(file_bundle.get('content', ''))
-                synopsis_text = read_file_content(file_bundle.get('synopsis', ''))
-                notes_text = read_file_content(file_bundle.get('notes', ''))
+                source_metadata = attach_auxiliary_files(source_metadata, file_bundle)
+                content_text = read_file_content(file_bundle.get('content', ''), preserve_formatting=True)
+                synopsis_text = read_file_content(file_bundle.get('synopsis', '')) or (item_node.findtext('Synopsis') or '').strip()
+                notes_text = read_file_content(file_bundle.get('notes', '')) or (item_node.findtext('Notes') or '').strip()
+                if itype.lower() == "folder":
+                    project_metadata.setdefault("binder_folders", []).append(source_metadata)
 
                 if is_char_folder:
-                    children = item_node.findall('Children/BinderItem') if item_node.find('Children') is not None else []
-                    for ch in children:
-                        c_title = ch.find('Title').text.strip() if ch.find('Title') is not None and ch.find('Title').text else ""
-                        c_uuid = str(ch.attrib.get('UUID') or ch.attrib.get('Id') or "")
-                        c_bundle = files_map.get(c_uuid, {})
-                        c_bio = read_file_content(c_bundle.get('content', '')) or read_file_content(c_bundle.get('notes', ''))
-                        c_syn = read_file_content(c_bundle.get('synopsis', ''))
-                        if c_title:
-                            characters.append({"name": c_title, "bio": c_bio, "synopsis": c_syn})
+                    def collect_characters(folder_node, folder_path):
+                        children_node = folder_node.find('Children')
+                        for child in children_node.findall('BinderItem') if children_node is not None else []:
+                            child_title_node = child.find('Title')
+                            child_title = child_title_node.text.strip() if child_title_node is not None and child_title_node.text else ""
+                            child_uuid = str(child.attrib.get('UUID') or child.attrib.get('Id') or "")
+                            child_type = child.attrib.get('Type', '')
+                            child_path = (*folder_path, child_title) if child_title else folder_path
+                            child_meta = item_metadata(child, child_title, child_uuid, child_type, list(child_path))
+                            child_bundle = files_map.get(child_uuid, {})
+                            child_meta = attach_auxiliary_files(child_meta, child_bundle)
+                            child_content = read_file_content(child_bundle.get('content', ''))
+                            child_notes = read_file_content(child_bundle.get('notes', '')) or (child.findtext('Notes') or '').strip()
+                            child_synopsis = read_file_content(child_bundle.get('synopsis', '')) or (child.findtext('Synopsis') or '').strip()
+                            grandchildren = child.find('Children')
+                            if child_type == 'Folder' or grandchildren is not None:
+                                collect_characters(child, child_path)
+                            elif child_title:
+                                characters.append({
+                                    "name": child_title,
+                                    "bio": child_content or child_notes,
+                                    "synopsis": child_synopsis,
+                                    "notes": child_notes,
+                                    "metadata": child_meta,
+                                })
+                    collect_characters(item_node, item_path)
                     return
 
                 if is_loc_folder:
-                    children = item_node.findall('Children/BinderItem') if item_node.find('Children') is not None else []
-                    for loc in children:
-                        l_title = loc.find('Title').text.strip() if loc.find('Title') is not None and loc.find('Title').text else ""
-                        l_uuid = str(loc.attrib.get('UUID') or loc.attrib.get('Id') or "")
-                        l_bundle = files_map.get(l_uuid, {})
-                        l_desc = read_file_content(l_bundle.get('content', '')) or read_file_content(l_bundle.get('notes', ''))
-                        if l_title:
-                            locations.append({"name": l_title, "desc": l_desc})
+                    def collect_locations(folder_node, folder_path):
+                        children_node = folder_node.find('Children')
+                        for child in children_node.findall('BinderItem') if children_node is not None else []:
+                            child_title_node = child.find('Title')
+                            child_title = child_title_node.text.strip() if child_title_node is not None and child_title_node.text else ""
+                            child_uuid = str(child.attrib.get('UUID') or child.attrib.get('Id') or "")
+                            child_type = child.attrib.get('Type', '')
+                            child_path = (*folder_path, child_title) if child_title else folder_path
+                            child_meta = item_metadata(child, child_title, child_uuid, child_type, list(child_path))
+                            child_bundle = files_map.get(child_uuid, {})
+                            child_meta = attach_auxiliary_files(child_meta, child_bundle)
+                            child_content = read_file_content(child_bundle.get('content', ''))
+                            child_notes = read_file_content(child_bundle.get('notes', '')) or (child.findtext('Notes') or '').strip()
+                            child_synopsis = read_file_content(child_bundle.get('synopsis', '')) or (child.findtext('Synopsis') or '').strip()
+                            grandchildren = child.find('Children')
+                            if child_type == 'Folder' or grandchildren is not None:
+                                collect_locations(child, child_path)
+                            elif child_title:
+                                locations.append({
+                                    "name": child_title,
+                                    "desc": child_content or child_notes,
+                                    "synopsis": child_synopsis,
+                                    "notes": child_notes,
+                                    "metadata": child_meta,
+                                })
+                    collect_locations(item_node, item_path)
                     return
 
                 if is_lore_folder:
-                    children = item_node.findall('Children/BinderItem') if item_node.find('Children') is not None else []
-                    for rule in children:
-                        r_title = rule.find('Title').text.strip() if rule.find('Title') is not None and rule.find('Title').text else ""
-                        r_uuid = str(rule.attrib.get('UUID') or rule.attrib.get('Id') or "")
-                        r_bundle = files_map.get(r_uuid, {})
-                        r_def = read_file_content(r_bundle.get('content', '')) or read_file_content(r_bundle.get('synopsis', ''))
-                        if r_title and r_def:
-                            lore_entries.append({"term": r_title, "definition": r_def})
+                    def collect_lore(folder_node, folder_path):
+                        children_node = folder_node.find('Children')
+                        for child in children_node.findall('BinderItem') if children_node is not None else []:
+                            child_title_node = child.find('Title')
+                            child_title = child_title_node.text.strip() if child_title_node is not None and child_title_node.text else ""
+                            child_uuid = str(child.attrib.get('UUID') or child.attrib.get('Id') or "")
+                            child_type = child.attrib.get('Type', '')
+                            child_path = (*folder_path, child_title) if child_title else folder_path
+                            child_meta = item_metadata(child, child_title, child_uuid, child_type, list(child_path))
+                            child_bundle = files_map.get(child_uuid, {})
+                            child_meta = attach_auxiliary_files(child_meta, child_bundle)
+                            child_content = read_file_content(child_bundle.get('content', ''))
+                            child_notes = read_file_content(child_bundle.get('notes', '')) or (child.findtext('Notes') or '').strip()
+                            child_synopsis = read_file_content(child_bundle.get('synopsis', '')) or (child.findtext('Synopsis') or '').strip()
+                            grandchildren = child.find('Children')
+                            if child_type == 'Folder' or grandchildren is not None:
+                                collect_lore(child, child_path)
+                            elif child_title:
+                                definition = child_content or child_synopsis or child_notes
+                                lore_entries.append({
+                                    "term": child_title,
+                                    "definition": definition,
+                                    "notes": child_notes,
+                                    "metadata": child_meta,
+                                })
+                    collect_lore(item_node, item_path)
                     return
 
                 children = item_node.findall('Children/BinderItem') if item_node.find('Children') is not None else []
-                if itype == 'Folder' or (children and itype != 'Text'):
-                    folder_name = raw_title or current_folder or "Chapter"
-                    manuscript_tuples.append((f"Chapter: {folder_name}", True, folder_name, synopsis_text, notes_text))
+                if raw_title.lower() in ('draft', 'manuscript') and children:
                     for child in children:
-                        traverse_folder(child, folder_name)
+                        traverse_folder(child, item_path)
+                    return
+                if itype == 'Folder' or (children and itype != 'Text'):
+                    folder_name = raw_title or "Chapter"
+                    manuscript_tuples.append((f"Chapter: {folder_name}", True, folder_name, synopsis_text, notes_text, source_metadata))
+                    for child in children:
+                        traverse_folder(child, item_path)
                 elif itype in ['Text', 'Document'] or not children:
                     doc_title = raw_title or "Scene"
                     paras = normalize_paragraphs(content_text)
-                    if paras:
-                        manuscript_tuples.append((f"### SCENE_TITLE: {doc_title}", False, doc_title, synopsis_text, notes_text))
+                    if paras or synopsis_text.strip() or notes_text.strip():
+                        manuscript_tuples.append((f"### SCENE_TITLE: {doc_title}", False, doc_title, synopsis_text, notes_text, source_metadata))
                         for p in paras:
                             manuscript_tuples.append((p, False, doc_title, synopsis_text, notes_text))
 
-            target_root = root.find('Binder') or root
-            for top_item in target_root.findall('BinderItem') if target_root.find('BinderItem') is not None else target_root.findall('Children/BinderItem'):
+            binder_node = root.find('Binder')
+            target_root = binder_node if binder_node is not None else root
+            top_items = target_root.findall('BinderItem')
+            if not top_items:
+                children_node = target_root.find('Children')
+                top_items = children_node.findall('BinderItem') if children_node is not None else []
+            for top_item in top_items:
                 traverse_folder(top_item)
 
-        except Exception as e:
-            print(f"Scrivener parse notice: {e}")
+        except ET.ParseError as e:
+            raise ValueError(f"Could not read Scrivener project metadata from {os.path.basename(scrivx_path)}: {e}") from e
 
     if not manuscript_tuples and files_map:
         for key, bundle in sorted(files_map.items()):
-            content_text = read_file_content(bundle.get('content', ''))
+            content_text = read_file_content(bundle.get('content', ''), preserve_formatting=True)
             synopsis_text = read_file_content(bundle.get('synopsis', ''))
             notes_text = read_file_content(bundle.get('notes', ''))
             paras = normalize_paragraphs(content_text)
-            if len(paras) >= 1:
+            if paras or synopsis_text.strip() or notes_text.strip():
                 manuscript_tuples.append((f"### SCENE_TITLE: {key}", False, str(key), synopsis_text, notes_text))
                 for p in paras:
                     manuscript_tuples.append((p, False, str(key), synopsis_text, notes_text))
@@ -274,7 +670,8 @@ def parse_scrivener_project(scriv_path: str) -> dict:
         "manuscript": manuscript_tuples,
         "characters": characters,
         "locations": locations,
-        "lore": lore_entries
+        "lore": lore_entries,
+        "scrivener": project_metadata,
     }
 
 def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
@@ -291,10 +688,11 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
     now = time.strftime("%Y-%m-%d %H:%M:%S")
 
     book_id = f"book_{uuid.uuid4().hex[:8]}"
+    book_card = json.dumps({"scrivener": manifest.get("scrivener", {})}, ensure_ascii=False)
     c.execute("""
         INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
-        VALUES (?, NULL, 'default', 'BOOK', ?, 10.0, 'Imported Manuscript', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
-    """, (book_id, book_title, now, now))
+        VALUES (?, NULL, 'default', 'BOOK', ?, 10.0, 'Imported Manuscript', '', '', 'DRAFT', 0, 0, '', ?, ?, ?)
+    """, (book_id, book_title, book_card, now, now))
 
     current_ch_id = None
     current_sc_id = None
@@ -302,6 +700,8 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
     current_custom_title = None
     current_synopsis = ""
     current_notes = ""
+    current_scene_metadata = {}
+    current_chapter_metadata = {}
     ch_sort = 10.0
     sc_sort = 10.0
     sc_num = 0
@@ -309,18 +709,24 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
     first_created_scene_id = None
 
     def flush_scene():
-        nonlocal current_sc_id, current_scene_paras, first_created_scene_id, current_custom_title, current_synopsis, current_notes
-        if current_sc_id and current_scene_paras:
-            full_text = "\n\n".join(current_scene_paras).strip()
-            wc = len(full_text.split())
-            final_synopsis = current_synopsis.strip() if current_synopsis.strip() else ((full_text[:140] + "...") if len(full_text) > 140 else full_text)
-            final_title = derive_smart_scene_title(current_scene_paras[0], sc_num, current_ch_title, current_custom_title)
+        nonlocal current_sc_id, current_scene_paras, first_created_scene_id, current_custom_title, current_synopsis, current_notes, current_scene_metadata
+        if current_sc_id:
+            full_text = "\n".join(
+                f"<p>{_safe_inline_markup(paragraph)}</p>"
+                for paragraph in current_scene_paras
+            ).strip()
+            wc = len(html_to_text(full_text).split())
+            plain_text = html_to_text(full_text)
+            final_synopsis = current_synopsis.strip() if current_synopsis.strip() else ((plain_text[:140] + "...") if len(plain_text) > 140 else plain_text)
+            first_para = html_to_text(current_scene_paras[0]) if current_scene_paras else ""
+            final_title = derive_smart_scene_title(first_para, sc_num, current_ch_title, current_custom_title)
+            imported_card = json.dumps({"scrivener": current_scene_metadata}, ensure_ascii=False) if current_scene_metadata else "{}"
             
             c.execute("""
                 UPDATE binder_nodes 
-                SET content = ?, word_count = ?, synopsis = ?, notes = ?, title = ?
+                SET content = ?, word_count = ?, synopsis = ?, notes = ?, title = ?, card_data = ?
                 WHERE id = ?
-            """, (full_text, wc, final_synopsis, current_notes, final_title, current_sc_id))
+            """, (full_text, wc, final_synopsis, current_notes, final_title, imported_card, current_sc_id))
             
             if not first_created_scene_id:
                 first_created_scene_id = current_sc_id
@@ -329,6 +735,32 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
             current_custom_title = None
             current_synopsis = ""
             current_notes = ""
+            current_scene_metadata = {}
+            current_sc_id = None
+
+    def ensure_chapter():
+        nonlocal current_ch_id
+        if current_ch_id:
+            return
+        current_ch_id = f"ch_{uuid.uuid4().hex[:8]}"
+        c.execute("""
+            INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+            VALUES (?, ?, 'default', 'CHAPTER', 'Chapter 1', 10.0, '', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
+        """, (current_ch_id, book_id, now, now))
+
+    def ensure_scene():
+        nonlocal current_sc_id, sc_num, sc_sort, current_scene_metadata
+        if current_sc_id:
+            return
+        ensure_chapter()
+        sc_num += 1
+        current_sc_id = f"scene_{uuid.uuid4().hex[:8]}"
+        placeholder_title = current_custom_title or f"Scene {sc_num}"
+        c.execute("""
+            INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
+            VALUES (?, ?, 'default', 'SCENE', ?, ?, '', '', '', 'DRAFT', 0, 0, '', ?, ?, ?)
+        """, (current_sc_id, current_ch_id, placeholder_title, sc_sort, json.dumps({"scrivener": current_scene_metadata}, ensure_ascii=False) if current_scene_metadata else "{}", now, now))
+        sc_sort += 10.0
 
     for item in tuples:
         text = item[0]
@@ -336,16 +768,18 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
         custom_sc_title = item[2] if len(item) > 2 else None
         item_synopsis = item[3] if len(item) > 3 else ""
         item_notes = item[4] if len(item) > 4 else ""
+        item_scrivener_metadata = item[5] if len(item) > 5 and isinstance(item[5], dict) else {}
 
         t_clean = text.strip()
         is_ch, ch_heading = is_chapter_heading(t_clean, is_heading_style=is_h)
 
         if t_clean.startswith("### SCENE_TITLE: "):
             flush_scene()
-            current_sc_id = None
             current_custom_title = t_clean.replace("### SCENE_TITLE: ", "").strip()
             current_synopsis = item_synopsis
             current_notes = item_notes
+            current_scene_metadata = item_scrivener_metadata
+            ensure_scene()
             continue
 
         if is_ch or t_clean.startswith("Chapter: "):
@@ -355,38 +789,25 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
             sc_sort = 10.0
             current_ch_id = f"ch_{uuid.uuid4().hex[:8]}"
             current_ch_title = ch_heading if is_ch else t_clean.replace("Chapter: ", "").strip()
+            current_chapter_metadata = item_scrivener_metadata
             
             c.execute("""
                 INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
-                VALUES (?, ?, 'default', 'CHAPTER', ?, ?, ?, '', ?, 'DRAFT', 0, 0, '', '{}', ?, ?)
-            """, (current_ch_id, book_id, current_ch_title, ch_sort, item_synopsis, item_notes, now, now))
+                VALUES (?, ?, 'default', 'CHAPTER', ?, ?, ?, '', ?, 'DRAFT', 0, 0, '', ?, ?, ?)
+            """, (current_ch_id, book_id, current_ch_title, ch_sort, item_synopsis, item_notes, json.dumps({"scrivener": current_chapter_metadata}, ensure_ascii=False), now, now))
             ch_sort += 10.0
             continue
 
-        if not current_ch_id:
-            current_ch_id = f"ch_{uuid.uuid4().hex[:8]}"
-            c.execute("""
-                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
-                VALUES (?, ?, 'default', 'CHAPTER', 'Chapter 1', 10.0, '', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
-            """, (current_ch_id, book_id, now, now))
-
         if is_scene_divider(t_clean):
             flush_scene()
-            current_sc_id = None
             continue
 
-        if not current_sc_id:
-            sc_num += 1
-            current_sc_id = f"scene_{uuid.uuid4().hex[:8]}"
-            placeholder_title = current_custom_title or custom_sc_title or f"Scene {sc_num}"
-            current_synopsis = item_synopsis or current_synopsis
-            current_notes = item_notes or current_notes
-
-            c.execute("""
-                INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, synopsis, content, notes, status, word_count, is_archived, epigraph, card_data, created_at, updated_at)
-                VALUES (?, ?, 'default', 'SCENE', ?, ?, '', '', '', 'DRAFT', 0, 0, '', '{}', ?, ?)
-            """, (current_sc_id, current_ch_id, placeholder_title, sc_sort, now, now))
-            sc_sort += 10.0
+        current_scene_metadata = item_scrivener_metadata or current_scene_metadata
+        current_synopsis = item_synopsis or current_synopsis
+        current_notes = item_notes or current_notes
+        if not current_custom_title and custom_sc_title:
+            current_custom_title = custom_sc_title
+        ensure_scene()
 
         current_scene_paras.append(t_clean)
 
@@ -397,7 +818,12 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
         name_clean = ch["name"].strip()
         if name_clean and len(name_clean) >= 2:
             eid = re.sub(r'\W+', '_', name_clean.lower())
-            axioms = json.dumps({"bio": ch.get("bio", "")[:2000], "synopsis": ch.get("synopsis", "")})
+            axioms = json.dumps({
+                "bio": ch.get("bio", ""),
+                "synopsis": ch.get("synopsis", ""),
+                "notes": ch.get("notes", ""),
+                "scrivener": ch.get("metadata", {}),
+            }, ensure_ascii=False)
             sensory = ch.get("synopsis", "")[:200]
             c.execute("""
                 INSERT INTO canonical_entities (entity_id, name, entity_type, role, aliases, sensory_profile, status, axioms, created_at)
@@ -412,7 +838,12 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
         loc_name = loc["name"].strip()
         if loc_name:
             eid = f"loc_{re.sub(r'\W+', '_', loc_name.lower())}"
-            axioms = json.dumps({"description": loc.get("desc", "")[:2000]})
+            axioms = json.dumps({
+                "description": loc.get("desc", ""),
+                "synopsis": loc.get("synopsis", ""),
+                "notes": loc.get("notes", ""),
+                "scrivener": loc.get("metadata", {}),
+            }, ensure_ascii=False)
             c.execute("""
                 INSERT INTO canonical_entities (entity_id, name, entity_type, role, aliases, sensory_profile, status, axioms, created_at)
                 VALUES (?, ?, 'LOCATION', 'SUPPORTING', '', '', 'ALIVE', ?, ?)
@@ -425,9 +856,12 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
         definition = rule["definition"].strip()
         if term and definition:
             c.execute("""
-                INSERT OR REPLACE INTO style_sheet (term, category, rule_definition, pronunciation, created_at)
-                VALUES (?, 'LORE', ?, '', ?)
-            """, (term, definition[:800], now))
+                INSERT OR REPLACE INTO style_sheet (term, category, rule_definition, pronunciation, metadata_json, created_at)
+                VALUES (?, 'LORE', ?, '', ?, ?)
+            """, (term, definition, json.dumps({
+                "notes": rule.get("notes", ""),
+                "scrivener": rule.get("metadata", {}),
+            }, ensure_ascii=False), now))
 
     conn.commit()
     conn.close()

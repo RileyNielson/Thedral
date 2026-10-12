@@ -53,14 +53,14 @@
         <button 
           @click="snapCamera('pacing')" 
           class="px-2.5 py-0.5 rounded text-zinc-400 hover:text-amber-400 transition" 
-          title="Side View: Tension Mountain Range (Time vs Stakes)"
+          title="Side view: text-derived tension estimate over story sequence"
         >
           🏔️ Pacing
         </button>
         <button 
           @click="snapCamera('map')" 
           class="px-2.5 py-0.5 rounded text-zinc-400 hover:text-amber-400 transition" 
-          title="Top-Down View: Geographic Story Map (Time vs Space)"
+          title="Top-down view: mapped locations over story sequence"
         >
           🗺️ Map
         </button>
@@ -92,7 +92,7 @@
       <div v-if="isLoading" class="absolute inset-0 flex items-center justify-center bg-zinc-950/80 z-20">
         <div class="flex flex-col items-center gap-3">
           <Loader class="w-7 h-7 text-amber-500 animate-spin" />
-          <span class="text-xs font-mono text-zinc-400">Rendering Narrative Spacetime...</span>
+          <span class="text-xs font-mono text-zinc-400">Rendering narrative map…</span>
         </div>
       </div>
     </div>
@@ -105,12 +105,13 @@
       <div class="flex items-center justify-between text-xs font-bold text-rose-400 border-b border-zinc-800 pb-2">
         <span class="flex items-center gap-1.5">
           <AlertTriangle class="w-4 h-4 text-rose-500" /> 
-          Continuity Collisions ({{ store.astrolabeAnomalies.length }})
+          Continuity signals ({{ store.astrolabeAnomalies.length }})
         </span>
         <button @click="store.astrolabeAnomalies = []" class="text-zinc-500 hover:text-zinc-300">
           <X class="w-3.5 h-3.5" />
         </button>
       </div>
+      <p class="text-[9px] leading-snug text-zinc-500">Heuristic flags based on mapped story data. Treat as review prompts, not confirmed continuity errors.</p>
 
       <div class="max-h-48 overflow-y-auto space-y-2 text-[11px] text-zinc-300 pr-1 custom-scrollbar">
         <div 
@@ -146,7 +147,7 @@
         </div>
         <div>
           <h3 class="text-base font-bold text-white tracking-wide">Surveying Story Universe</h3>
-          <p class="text-xs text-zinc-400 mt-0.5">Local engine analyzing causal trajectories</p>
+          <p class="text-xs text-zinc-400 mt-0.5">Extracting suggestions for you to review before they change mapped story data</p>
         </div>
         
         <div class="space-y-1.5">
@@ -172,7 +173,7 @@
 
         <div class="flex items-center justify-between pt-2 border-t border-zinc-800/80">
           <span class="text-[11px] text-zinc-500 font-mono">
-            Mapped Events: <strong class="text-amber-400">{{ store.surveyProgress.extracted }}</strong>
+            Suggested events: <strong class="text-amber-400">{{ store.surveyProgress.extracted }}</strong>
           </span>
           <button 
             @click="cancelSurvey" 
@@ -188,7 +189,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { store, showToast } from '../store.js'
 import { Clock, Satellite, AlertTriangle, ExternalLink, Loader, X, Crosshair } from 'lucide-vue-next'
 
@@ -203,7 +204,8 @@ const getPlotly = async () => {
   try {
     const mod = await import('plotly.js-dist-min')
     return mod.default || mod
-  } catch (e) {
+  } catch {
+    showToast('Could not load the Cosmograph plotting library.', 'error')
     return null
   }
 }
@@ -216,7 +218,7 @@ const snapCamera = async (mode) => {
 
   let eye = { x: 0.1, y: -2.3, z: 1.0 } // 3D Isometric default
   if (mode === 'pacing') {
-    eye = { x: 0.0, y: -3.2, z: 0.0 }   // Flat Side Elevation: Time (X) vs Stakes (Z)
+    eye = { x: 0.0, y: -3.2, z: 0.0 }   // Side elevation: story sequence versus text-derived estimate
   } else if (mode === 'map') {
     eye = { x: 0.0, y: 0.0, z: 3.2 }   // Top-Down God's Eye: Time (X) vs Space (Y)
   }
@@ -229,8 +231,8 @@ const snapCamera = async (mode) => {
 const renderAstrolabe = async () => {
   isLoading.value = true
   try {
-    const bId = store.activeNode?.book_id || (store.tree[0] && store.tree[0].id) || ''
-    const res = await fetch(`${API_BASE}/api/narrative/astrolabe?book_id=${bId}&projection=${store.projectionMode}&time_mode=${store.timeMode}`)
+    const bId = store.activeBookId || ''
+    const res = await fetch(`${API_BASE}/api/narrative/astrolabe?book_id=${encodeURIComponent(bId)}&projection=${encodeURIComponent(store.projectionMode)}&time_mode=${encodeURIComponent(store.timeMode)}`)
     if (!res.ok) throw new Error('Astrolabe endpoint returned ' + res.status)
     const manifest = await res.json()
     
@@ -265,7 +267,7 @@ const renderAstrolabe = async () => {
         }
       })
     }
-  } catch (err) {
+  } catch {
     showToast(`Astrolabe Render: ${err.message}`, 'error')
   } finally {
     isLoading.value = false
@@ -283,7 +285,7 @@ const toggleTimeMode = () => {
 }
 
 const surveyStory = async () => {
-  const bId = (store.tree[0] && store.tree[0].id) || ''
+  const bId = store.activeBookId || ''
   store.surveyProgress = {
     active: true,
     current: 0,
@@ -295,7 +297,7 @@ const surveyStory = async () => {
 
   if (window.EventSource) {
     if (evtSource) evtSource.close()
-    evtSource = new EventSource(`${API_BASE}/api/narrative/survey-stream?book_id=${bId}`)
+    evtSource = new EventSource(`${API_BASE}/api/narrative/survey-stream?book_id=${encodeURIComponent(bId)}`)
     
     evtSource.onmessage = (event) => {
       try {
@@ -306,20 +308,33 @@ const surveyStory = async () => {
         store.surveyProgress.current_title = data.message || ''
         store.surveyProgress.extracted = data.extracted || 0
         
+        if (data.error) {
+          evtSource.close()
+          store.surveyProgress.active = false
+          showToast(data.error, 'error')
+          return
+        }
         if (data.done) {
           evtSource.close()
           store.surveyProgress.active = false
           renderAstrolabe()
+          store.toggleModal('review', true)
         }
       } catch (err) {
-        console.warn('[Survey Stream Parse Error]', err)
+        evtSource.close()
+        store.surveyProgress.active = false
+        showToast('Could not read Cosmograph survey progress.', 'error')
       }
     }
 
     evtSource.onerror = () => {
       if (evtSource) evtSource.close()
       store.surveyProgress.active = false
+      showToast('Cosmograph survey connection was interrupted.', 'error')
     }
+  } else {
+    store.surveyProgress.active = false
+    showToast('This browser does not support the survey progress stream.', 'error')
   }
 }
 
@@ -331,7 +346,11 @@ const cancelSurvey = () => {
 // Sniper-Scroll: Jumps to scene and fires crosshair highlight in prose
 const jumpToAnomaly = async (sceneId, entityName) => {
   if (!sceneId) return
-  await store.loadScene(sceneId)
+  const loaded = await store.loadScene(sceneId)
+  if (!loaded) {
+    showToast('Save your current scene before opening this continuity signal.', 'error')
+    return
+  }
   store.viewMode = 'editor'
   
   setTimeout(() => {
@@ -340,6 +359,13 @@ const jumpToAnomaly = async (sceneId, entityName) => {
     }))
   }, 200)
 }
+
+watch(
+  () => [store.activeBookId, store.viewMode],
+  ([, viewMode]) => {
+    if (viewMode === 'cosmograph' || viewMode === '3d') renderAstrolabe()
+  }
+)
 
 onMounted(() => {
   renderAstrolabe()
@@ -350,6 +376,7 @@ onMounted(() => {
       const Plotly = await getPlotly()
       if (Plotly) Plotly.Plots.resize(plotEl)
     })
+
     resizeObserver.observe(plotEl)
   }
 })

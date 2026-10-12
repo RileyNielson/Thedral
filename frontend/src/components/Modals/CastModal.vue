@@ -166,13 +166,13 @@ const newEntity = ref({
 // Returns concatenated prose of all scenes in active book to detect active cast
 const activeBookProse = computed(() => {
   const scenes = []
-  for (const book of store.tree || []) {
-    for (const ch of book.children || []) {
-      for (const sc of ch.children || []) {
-        if (sc.content) scenes.push(sc.content)
-      }
+  const visit = (nodes) => {
+    for (const node of nodes || []) {
+      if (node.node_type === 'SCENE' && node.content) scenes.push(node.content)
+      visit(node.children)
     }
   }
+  visit(store.getBook()?.children)
   return scenes.join(' ').toLowerCase()
 })
 

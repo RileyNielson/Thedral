@@ -4,7 +4,8 @@ import hashlib
 import sqlite3
 from backend.database import get_db
 from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
-from backend.spectrometer import analyze_neuro_spectrum, calculate_manuscript_comps
+from backend.spectrometer import analyze_text_signals
+from backend.text_utils import html_to_text
 
 def generate_narrator_pack(book_id: str | None = None) -> str:
     conn = get_db()
@@ -109,45 +110,57 @@ def generate_authorship_certificate(book_id: str | None = None) -> dict:
         WHERE ch.parent_id = ? AND s.node_type = 'SCENE'
     """, (book["id"],))
     stats = c.fetchone()
+    c.execute("""
+        SELECT s.id, s.title, s.content
+        FROM binder_nodes s
+        JOIN binder_nodes ch ON s.parent_id = ch.id
+        WHERE ch.parent_id = ? AND s.node_type = 'SCENE'
+        ORDER BY ch.sort_order ASC, s.sort_order ASC
+    """, (book["id"],))
+    scene_rows = c.fetchall()
     conn.close()
 
     total_words = stats["total_words"] or 0
     total_revs = rev_data["total_revs"] or 0
     scene_count = stats["scene_count"] or 0
-    timespan_start = rev_data["earliest_rev"] or book["created_at"] or "2026-01-01 00:00:00"
-    timespan_end = rev_data["latest_rev"] or time.strftime("%Y-%m-%d %H:%M:%S")
+    timespan_start = rev_data["earliest_rev"] or "No revision recorded"
+    timespan_end = rev_data["latest_rev"] or "No revision recorded"
 
-    raw_signature = f"{book['title']}_{total_words}_{total_revs}_{timespan_start}_{timespan_end}_{book['id']}"
-    verification_hash = hashlib.sha256(raw_signature.encode('utf-8')).hexdigest()
+    snapshot = {
+        "title": book["title"],
+        "scenes": [
+            {"id": row["id"], "title": row["title"], "prose": html_to_text(row["content"] or "")}
+            for row in scene_rows
+        ],
+    }
+    verification_hash = hashlib.sha256(
+        json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
-    certificate_text = f"""===============================================================================
-       CERTIFICATE OF HUMAN AUTHORSHIP & ORGANIC DRAFTING PROVENANCE
-===============================================================================
+    report_text = f"""DRAFTING HISTORY REPORT
+======================
 
-TITLE:               {book['title']}
-PROJECT IDENTIFIER:  {book['id']}
-TOTAL CANONICAL WORDS: {total_words:,} words across {scene_count} scenes
-REVISION SNAPSHOTS:  {total_revs:,} verified incremental drafting milestones
-FIRST RECORDED DRAFT: {timespan_start}
-LATEST RECORDED DRAFT:{timespan_end}
+Manuscript: {book['title']}
+Project identifier: {book['id']}
+Current word count: {total_words:,} words across {scene_count} scenes
+Recorded revision snapshots: {total_revs:,}
+Earliest recorded revision: {timespan_start}
+Latest recorded revision: {timespan_end}
 
-CRYPTOGRAPHIC AUDIT TRAIL:
-Verification Hash: SHA256({verification_hash[:32]}...)
-Ledger Integrity:  MATHEMATICALLY VERIFIED (Append-only SQLite Event Ledger)
+CURRENT CONTENT FINGERPRINT
+SHA-256: {verification_hash}
 
-EVIDENTIARY DECLARATION:
-This document certifies that the manuscript titled "{book['title']}" exhibits the
-measurable thermodynamic signature of organic, incremental human drafting.
-The record demonstrates continuous, multi-session revision velocity, localized
-character revisions, and sequential paragraph development consistent with human 
-authorship, and inconsistent with single-prompt generative AI bulk dumping.
-
-Issued by Thedral Studio (Local-First AGPLv3 Sovereignty Architecture).
-==============================================================================="""
+The fingerprint is calculated from the current manuscript title and the ordered
+scene identifiers, titles, and plain-text prose currently stored in Thedral.
+Changing any of those values changes the fingerprint. It does not include
+revision history, prove when or by whom text was written, or establish human
+authorship. Revision counts and dates are database records and are not an
+independent audit or tamper-proof proof of provenance."""
 
     return {
         "status": "success",
-        "certificate_text": certificate_text,
+        "report_text": report_text,
+        "certificate_text": report_text,
         "verification_hash": verification_hash,
         "total_words": total_words,
         "total_revisions": total_revs,
@@ -189,7 +202,8 @@ def generate_query_synopsis(book_id: str | None = None) -> str:
 
     spine_bullets = []
     for r in rows:
-        summary = r["synopsis"] or (r["content"][:140] + "..." if r["content"] else "")
+        plain_content = html_to_text(r["content"] or "")
+        summary = r["synopsis"] or (plain_content[:140] + "..." if plain_content else "")
         if summary.strip():
             spine_bullets.append(f"- [{r['ch_title']} / {r['sc_title']}]: {summary}")
 
@@ -220,7 +234,7 @@ CAUSAL PLOT SPINE:
     except Exception as e:
         return f"Could not generate query synopsis: {e}"
 
-def generate_manuscript_genome(book_id: str | None = None) -> dict:
+def generate_manuscript_prose_signals(book_id: str | None = None) -> dict:
     conn = get_db()
     c = conn.cursor()
 
@@ -250,16 +264,14 @@ def generate_manuscript_genome(book_id: str | None = None) -> dict:
     rows = c.fetchall()
     conn.close()
 
-    full_text = " ".join([(r["content"] or "") for r in rows if r["content"]])
+    full_text = " ".join([html_to_text(r["content"] or "") for r in rows if r["content"]])
     total_words = len(full_text.split())
 
-    spectrum = analyze_neuro_spectrum(full_text)
-    comps = calculate_manuscript_comps(spectrum)
+    text_signals = analyze_text_signals(full_text)
 
     return {
         "status": "success",
         "book_id": book_id,
         "total_words": total_words,
-        "spectrum": spectrum,
-        "comps": comps
+        "text_signals": text_signals,
     }

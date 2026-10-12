@@ -1,4 +1,5 @@
 import os
+from backend.text_utils import html_to_formatted_paragraphs
 import re
 import docx
 from docx.shared import Inches, Pt
@@ -8,7 +9,11 @@ from backend.config import EXPORTS_DIR
 
 def compile_book_to_docx(
     book_id: str | None = None, 
-    output_filename: str = "Thedral_Manuscript.docx"
+    output_filename: str = "Thedral_Manuscript.docx",
+    author_name: str = "",
+    subtitle: str = "",
+    dedication: str = "",
+    chapter_ids: list[str] | None = None,
 ) -> str:
     """
     Compiles the active book into an industry-standard formatted Word manuscript (.docx).
@@ -19,20 +24,21 @@ def compile_book_to_docx(
     c = conn.cursor()
 
     # 1. Resolve Active Book Node
-    if not book_id:
+    if book_id:
+        c.execute(
+            "SELECT id, title FROM binder_nodes WHERE id = ? AND node_type = 'BOOK'",
+            (book_id,),
+        )
+        book = c.fetchone()
+        if not book:
+            conn.close()
+            raise ValueError("The selected manuscript was not found.")
+    else:
         c.execute("""
             SELECT id, title FROM binder_nodes 
             WHERE node_type = 'BOOK' AND (is_archived IS NULL OR is_archived = 0) 
             ORDER BY sort_order ASC LIMIT 1
         """)
-        book = c.fetchone()
-    else:
-        c.execute("SELECT id, title FROM binder_nodes WHERE id = ?", (book_id,))
-        book = c.fetchone()
-
-    if not book:
-        # Fallback to any book if all are marked archived
-        c.execute("SELECT id, title FROM binder_nodes WHERE node_type = 'BOOK' LIMIT 1")
         book = c.fetchone()
 
     if not book:
@@ -58,15 +64,49 @@ def compile_book_to_docx(
     run_t.font.name = "Times New Roman"
     run_t.font.size = Pt(24)
     run_t.bold = True
+    if subtitle.strip():
+        subtitle_p = doc.add_paragraph()
+        subtitle_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        subtitle_r = subtitle_p.add_run(subtitle.strip())
+        subtitle_r.font.name = "Times New Roman"
+        subtitle_r.font.size = Pt(14)
+        subtitle_r.italic = True
+    if author_name.strip():
+        author_p = doc.add_paragraph()
+        author_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        author_p.paragraph_format.space_before = Pt(24)
+        author_r = author_p.add_run(author_name.strip())
+        author_r.font.name = "Times New Roman"
+        author_r.font.size = Pt(12)
+    if dedication.strip():
+        doc.add_page_break()
+        dedication_p = doc.add_paragraph()
+        dedication_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        dedication_p.paragraph_format.space_before = Pt(216)
+        dedication_r = dedication_p.add_run(dedication.strip())
+        dedication_r.font.name = "Times New Roman"
+        dedication_r.font.size = Pt(12)
 
     # 4. Fetch Chapters in Chronological Sequence
-    c.execute("""
-        SELECT id, title, sort_order, epigraph 
-        FROM binder_nodes 
-        WHERE parent_id = ? AND node_type = 'CHAPTER' 
-        ORDER BY sort_order ASC
-    """, (book["id"],))
+    chapter_query = """
+        SELECT id, title, sort_order, epigraph
+        FROM binder_nodes
+        WHERE parent_id = ? AND node_type = 'CHAPTER'
+    """
+    chapter_params: list = [book["id"]]
+    if chapter_ids is not None:
+        if not chapter_ids:
+            conn.close()
+            raise ValueError("Select at least one chapter to export.")
+        placeholders = ",".join("?" for _ in chapter_ids)
+        chapter_query += f" AND id IN ({placeholders})"
+        chapter_params.extend(chapter_ids)
+    chapter_query += " ORDER BY sort_order ASC"
+    c.execute(chapter_query, chapter_params)
     chapters = c.fetchall()
+    if chapter_ids is not None and len(chapters) != len(set(chapter_ids)):
+        conn.close()
+        raise ValueError("One or more selected chapters do not belong to this manuscript.")
 
     for ch in chapters:
         doc.add_page_break()
@@ -115,8 +155,8 @@ def compile_book_to_docx(
                 dr.font.size = Pt(12)
 
             raw_content = sc["content"] or ""
-            for para in raw_content.split("\n\n"):
-                clean = para.strip()
+            for para in html_to_formatted_paragraphs(raw_content):
+                clean = "".join(text for text, _, _ in para).strip()
                 if not clean:
                     continue
 
@@ -136,9 +176,12 @@ def compile_book_to_docx(
                 p_obj.paragraph_format.first_line_indent = Inches(0.5)
                 p_obj.paragraph_format.line_spacing = 1.5
                 p_obj.paragraph_format.space_after = Pt(0)
-                run = p_obj.add_run(clean)
-                run.font.name = "Times New Roman"
-                run.font.size = Pt(12)
+                for text, bold, italic in para:
+                    run = p_obj.add_run(text)
+                    run.bold = bold
+                    run.italic = italic
+                    run.font.name = "Times New Roman"
+                    run.font.size = Pt(12)
 
     conn.close()
 

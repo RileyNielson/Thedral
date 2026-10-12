@@ -43,14 +43,14 @@
           </a>
         </div>
 
-        <!-- Tool 2: Authorship Certificate -->
+        <!-- Tool 2: Drafting History -->
         <div class="p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2 flex flex-col justify-between hover:border-zinc-700 transition">
           <div>
             <div class="text-xs font-bold text-emerald-400 flex items-center gap-1.5 font-mono">
-              <ShieldCheck class="w-4 h-4" /> Authorship Proof
+              <ShieldCheck class="w-4 h-4" /> Drafting History
             </div>
             <p class="text-[10px] text-zinc-500 mt-1 leading-snug">
-              Cryptographic audit trail proving organic human drafting.
+              Recorded revisions and a hash of the current manuscript text. Not proof of authorship.
             </p>
           </div>
           <button 
@@ -58,8 +58,16 @@
             :disabled="isLoading"
             class="w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 font-medium rounded text-xs text-white transition border border-zinc-700/50"
           >
-            View Certificate
+            View Report
           </button>
+        </div>
+
+        <div class="rounded-xl border border-amber-800/50 bg-amber-950/20 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div class="text-xs font-bold text-amber-300">Submission workspace</div>
+            <p class="mt-1 text-[10px] text-zinc-400">Prepare query materials, choose sample scenes, and track submissions locally.</p>
+          </div>
+          <button @click="openSubmissionWorkspace" class="rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-zinc-950 hover:bg-amber-400">Open workspace</button>
         </div>
 
         <!-- Tool 3: Query Synopsis -->
@@ -117,11 +125,15 @@ const isLoading = ref(false)
 const copied = ref(false)
 
 const activeBookId = computed(() => {
-  return store.activeNode?.book_id || (store.tree[0] && store.tree[0].id) || ''
+  return store.activeBookId || store.activeNode?.book_id || (store.tree[0] && store.tree[0].id) || ''
 })
 
 const closeModal = () => {
   store.toggleModal('career', false)
+}
+const openSubmissionWorkspace = () => {
+  store.toggleModal('career', false)
+  store.toggleModal('submission', true)
 }
 
 const copyOutput = async () => {
@@ -138,16 +150,16 @@ const copyOutput = async () => {
 
 const fetchAuthorshipProof = async () => {
   isLoading.value = true
-  outputTitle.value = 'Cryptographic Authenticity Certificate'
-  output.value = 'Calculating thermodynamic entropy and revision velocity from SQLite ledger...'
+  outputTitle.value = 'Drafting History Report'
+  output.value = 'Preparing a factual summary of stored revisions and current text fingerprint...'
   
   try {
-    const res = await fetch(`${API_BASE}/api/publishing/authorship-proof?book_id=${activeBookId.value}`)
-    if (!res.ok) throw new Error('Proof generation failed')
+    const res = await fetch(`${API_BASE}/api/publishing/drafting-history?book_id=${activeBookId.value}`)
+    if (!res.ok) throw new Error('Drafting history report failed')
     const data = await res.json()
-    output.value = data.certificate_text
+    output.value = data.report_text
   } catch(e) { 
-    output.value = 'Error generating authorship proof certificate.'
+    output.value = 'Error generating drafting history report.'
     showToast(e.message, 'error') 
   } finally {
     isLoading.value = false

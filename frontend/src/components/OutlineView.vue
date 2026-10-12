@@ -30,14 +30,14 @@
       </div>
 
       <!-- Empty Hierarchy State -->
-      <div v-if="!store.tree?.length" class="text-center py-20 text-zinc-600 space-y-3 font-serif">
+      <div v-if="!activeBooks.length" class="text-center py-20 text-zinc-600 space-y-3 font-serif">
         <BookOpen class="w-10 h-10 mx-auto text-zinc-800" />
         <p class="text-sm">No chapters or scenes found to outline.</p>
       </div>
 
       <!-- Outline Tree Hierarchy -->
       <div class="space-y-12">
-        <template v-for="book in store.tree" :key="book.id">
+        <template v-for="book in activeBooks" :key="book.id">
           
           <!-- Book / Volume Section -->
           <div class="space-y-8">
@@ -115,7 +115,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { store, showToast } from '../store.js'
 import { ListTree, PenTool, BookOpen, Folder, Plus, FileText, ExternalLink } from 'lucide-vue-next'
 
@@ -123,10 +123,10 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 const saveNote = ref('')
 let saveTimer = null
+const activeBooks = computed(() => store.getBook() ? [store.getBook()] : [])
 
 const openScene = async (sceneId) => {
-  await store.loadScene(sceneId)
-  store.viewMode = 'editor'
+  if (await store.loadScene(sceneId)) store.viewMode = 'editor'
 }
 
 const queueSaveSynopsis = (scene) => {

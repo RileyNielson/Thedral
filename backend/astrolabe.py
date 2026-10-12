@@ -3,7 +3,8 @@ import math
 import re
 import sqlite3
 from backend.telemetry import calculate_text_telemetry
-from backend.config import TENSION_KEYWORDS, FILTER_VERBS
+from backend.text_utils import html_to_text
+from backend.config import TENSION_KEYWORDS
 
 # =============================================================================
 # 1. MICRO CHAPTER LENS (Beat-by-Beat Narrative Waveform + Live Location)
@@ -33,7 +34,7 @@ def build_chapter_micro_lens(
     all_entities = c.fetchall()
     location_entities = [e["name"] for e in all_entities if e["entity_type"] == "LOCATION"]
 
-    all_chapter_text = " ".join([(sc["content"] or "") for sc in scene_rows]).lower()
+    all_chapter_text = " ".join([html_to_text(sc["content"] or "") for sc in scene_rows]).lower()
     chapter_locations = [loc for loc in location_entities if loc.lower() in all_chapter_text]
 
     use_geographic_y = len(chapter_locations) >= 2
@@ -43,10 +44,10 @@ def build_chapter_micro_lens(
         y_tick_vals = list(loc_to_y.values())
         y_axis_title = "Chapter Geography"
     else:
-        loc_to_y = {"Interiority": 0, "Dialogue": 1, "Action": 2}
-        y_tick_text = ["Interior", "Dialogue", "Action"]
+        loc_to_y = {"Non-dialogue passage": 0, "Dialogue": 1, "Action cue": 2}
+        y_tick_text = ["Non-dialogue", "Dialogue", "Action cue"]
         y_tick_vals = [0, 1, 2]
-        y_axis_title = "Dramatic Channel"
+        y_axis_title = "Text pattern"
 
     beats_x = []
     beats_y = []
@@ -58,13 +59,12 @@ def build_chapter_micro_lens(
 
     entity_markers = {}
     global_beat_idx = 0
-    prev_z = 0.35
     current_loc = chapter_locations[0] if chapter_locations else "Scene Setting"
 
     for sc in scene_rows:
         sc_id = sc["id"]
         sc_title = sc["title"]
-        content = sc["content"] or ""
+        content = html_to_text(sc["content"] or "")
         is_active_scene = (focus_scene_id and sc_id == focus_scene_id)
 
         paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
@@ -89,29 +89,15 @@ def build_chapter_micro_lens(
                 has_action = (tension_hits > 0) or (words < 10 and not has_dialogue)
                 if has_action and not has_dialogue:
                     y_val = 2.0
-                    mode_label = "Action / Somatic"
+                    mode_label = "Action cue"
                 elif has_dialogue:
                     y_val = 1.0
-                    mode_label = "Dialogue / Exchange"
+                    mode_label = "Dialogue"
                 else:
                     y_val = 0.0
-                    mode_label = "Interiority / Narrative"
+                    mode_label = "Non-dialogue passage"
 
-            tension_hits = sum(len(re.findall(r"\b" + re.escape(k) + r"\b", para_lower)) for k in TENSION_KEYWORDS)
-            filter_hits = sum(len(re.findall(r"\b" + re.escape(v) + r"\b", para_lower)) for v in FILTER_VERBS)
-
-            beat_tension = 0.30 + min(0.45, tension_hits * 0.15)
-            if ('"' in para or '“' in para):
-                beat_tension += 0.12
-            if 0 < words <= 10:
-                beat_tension += 0.10
-            elif words > 35:
-                beat_tension -= 0.08
-            if filter_hits >= 2:
-                beat_tension -= 0.12
-
-            smoothed_z = round(max(0.08, min(0.96, (0.55 * beat_tension) + (0.45 * prev_z))), 2)
-            prev_z = smoothed_z
+            tension_estimate = calculate_text_telemetry(para)["tension_elevation"]
 
             if is_active_scene:
                 node_color = "#22d3ee"
@@ -124,7 +110,7 @@ def build_chapter_micro_lens(
 
             beats_x.append(global_beat_idx)
             beats_y.append(y_val)
-            beats_z.append(smoothed_z)
+            beats_z.append(tension_estimate)
             beats_sizes.append(node_size)
             beats_colors.append(node_color)
             
@@ -138,7 +124,7 @@ def build_chapter_micro_lens(
             hover_info = (
                 f"<b>{sc_title}</b> (Beat {p_idx})<br>"
                 f"{mode_label}<br>"
-                f"Tension: <b>{smoothed_z:.2f}</b> ({words}w)<br>"
+                f"Text-derived tension estimate: <b>{tension_estimate:.2f}</b> ({words}w)<br>"
                 f"<i>\"{snippet}\"</i>"
             )
             beats_text.append(hover_info)
@@ -150,7 +136,7 @@ def build_chapter_micro_lens(
                         entity_markers[ent_name] = {"x": [], "y": [], "z": [], "text": []}
                     entity_markers[ent_name]["x"].append(global_beat_idx)
                     entity_markers[ent_name]["y"].append(y_val)
-                    entity_markers[ent_name]["z"].append(smoothed_z + 0.04)
+                    entity_markers[ent_name]["z"].append(tension_estimate + 0.04)
                     entity_markers[ent_name]["text"].append(f"<b>{ent_name}</b> in Beat {global_beat_idx}")
 
     traces = [
@@ -191,7 +177,7 @@ def build_chapter_micro_lens(
         "scene": {
             "xaxis": {"title": "Chapter Beats", "color": "#71717a", "gridcolor": "#27272a", "showticklabels": True},
             "yaxis": {"title": y_axis_title, "tickvals": y_tick_vals, "ticktext": y_tick_text, "color": "#a1a1aa", "gridcolor": "#27272a"},
-            "zaxis": {"title": "Tension", "range": [0, 1], "color": "#71717a", "gridcolor": "#27272a"},
+            "zaxis": {"title": "Text-derived tension estimate", "range": [0, 1], "color": "#71717a", "gridcolor": "#27272a"},
             "camera": {"eye": {"x": 1.1, "y": -1.5, "z": 0.8}}
         },
         "margin": {"l": 0, "r": 0, "b": 0, "t": 0}
@@ -291,7 +277,7 @@ def build_astrolabe_manifest(
             locations.append(loc)
 
     if not locations:
-        locations = ["The Sky Docks", "The Lower Sinks", "The Grand Balustrade", "The High Citadel"]
+        locations = ["Unspecified"]
 
     loc_to_y = {loc: idx for idx, loc in enumerate(locations)}
 
@@ -300,7 +286,7 @@ def build_astrolabe_manifest(
 
     for sc in scene_rows:
         sc_id = sc["id"]
-        sc_content = (sc["content"] or "").lower()
+        sc_content = html_to_text(sc["content"] or "").lower()
         matched_loc = None
 
         for loc in locations:
@@ -323,36 +309,15 @@ def build_astrolabe_manifest(
             current_active_loc = matched_loc
         scene_location_map[sc_id] = current_active_loc
 
-    # Pacing math (Z-Axis)
-    raw_z_values = []
+    # The arc reflects text-derived telemetry; it does not model reader response.
+    tension_estimates = []
     prev_tens = 0.35
 
-    for idx, sc in enumerate(scene_rows, 1):
+    for sc in scene_rows:
         metric = calculate_text_telemetry(sc["content"] or "", prev_tens)
         scene_telemetry[sc["id"]] = metric
         prev_tens = metric["tension_elevation"]
-
-        progress = idx / max(1, total_scenes)
-        if progress < 0.25:
-            macro_gravity = 0.25 + (progress * 0.60)
-        elif progress < 0.75:
-            macro_gravity = 0.40 + ((progress - 0.25) * 0.60)
-        else:
-            climax_progress = (progress - 0.75) / 0.25
-            if climax_progress < 0.80:
-                macro_gravity = 0.70 + (climax_progress * 0.25)
-            else:
-                macro_gravity = 0.95 - ((climax_progress - 0.80) * 2.0)
-
-        local_delta = (metric["tension_elevation"] - 0.35) * 0.40
-        raw_z_values.append(max(0.08, min(0.98, macro_gravity + local_delta)))
-
-    smoothed_z = []
-    curr_smooth = raw_z_values[0]
-    alpha = 0.55
-    for z in raw_z_values:
-        curr_smooth = (alpha * z) + ((1 - alpha) * curr_smooth)
-        smoothed_z.append(round(curr_smooth, 3))
+        tension_estimates.append(metric["tension_elevation"])
 
     character_events = {}
     artifact_events = {}
@@ -377,7 +342,7 @@ def build_astrolabe_manifest(
 
         y_val = loc_to_y.get(loc_name, 0)
         sc_idx = scene_seq_map.get(ev["scene_id"], 1) - 1
-        z_val = smoothed_z[sc_idx] if 0 <= sc_idx < len(smoothed_z) else 0.45
+        z_val = tension_estimates[sc_idx] if 0 <= sc_idx < len(tension_estimates) else 0.45
 
         pt = {
             "x": x_val, "y": y_val, "z": z_val, "tick": tick,
@@ -397,8 +362,8 @@ def build_astrolabe_manifest(
 
             if health_val < 0.40 and z_val > 0.70:
                 anomalies.append({
-                    "type": "BIOLOGICAL_STRAIN", "entity": ev["name"], "scene_id": ev["scene_id"],
-                    "desc": f"{ev['name']} engaged in high-tension crisis (Z={z_val:.2f}) while vitality is critical ({int(health_val*100)}%)."
+                    "type": "POTENTIAL_STRAIN_CONTINUITY", "entity": ev["name"], "scene_id": ev["scene_id"],
+                    "desc": f"Mapped state data places {ev['name']} in a scene with a text-derived tension estimate of {z_val:.2f} while vitality is {int(health_val*100)}%. Check whether that combination matches the prose."
                 })
 
         elif etype == "ITEM":
@@ -513,12 +478,11 @@ def build_astrolabe_manifest(
                 "hoverinfo": "text"
             })
 
-    # Layer 6 & 7: Pacing Spine & Ratcheting Stakes Floor
+    # Layer 6: Text-derived tension-estimate spine
     spine_x, spine_y, spine_z, spine_sizes, spine_colors, spine_text = [], [], [], [], [], []
-    floor_z = []
     scene_id_list = []
 
-    for idx, (r, z_smooth) in enumerate(zip(scene_rows, smoothed_z), 1):
+    for idx, (r, tension_estimate) in enumerate(zip(scene_rows, tension_estimates), 1):
         # In chronological mode, leap to actual story tick if known (handles flashbacks!)
         if time_mode == "chronological":
             x_story = scene_actual_ticks.get(r["id"], idx * 0.5)
@@ -529,17 +493,12 @@ def build_astrolabe_manifest(
         y_val = loc_to_y.get(loc_name, 0)
         metric = scene_telemetry.get(r["id"]) or calculate_text_telemetry(r["content"] or "")
 
-        # Ratcheting 3-scene rolling baseline floor
-        window_start = max(0, idx - 3)
-        current_floor = min(smoothed_z[window_start:idx])
-        floor_z.append(round(current_floor * 0.75, 2))
-
         point_color = "#22d3ee" if (focus_scene_id and r["id"] == focus_scene_id) else "#f59e0b"
         node_size = 20 if (focus_scene_id and r["id"] == focus_scene_id) else max(6, min(16, int(6 + ((r["word_count"] or 0) / 160))))
 
         spine_x.append(x_story)
         spine_y.append(y_val)
-        spine_z.append(z_smooth)
+        spine_z.append(tension_estimate)
         spine_sizes.append(node_size)
         spine_colors.append(point_color)
         scene_id_list.append(r["id"])
@@ -547,8 +506,7 @@ def build_astrolabe_manifest(
         hover = (
             f"<b>{r['title']}</b><br>"
             f"Corridor: <b>{loc_name}</b><br>"
-            f"Words: {r['word_count']:,} | Stakes (Z): <b>{z_smooth:.2f}</b><br>"
-            f"Floor: <b>{current_floor:.2f}</b>"
+            f"Words: {r['word_count']:,} | Text-derived tension estimate: <b>{tension_estimate:.2f}</b>"
         )
         spine_text.append(hover)
 
@@ -568,15 +526,6 @@ def build_astrolabe_manifest(
         }
     })
 
-    # The Ratcheting Baseline Floor (Visual verification that stakes are climbing)
-    traces.append({
-        "type": "scatter3d", "mode": "lines",
-        "name": "Stakes Floor (Baseline)",
-        "x": spine_x, "y": spine_y, "z": floor_z,
-        "hoverinfo": "none",
-        "line": {"color": "rgba(245, 158, 11, 0.35)", "width": 2, "dash": "dot"}
-    })
-
     layout = {
         "autosize": True,
         "paper_bgcolor": "rgba(9, 9, 11, 1)",
@@ -590,7 +539,7 @@ def build_astrolabe_manifest(
                 "color": "#a1a1aa",
                 "gridcolor": "#27272a"
             },
-            "zaxis": {"title": "Stakes Elevation (Z)", "range": [0, 1], "color": "#71717a", "gridcolor": "#27272a"},
+            "zaxis": {"title": "Text-derived tension estimate (heuristic)", "range": [0, 1], "color": "#71717a", "gridcolor": "#27272a"},
             "camera": {"eye": {"x": 0.1, "y": -2.3, "z": 1.0}}
         },
         "margin": {"l": 0, "r": 0, "b": 0, "t": 10},

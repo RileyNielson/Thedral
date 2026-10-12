@@ -3,10 +3,12 @@ import json
 import time
 import uuid
 import asyncio
+import hashlib
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from backend.database import get_db
+from backend.text_utils import html_to_text
 from backend.astrolabe import build_astrolabe_manifest
 from backend.guardrails import sanitize_entity_type
 from backend.socratic import extract_ghost_proposals, discover_synaptic_resonance
@@ -47,6 +49,103 @@ def get_astrolabe(
     conn.close()
     return manifest
 
+
+@router.get("/api/narrative/proposals")
+def get_survey_proposals(book_id: str):
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT p.proposal_id, p.scene_id, p.detected_entity_name, p.entity_type,
+               p.proposed_delta, p.confidence, p.epistemic_tier, p.attested_by,
+               p.source_span_text, p.status, s.title AS scene_title, ch.title AS chapter_title
+        FROM staged_proposals p
+        JOIN binder_nodes s ON p.scene_id = s.id AND s.node_type = 'SCENE'
+        JOIN binder_nodes ch ON s.parent_id = ch.id AND ch.node_type = 'CHAPTER'
+        WHERE ch.parent_id = ? AND p.status = 'PENDING'
+        ORDER BY ch.sort_order, s.sort_order, p.proposal_id
+    """, (book_id,)).fetchall()
+    conn.close()
+    proposals = [dict(row) for row in rows]
+    for proposal in proposals:
+        proposal["proposed_delta"] = json.loads(proposal["proposed_delta"] or "{}")
+    return proposals
+
+
+@router.post("/api/narrative/proposals/{proposal_id}/approve")
+def approve_survey_proposal(proposal_id: str):
+    conn = get_db()
+    proposal = conn.execute("""
+        SELECT p.*, s.id AS valid_scene_id
+        FROM staged_proposals p
+        JOIN binder_nodes s ON s.id = p.scene_id AND s.node_type = 'SCENE'
+        WHERE p.proposal_id = ? AND p.status = 'PENDING'
+    """, (proposal_id,)).fetchone()
+    if not proposal:
+        conn.close()
+        raise HTTPException(404, "Pending survey proposal not found")
+
+    entity_type = proposal["entity_type"]
+    if entity_type not in {"CHARACTER", "ITEM"}:
+        conn.close()
+        raise HTTPException(400, "Unsupported entity type in survey proposal")
+    entity = conn.execute(
+        "SELECT entity_id FROM canonical_entities WHERE lower(name) = lower(?) AND entity_type = ? LIMIT 1",
+        (proposal["detected_entity_name"], entity_type),
+    ).fetchone()
+    if entity:
+        entity_id = entity["entity_id"]
+    else:
+        entity_id = f"{entity_type.lower()}_{uuid.uuid4().hex}"
+
+    try:
+        delta = json.loads(proposal["proposed_delta"] or "{}")
+    except json.JSONDecodeError as exc:
+        conn.close()
+        raise HTTPException(400, "Survey proposal contains invalid state data") from exc
+    if not isinstance(delta, dict):
+        conn.close()
+        raise HTTPException(400, "Survey proposal state must be an object")
+
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    event_id = f"ev_{uuid.uuid4().hex}"
+    source_hash = hashlib.sha256(proposal["source_span_text"].encode("utf-8")).hexdigest()
+    with conn:
+        claimed = conn.execute(
+            "UPDATE staged_proposals SET status = 'APPROVED' WHERE proposal_id = ? AND status = 'PENDING'",
+            (proposal_id,),
+        ).rowcount
+        if claimed:
+            if not entity:
+                conn.execute("""
+                    INSERT INTO canonical_entities (entity_id, name, entity_type, axioms, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (entity_id, proposal["detected_entity_name"], entity_type, json.dumps({"health_score": 1.0}), now))
+            conn.execute("""
+                INSERT INTO canonical_worldlines
+                (event_id, entity_id, timeline_tick, scene_id, source_span_hash, state_delta, epistemic_tier, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                event_id, entity_id, proposal["timeline_tick"], proposal["scene_id"],
+                source_hash, json.dumps(delta), proposal["epistemic_tier"], now,
+            ))
+    conn.close()
+    if not claimed:
+        raise HTTPException(404, "Pending survey proposal not found")
+    return {"status": "approved"}
+
+
+@router.post("/api/narrative/proposals/{proposal_id}/dismiss")
+def dismiss_survey_proposal(proposal_id: str):
+    conn = get_db()
+    with conn:
+        result = conn.execute(
+            "UPDATE staged_proposals SET status = 'DISMISSED' WHERE proposal_id = ? AND status = 'PENDING'",
+            (proposal_id,),
+        )
+    conn.close()
+    if not result.rowcount:
+        raise HTTPException(404, "Pending survey proposal not found")
+    return {"status": "dismissed"}
+
 @router.get("/api/narrative/survey-stream")
 async def stream_survey(book_id: str | None = None):
     """Server-Sent Events streaming progress of local AI character/item/location worldline survey."""
@@ -86,49 +185,42 @@ async def stream_survey(book_id: str | None = None):
             })
             yield f"data: {payload}\n\n"
 
-            text = sc["content"] or ""
+            text = html_to_text(sc["content"] or "")
             if len(text.strip()) >= 40:
                 proposals = await asyncio.to_thread(extract_ghost_proposals, text)
                 db_conn = get_db()
                 with db_conn:
                     for p in proposals:
                         name = p.get("detected_entity_name", "").title().strip()
+                        if not name:
+                            continue
                         raw_type = p.get("entity_type", "CHARACTER")
                         safe_type = sanitize_entity_type(name, raw_type)
                         if safe_type == "CLUTTER": 
                             continue
-
-                        eid = re.sub(r'\W+', '_', name.lower())
-                        default_axioms = json.dumps({'health_score': 1.0})
-                        
-                        db_conn.execute("""
-                            INSERT INTO canonical_entities (entity_id, name, entity_type, axioms, created_at)
-                            VALUES (?, ?, ?, ?, ?)
-                            ON CONFLICT(entity_id) DO NOTHING
-                        """, (eid, name, safe_type, default_axioms, now))
-
-                        ev_id = f"ev_{uuid.uuid4().hex[:8]}"
                         delta = p.get("proposed_delta", {})
-                        
-                        # Automatically register extracted story locations into Y-axis corridors
-                        loc_name = delta.get("location")
-                        if loc_name and len(loc_name.strip()) > 2 and loc_name != "Unknown":
-                            loc_clean = loc_name.strip().title()
-                            loc_id = f"loc_{re.sub(r'\\W+', '_', loc_clean.lower())}"
-                            db_conn.execute("""
-                                INSERT INTO canonical_entities (entity_id, name, entity_type, axioms, created_at)
-                                VALUES (?, ?, 'LOCATION', '{}', ?)
-                                ON CONFLICT(entity_id) DO NOTHING
-                            """, (loc_id, loc_clean, now))
-                        else:
-                            delta["location"] = sc["ch_title"].replace("Chapter: ", "").strip()
-
+                        if not isinstance(delta, dict):
+                            continue
+                        source_span = str(p.get("source_span_text", "")).strip()
+                        confidence = p.get("confidence", 0.8)
+                        try:
+                            confidence = max(0.0, min(1.0, float(confidence)))
+                        except (TypeError, ValueError):
+                            confidence = 0.8
                         tick = idx * 0.8
                         db_conn.execute("""
-                            INSERT INTO canonical_worldlines 
-                            (event_id, entity_id, timeline_tick, scene_id, source_span_hash, state_delta, epistemic_tier, created_at)
-                            VALUES (?, ?, ?, ?, 'surveyed', ?, ?, ?)
-                        """, (ev_id, eid, tick, sc["id"], json.dumps(delta), p.get("epistemic_tier", "FACT"), now))
+                            INSERT INTO staged_proposals
+                            (proposal_id, scene_id, timeline_tick, detected_entity_name, entity_type,
+                             proposed_delta, confidence, epistemic_tier, attested_by, source_span_text,
+                             collision_warning, status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'PENDING')
+                        """, (
+                            f"proposal_{uuid.uuid4().hex}", sc["id"], tick, name, safe_type,
+                            json.dumps(delta), confidence,
+                            p.get("epistemic_tier", "INFERENCE")
+                                if p.get("epistemic_tier") in {"FACT", "CLAIM", "INFERENCE"} else "INFERENCE",
+                            p.get("attested_by"), source_span,
+                        ))
                         extracted_total += 1
                 db_conn.close()
 
@@ -172,7 +264,7 @@ def get_scene_serendipity(scene_id: str):
     lore_summary = chr(10).join(rules) if rules else "No established style lore."
     conn.close()
 
-    suggestion = discover_synaptic_resonance(row["content"], lore_summary)
+    suggestion = discover_synaptic_resonance(html_to_text(row["content"]), lore_summary)
     return {"suggestion": suggestion}
 
 @router.post("/api/narrative/promise")

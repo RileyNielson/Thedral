@@ -24,33 +24,33 @@
       <!-- Action Card Grid: 4 Master Publishing Tools -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
         
-        <!-- Tool 1: Reader Genome (Macro Audience DNA) -->
+        <!-- Tool 1: Manuscript Prose Signals -->
         <div class="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2 flex flex-col justify-between hover:border-purple-500/50 transition group">
           <div>
             <div class="text-xs font-bold text-purple-400 flex items-center gap-1.5 font-mono">
-              <Dna class="w-4 h-4" /> Reader Genome
+              <Activity class="w-4 h-4" /> Prose Signals
             </div>
             <p class="text-[10px] text-zinc-500 mt-1 leading-snug">
-              Macro neurochemical DNA & literary author comps.
+              Counts of selected word and sentence patterns—not reader reactions.
             </p>
           </div>
           <button 
-            @click="fetchReaderGenome" 
+            @click="fetchProseSignals"
             :disabled="isLoading"
             class="w-full py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 disabled:opacity-50 font-medium rounded text-xs transition shadow-sm"
           >
-            {{ isLoading && outputTitle.includes('Genome') ? 'Analyzing...' : 'Analyze DNA' }}
+            {{ isLoading && outputTitle.includes('Signals') ? 'Counting...' : 'View patterns' }}
           </button>
         </div>
 
-        <!-- Tool 2: Authorship Certificate -->
+        <!-- Tool 2: Drafting History -->
         <div class="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2 flex flex-col justify-between hover:border-emerald-500/50 transition group">
           <div>
             <div class="text-xs font-bold text-emerald-400 flex items-center gap-1.5 font-mono">
-              <ShieldCheck class="w-4 h-4" /> Authorship Proof
+              <ShieldCheck class="w-4 h-4" /> Drafting History
             </div>
             <p class="text-[10px] text-zinc-500 mt-1 leading-snug">
-              SHA-256 certificate proving organic human drafting.
+              Revision records and a current-text fingerprint; not proof of authorship.
             </p>
           </div>
           <button 
@@ -58,7 +58,7 @@
             :disabled="isLoading"
             class="w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 font-medium rounded text-xs text-white transition border border-zinc-700/50"
           >
-            {{ isLoading && outputTitle.includes('Authenticity') ? 'Verifying...' : 'Certificate' }}
+            {{ isLoading && outputTitle.includes('Drafting History') ? 'Preparing...' : 'View report' }}
           </button>
         </div>
 
@@ -126,7 +126,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { store, showToast } from '../../store.js'
-import { Award, X, Mic, ShieldCheck, FileText, Copy, Dna } from 'lucide-vue-next'
+import { Award, X, Mic, ShieldCheck, FileText, Copy, Activity } from 'lucide-vue-next'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 
@@ -155,53 +155,54 @@ const copyOutput = async () => {
   }
 }
 
-// 1. Full Manuscript Reader Genome & Market Comps
-const fetchReaderGenome = async () => {
+// 1. Full manuscript prose-pattern summary
+const fetchProseSignals = async () => {
   isLoading.value = true
-  outputTitle.value = 'Full-Manuscript Reader Genome & Market Comps'
-  output.value = 'Running 4-channel neuro-spectrometry across all scenes in manuscript...'
+  outputTitle.value = 'Manuscript Prose Signals'
+  output.value = 'Counting selected textual patterns across this manuscript...'
 
   try {
-    const res = await fetch(`${API_BASE}/api/publishing/genome?book_id=${activeBookId.value}`)
-    if (!res.ok) throw new Error('Genome calculation failed')
+    const res = await fetch(`${API_BASE}/api/publishing/prose-signals?book_id=${activeBookId.value}`)
+    if (!res.ok) throw new Error(`Prose signal analysis failed (HTTP ${res.status}).`)
     const data = await res.json()
 
-    let report = `🧬 FULL MANUSCRIPT READER GENOME (${data.total_words.toLocaleString()} words)\n`
-    report += `=================================================================\n\n`
-    report += `NEUROCHEMICAL COMPOSITION OF YOUR PROSE:\n`
-    report += `• 🔴 Adrenaline (Kinetic Survival):     ${data.spectrum.adrenaline}%\n`
-    report += `• 🟣 Oxytocin (Relational Intimacy):    ${data.spectrum.oxytocin}%\n`
-    report += `• 🔵 Dopamine (Deductive Mystery):      ${data.spectrum.dopamine}%\n`
-    report += `• 🟢 Serotonin (Aesthetic Immersion):   ${data.spectrum.serotonin}%\n\n`
-    report += `AUDIENCE PSYCHOLOGICAL DIAGNOSIS:\n`
-    report += `↳ ${data.spectrum.hunger_alert}\n\n`
-    report += `TOP 3 LITERARY COMPS (CALCULATED BY PROSE DNA):\n`
-    for (const c of data.comps) {
-      report += `★ ${c.author} (${c.match_pct}% Match)\n  "${c.description}"\n\n`
-    }
+    const signals = data.text_signals
+    let report = `MANUSCRIPT PROSE SIGNALS (${data.total_words.toLocaleString()} words)\n`
+    report += `============================================================\n\n`
+    report += `Selected word cues per 1,000 words (cue counts are not reader reactions):\n`
+    report += `• Action-related cues: ${signals.signals.action_cues_per_1000_words.count} (${signals.signals.action_cues_per_1000_words.rate}/1,000 words)\n`
+    report += `• Relational cues: ${signals.signals.relational_cues_per_1000_words.count} (${signals.signals.relational_cues_per_1000_words.rate}/1,000 words)\n`
+    report += `• Mystery-related cues: ${signals.signals.mystery_cues_per_1000_words.count} (${signals.signals.mystery_cues_per_1000_words.rate}/1,000 words)\n`
+    report += `• Sensory cues: ${signals.signals.sensory_cues_per_1000_words.count} (${signals.signals.sensory_cues_per_1000_words.rate}/1,000 words)\n\n`
+    report += `Text patterns:\n`
+    report += `• Dialogue paragraphs: ${signals.patterns.dialogue_paragraph_pct}%\n`
+    report += `• Short sentences (8 words or fewer): ${signals.patterns.short_sentence_pct}%\n`
+    report += `• Long sentences (22 words or more): ${signals.patterns.long_sentence_pct}%\n`
+    report += `• Question marks per 1,000 words: ${signals.patterns.question_marks_per_1000_words}\n\n`
+    report += `LIMITS: ${signals.limitations}\n`
 
     output.value = report
   } catch(e) {
-    output.value = 'Error analyzing reader genome.'
+    output.value = 'Error analyzing manuscript prose signals.'
     showToast(e.message, 'error')
   } finally {
     isLoading.value = false
   }
 }
 
-// 2. Cryptographic Authorship Proof
+// 2. Drafting history report
 const fetchAuthorshipProof = async () => {
   isLoading.value = true
-  outputTitle.value = 'Cryptographic Authenticity Certificate'
-  output.value = 'Calculating thermodynamic entropy and revision velocity from SQLite ledger...'
+  outputTitle.value = 'Drafting History Report'
+  output.value = 'Preparing recorded revisions and current-text fingerprint...'
   
   try {
-    const res = await fetch(`${API_BASE}/api/publishing/authorship-proof?book_id=${activeBookId.value}`)
-    if (!res.ok) throw new Error('Proof generation failed')
+    const res = await fetch(`${API_BASE}/api/publishing/drafting-history?book_id=${encodeURIComponent(activeBookId.value)}`)
+    if (!res.ok) throw new Error('Drafting history report failed')
     const data = await res.json()
-    output.value = data.certificate_text
+    output.value = data.report_text
   } catch(e) { 
-    output.value = 'Error generating authorship proof certificate.'
+    output.value = 'Error generating drafting history report.'
     showToast(e.message, 'error') 
   } finally {
     isLoading.value = false

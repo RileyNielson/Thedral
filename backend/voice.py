@@ -4,6 +4,69 @@ import sqlite3
 from backend.database import get_db
 from backend.config import COMMON_ANACHRONISMS
 
+
+def _ensure_voice_profile(conn: sqlite3.Connection, pov_entity_id: str) -> sqlite3.Row | None:
+    """Ensure the voice profile table exists and seed a default entry for a missing POV."""
+    c = conn.cursor()
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='voice_profiles'")
+    if c.fetchone() is None:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS voice_profiles (
+                profile_id TEXT PRIMARY KEY,
+                entity_id TEXT NOT NULL UNIQUE,
+                pov_name TEXT NOT NULL,
+                target_avg_sentence REAL DEFAULT 12.0,
+                target_cadence_stdev REAL DEFAULT 5.5,
+                allowed_metaphor_domains TEXT DEFAULT '',
+                forbidden_lexicon TEXT DEFAULT '',
+                signature_sensory_anchors TEXT DEFAULT '',
+                canonical_quote_anchor TEXT DEFAULT '',
+                updated_at TEXT
+            )
+        """)
+
+    c.execute("SELECT * FROM voice_profiles WHERE entity_id = ?", (pov_entity_id,))
+    profile = c.fetchone()
+    if profile is None:
+        default_profile = {
+            "profile_id": f"vp_{pov_entity_id}",
+            "entity_id": pov_entity_id,
+            "pov_name": pov_entity_id.title(),
+            "target_avg_sentence": 11.5,
+            "target_cadence_stdev": 6.2,
+            "allowed_metaphor_domains": "Lockpicking, waterfront docks, debt, cold iron, tallow candles, survival mechanics",
+            "forbidden_lexicon": "strategic options, process her feelings, toxic, evaluate, furthermore, ostensibly",
+            "signature_sensory_anchors": "Frozen marble, copper coins, frayed burlap, locked lungs",
+            "canonical_quote_anchor": "Bare marble met my soles like frozen iron.",
+            "updated_at": None,
+        }
+        c.execute(
+            """
+            INSERT INTO voice_profiles (
+                profile_id, entity_id, pov_name, target_avg_sentence, target_cadence_stdev,
+                allowed_metaphor_domains, forbidden_lexicon, signature_sensory_anchors,
+                canonical_quote_anchor, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                default_profile["profile_id"],
+                default_profile["entity_id"],
+                default_profile["pov_name"],
+                default_profile["target_avg_sentence"],
+                default_profile["target_cadence_stdev"],
+                default_profile["allowed_metaphor_domains"],
+                default_profile["forbidden_lexicon"],
+                default_profile["signature_sensory_anchors"],
+                default_profile["canonical_quote_anchor"],
+                default_profile["updated_at"],
+            ),
+        )
+        conn.commit()
+        c.execute("SELECT * FROM voice_profiles WHERE entity_id = ?", (pov_entity_id,))
+        profile = c.fetchone()
+    return profile
+
+
 def audit_voice_continuity(
     text: str, 
     pov_entity_id: str = "ellie", 
@@ -27,9 +90,7 @@ def audit_voice_continuity(
         }
 
     conn = custom_conn if custom_conn else get_db()
-    c = conn.cursor()
-    c.execute("SELECT * FROM voice_profiles WHERE entity_id = ?", (pov_entity_id,))
-    profile = c.fetchone()
+    profile = _ensure_voice_profile(conn, pov_entity_id)
     if not custom_conn:
         conn.close()
 

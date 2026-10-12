@@ -1,6 +1,7 @@
 import re
 import hashlib
 import sqlite3
+from backend.text_utils import html_to_text
 
 def compute_block_hash(paragraph_text: str) -> str:
     """
@@ -11,7 +12,7 @@ def compute_block_hash(paragraph_text: str) -> str:
     if not paragraph_text:
         return ""
     # Strip all punctuation and symbols, retain alphanumeric characters and basic whitespace
-    normalized = re.sub(r'[^\w\s]', '', paragraph_text.lower())
+    normalized = re.sub(r'[^\w\s]', '', html_to_text(paragraph_text).lower())
     # Collapse multiple spaces, newlines, and tabs into single spaces
     clean_text = " ".join(normalized.split())
     if not clean_text:

@@ -25,12 +25,21 @@
         <span class="text-[11px] text-zinc-500 font-mono">
           Words: <strong class="text-zinc-300 font-medium">{{ store.activeNode?.word_count || 0 }}</strong>
         </span>
+        <div class="flex items-center gap-2 min-w-[160px]">
+          <span class="text-[10px] uppercase tracking-wider text-zinc-500 font-mono">Goal</span>
+          <div class="h-1.5 w-24 bg-zinc-800 rounded-full overflow-hidden">
+            <div class="h-full rounded-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 transition-all" :style="{ width: `${goalProgress}%` }"></div>
+          </div>
+          <span class="text-[10px] font-mono text-zinc-300">{{ Math.min(store.activeNode?.word_count || 0, wordTarget) }}/{{ wordTarget }}</span>
+        </div>
         <span v-if="store.saveStatus" class="text-[10px] font-mono tracking-wider uppercase text-zinc-500">
           ● {{ store.saveStatus }}
         </span>
       </div>
 
       <div class="flex items-center space-x-2">
+        <button @click="store.navigateScene(-1)" :disabled="!hasPreviousScene" title="Previous scene (Ctrl/Cmd+Alt+Left)" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">← Scene</button>
+        <button @click="store.navigateScene(1)" :disabled="!hasNextScene" title="Next scene (Ctrl/Cmd+Alt+Right)" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">Scene →</button>
         <button @click="toggleXRay" :class="['px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition border', store.isXRayActive ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.15)]' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800']">
           <Eye class="w-3.5 h-3.5" /> <span>Craft X-Ray</span>
         </button>
@@ -52,9 +61,27 @@
       <div class="flex items-center gap-1.5 overflow-x-auto">
         <span class="text-zinc-500 uppercase tracking-wider font-bold mr-1">Lens:</span>
         <button @click="activeXRayLens = 'energetics'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'energetics' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">⚡ Energetics</button>
-        <button @click="activeXRayLens = 'neuro'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'neuro' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🧬 Neuro-Spectrum</button>
+        <button @click="activeXRayLens = 'signals'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'signals' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">Selected word cues</button>
         <button @click="activeXRayLens = 'clutter'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'clutter' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🔍 Clutter & Filters</button>
         <button @click="activeXRayLens = 'cadence'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'cadence' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🎵 Cadence</button>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 text-[9px] text-zinc-400">
+        <label class="flex items-center gap-1.5">
+          <span>Staccato</span>
+          <input v-model.number="xraySettings.staccato_threshold" type="range" min="4" max="12" class="accent-amber-500" @change="refreshXRay" />
+          <strong class="text-zinc-200 font-mono">{{ xraySettings.staccato_threshold }}</strong>
+        </label>
+        <label class="flex items-center gap-1.5">
+          <span>Expansive</span>
+          <input v-model.number="xraySettings.expansive_threshold" type="range" min="15" max="35" class="accent-cyan-500" @change="refreshXRay" />
+          <strong class="text-zinc-200 font-mono">{{ xraySettings.expansive_threshold }}</strong>
+        </label>
+        <label class="flex items-center gap-1.5">
+          <span>Clutter</span>
+          <input v-model.number="xraySettings.clutter_sensitivity" type="range" min="1" max="4" class="accent-rose-500" @change="refreshXRay" />
+          <strong class="text-zinc-200 font-mono">{{ xraySettings.clutter_sensitivity }}</strong>
+        </label>
       </div>
 
       <!-- Dynamic Lens Legend -->
@@ -67,12 +94,13 @@
           <span class="flex items-center gap-1 text-zinc-500"><span class="w-2 h-2 rounded-sm border border-zinc-700 bg-transparent"></span> Clean Baseline</span>
         </template>
 
-        <!-- 2. Neuro-Spectrum Key -->
-        <template v-else-if="activeXRayLens === 'neuro'">
-          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/40"></span> Adrenaline</span>
-          <span class="flex items-center gap-1 text-purple-300"><span class="w-2 h-2 rounded-sm bg-purple-500/40"></span> Oxytocin</span>
-          <span class="flex items-center gap-1 text-cyan-300"><span class="w-2 h-2 rounded-sm bg-cyan-500/40"></span> Dopamine</span>
-          <span class="flex items-center gap-1 text-emerald-300"><span class="w-2 h-2 rounded-sm bg-emerald-500/40"></span> Serotonin</span>
+        <!-- 2. Selected word-cue key -->
+        <template v-else-if="activeXRayLens === 'signals'">
+          <span class="flex items-center gap-1 text-rose-300"><span class="w-2 h-2 rounded-sm bg-rose-500/40"></span> Action</span>
+          <span class="flex items-center gap-1 text-purple-300"><span class="w-2 h-2 rounded-sm bg-purple-500/40"></span> Relational</span>
+          <span class="flex items-center gap-1 text-cyan-300"><span class="w-2 h-2 rounded-sm bg-cyan-500/40"></span> Mystery</span>
+          <span class="flex items-center gap-1 text-emerald-300"><span class="w-2 h-2 rounded-sm bg-emerald-500/40"></span> Sensory</span>
+          <span class="text-zinc-500">Selected lexical cues only; not reader reactions.</span>
         </template>
 
         <!-- 3. Clutter Key -->
@@ -106,6 +134,15 @@
       <input v-model="store.activeNode.title" @input="queueAutoSave" class="bg-transparent text-2xl md:text-4xl font-serif font-bold tracking-tight border-none focus:outline-none mb-8 placeholder-zinc-700 transition-colors" :class="store.isCandlelight ? 'text-amber-100/90' : 'text-zinc-100'" placeholder="Scene Title..." />
       
       <!-- TipTap Rich Text Surface -->
+      <div v-show="!store.isXRayActive" class="flex items-center gap-1 mb-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-1 w-fit" role="toolbar" aria-label="Text formatting">
+        <button @mousedown.prevent @click="toggleMark('bold')" :aria-pressed="activeMarks.bold" aria-label="Bold (Ctrl/Cmd+B)" title="Bold (Ctrl/Cmd+B)" :class="['p-2 rounded transition', activeMarks.bold ? 'bg-amber-500/20 text-amber-300' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white']">
+          <Bold class="w-4 h-4" />
+        </button>
+        <button @mousedown.prevent @click="toggleMark('italic')" :aria-pressed="activeMarks.italic" aria-label="Italic (Ctrl/Cmd+I)" title="Italic (Ctrl/Cmd+I)" :class="['p-2 rounded transition', activeMarks.italic ? 'bg-amber-500/20 text-amber-300' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white']">
+          <Italic class="w-4 h-4" />
+        </button>
+        <span class="px-2 text-[9px] text-zinc-600 font-mono">Ctrl/Cmd+B / I</span>
+      </div>
       <editor-content v-show="!store.isXRayActive" :editor="editor" class="flex-1 font-serif text-lg md:text-xl leading-relaxed outline-none min-h-[350px]" :class="store.isCandlelight ? 'text-amber-100/90' : 'text-zinc-200'" />
       
       <!-- Multi-Lens Analytical Overlay -->
@@ -128,10 +165,28 @@
     </div>
     
     <!-- Empty State -->
-    <div v-else class="flex-1 flex items-center justify-center text-zinc-600 select-none">
-      <div class="text-center space-y-3">
-        <Feather class="w-12 h-12 mx-auto text-zinc-800" />
-        <p class="text-sm font-sans tracking-wide">Select a scene from the binder to begin crafting.</p>
+    <div v-else class="flex-1 flex items-center justify-center overflow-y-auto p-6 select-none">
+      <div class="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950/70 p-6 md:p-8 shadow-xl">
+        <Feather class="w-10 h-10 text-amber-500/70 mb-4" />
+        <template v-if="!store.tree?.length">
+          <p class="text-[10px] uppercase tracking-[0.2em] text-amber-400 font-mono mb-2">A place to begin</p>
+          <h2 class="text-xl font-serif font-semibold text-zinc-100 mb-2">Your next story starts here.</h2>
+          <p class="text-sm text-zinc-400 leading-relaxed mb-5">Create a manuscript to get a Binder, your first chapter, and a blank scene ready for drafting—or bring in a draft you already have.</p>
+          <div class="space-y-2 mb-6 text-xs text-zinc-400">
+            <div class="flex gap-2"><span class="text-amber-400 font-mono">01</span><span>Organize chapters and scenes in the Binder.</span></div>
+            <div class="flex gap-2"><span class="text-amber-400 font-mono">02</span><span>Write in the center workspace; your changes save automatically.</span></div>
+            <div class="flex gap-2"><span class="text-amber-400 font-mono">03</span><span>Use the Inspector on the right for goals, notes, and craft feedback.</span></div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button @click="store.createManuscript()" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs transition">Create a manuscript</button>
+            <button @click="store.toggleModal('import', true)" class="px-4 py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs transition">Import a draft</button>
+          </div>
+        </template>
+        <template v-else>
+          <p class="text-[10px] uppercase tracking-[0.2em] text-amber-400 font-mono mb-2">Ready when you are</p>
+          <h2 class="text-xl font-serif font-semibold text-zinc-100 mb-2">Choose a scene to start writing.</h2>
+          <p class="text-sm text-zinc-400 leading-relaxed">Your projects and chapters are in the Binder on the left. Select a scene to open it here, or use the Binder’s add buttons to create one.</p>
+        </template>
       </div>
     </div>
 
@@ -147,9 +202,9 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
-import { Eye, Moon, Wand2, RotateCcw, X, Feather, Search, DoorOpen, Sparkles, UserPlus, Key, Link2Off } from 'lucide-vue-next'
+import { Eye, Moon, Wand2, RotateCcw, X, Feather, Search, DoorOpen, Sparkles, UserPlus, Key, Link2Off, Bold, Italic } from 'lucide-vue-next'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -158,21 +213,86 @@ import Typography from '@tiptap/extension-typography'
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 const isXRayLoading = ref(false)
-const activeXRayLens = ref('energetics') // 'energetics' | 'neuro' | 'clutter' | 'cadence'
+const activeXRayLens = ref('energetics') // 'energetics' | 'signals' | 'clutter' | 'cadence'
+const xraySettings = ref({
+  staccato_threshold: 9,
+  expansive_threshold: 22,
+  clutter_sensitivity: 2
+})
+const wordTarget = computed(() => Number(store.activeNode?.card?.word_target) || 500)
+const goalProgress = computed(() => {
+  const target = wordTarget.value || 1
+  return Math.min(100, Math.round(((Number(store.activeNode?.word_count) || 0) / target) * 100))
+})
+const bookScenes = computed(() => {
+  const scenes = []
+  const visit = (nodes) => {
+    for (const node of nodes || []) {
+      if (node.node_type === 'SCENE') scenes.push(node)
+      visit(node.children)
+    }
+  }
+  visit(store.getBook()?.children || [])
+  return scenes
+})
+const activeSceneIndex = computed(() => bookScenes.value.findIndex(scene => scene.id === store.activeNode?.id))
+const hasPreviousScene = computed(() => bookScenes.value.length > 0 && activeSceneIndex.value !== 0)
+const hasNextScene = computed(() => bookScenes.value.length > 0 && (activeSceneIndex.value < 0 || activeSceneIndex.value < bookScenes.value.length - 1))
 const scrollContainer = ref(null)
 let editor = null
 let scrollThrottle = null
+let hasPendingSave = false
+let savePromise = null
+const activeMarks = ref({ bold: false, italic: false })
 
-const textToHtml = (text) => {
-  if (!text) return ''
-  return text.split(/\n\n+/).map(p => `<p>${p.trim()}</p>`).join('')
+const updateActiveMarks = () => {
+  if (!editor) return
+  activeMarks.value = { bold: editor.isActive('bold'), italic: editor.isActive('italic') }
+}
+
+const toggleMark = (mark) => {
+  if (!editor) return
+  editor.chain().focus()[mark]().run()
+  updateActiveMarks()
+}
+
+const escapeHtml = (text) => text
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+
+const contentToHtml = (content) => {
+  if (!content) return ''
+  if (!/<\/?(?:p|strong|em|br|ul|ol|li|blockquote)\b/i.test(content)) {
+    return content.split(/\n\n+/).map(paragraph => `<p>${escapeHtml(paragraph.trim())}</p>`).join('')
+  }
+
+  const parsed = new DOMParser().parseFromString(content, 'text/html')
+  const allowedTags = new Set(['P', 'STRONG', 'EM', 'BR', 'UL', 'OL', 'LI', 'BLOCKQUOTE'])
+  const sanitizeNode = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent || '')
+    if (node.nodeType !== Node.ELEMENT_NODE) return document.createDocumentFragment()
+    if (!allowedTags.has(node.tagName)) {
+      const fragment = document.createDocumentFragment()
+      for (const child of node.childNodes) fragment.append(sanitizeNode(child))
+      return fragment
+    }
+    const clean = document.createElement(node.tagName.toLowerCase())
+    for (const child of node.childNodes) clean.append(sanitizeNode(child))
+    return clean
+  }
+  const container = document.createElement('div')
+  for (const child of parsed.body.childNodes) container.append(sanitizeNode(child))
+  return container.innerHTML
 }
 
 const htmlToText = (html) => {
   if (!html) return ''
-  let text = html.replace(/<\/p>\s*<p>/gi, '\n\n')
-  text = text.replace(/<[^>]*>?/gm, '')
-  return text.trim()
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  const paragraphs = Array.from(parsed.body.querySelectorAll('p, li, blockquote'))
+    .map(element => element.textContent.trim())
+    .filter(Boolean)
+  return (paragraphs.length ? paragraphs.join('\n\n') : parsed.body.textContent || '').trim()
 }
 
 const syncSelectionFromEditor = () => {
@@ -258,7 +378,7 @@ const initEditor = () => {
   if (editor) editor.destroy()
   
   editor = new Editor({
-    content: textToHtml(store.activeNode?.content) || '',
+    content: contentToHtml(store.activeNode?.content) || '',
     extensions: [
       StarterKit, 
       Typography, 
@@ -266,14 +386,19 @@ const initEditor = () => {
     ],
     editorProps: { attributes: { class: 'ProseMirror outline-none prose-canvas focus:outline-none min-h-[300px]' } },
     onUpdate: () => {
-      const text = htmlToText(editor.getHTML())
+      const serialized = editor.getHTML()
+      const text = htmlToText(serialized)
       if (!store.activeNode) return
-      store.activeNode.content = text
+      store.activeNode.content = serialized
       store.activeNode.word_count = text.split(/\s+/).filter(Boolean).length
       queueAutoSave()
     },
     onSelectionUpdate: () => {
       syncSelectionFromEditor()
+      updateActiveMarks()
+    },
+    onTransaction: () => {
+      updateActiveMarks()
     }
   })
 }
@@ -284,9 +409,10 @@ watch(() => store.activeNode?.id, async (newId) => {
     if (!editor) {
       initEditor()
     } else {
-      const currentText = htmlToText(editor.getHTML())
-      if (currentText !== store.activeNode.content) {
-        editor.commands.setContent(textToHtml(store.activeNode.content) || '')
+      const currentHtml = editor.getHTML()
+      const storedHtml = contentToHtml(store.activeNode.content)
+      if (currentHtml !== storedHtml) {
+        editor.commands.setContent(storedHtml || '')
       }
     }
     if (store.isXRayActive && store.activeNode?.content) {
@@ -297,30 +423,85 @@ watch(() => store.activeNode?.id, async (newId) => {
 
 let saveTimeout = null
 const queueAutoSave = () => {
+  hasPendingSave = true
   store.saveStatus = 'Saving...'
   clearTimeout(saveTimeout)
-  saveTimeout = setTimeout(async () => {
-    if (!store.activeNode?.id) return
+  saveTimeout = setTimeout(persistActiveScene, 1200)
+}
+
+const persistActiveScene = async () => {
+  if (savePromise) {
+    const inFlight = savePromise
+    const saved = await inFlight
+    if (!saved) return false
+    if (!hasPendingSave) return true
+  }
+  const node = store.activeNode
+  if (!node?.id || !hasPendingSave) return true
+  const snapshot = {
+    id: node.id,
+    title: node.title,
+    synopsis: node.synopsis || '',
+    content: editor?.getHTML() || '',
+    status: node.status || 'DRAFT',
+    wordCount: node.word_count
+  }
+  hasPendingSave = false
+  store.saveStatus = 'Saving...'
+  const request = (async () => {
     try {
-      const rawText = htmlToText(editor.getHTML())
-      await fetch(`${API_BASE}/api/node/${store.activeNode.id}`, {
+      const response = await fetch(`${API_BASE}/api/node/${snapshot.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: store.activeNode.title,
-          synopsis: store.activeNode.synopsis || '',
-          content: rawText,
-          status: store.activeNode.status || 'DRAFT'
+          title: snapshot.title,
+          synopsis: snapshot.synopsis,
+          content: snapshot.content,
+          status: snapshot.status
         })
       })
+      if (!response.ok) throw new Error(`HTTP ${response.status}: Save failed`)
+      const treeNode = store.getBook()?.children?.flatMap(chapter => chapter.children || []).find(scene => scene.id === snapshot.id)
+      if (treeNode) {
+        treeNode.title = snapshot.title
+        treeNode.word_count = snapshot.wordCount
+      }
       store.saveStatus = 'Saved'
       window.dispatchEvent(new Event('refresh-tree'))
+      return true
     } catch(e) { 
-      store.saveStatus = 'Error'
-      showToast('Save failed', 'error') 
+      hasPendingSave = true
+      store.saveStatus = 'Save failed'
+      showToast(`Save failed: ${e.message}`, 'error')
+      return false
     }
-  }, 1200)
+  })()
+  savePromise = request
+  const saved = await request
+  if (savePromise === request) savePromise = null
+  if (saved && hasPendingSave) {
+    clearTimeout(saveTimeout)
+    return persistActiveScene()
+  }
+  return saved
 }
+
+const flushPendingSave = async () => {
+  clearTimeout(saveTimeout)
+  return persistActiveScene()
+}
+
+const warnBeforeLeaving = (event) => {
+  if (!hasPendingSave && !savePromise) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+store.flushPendingSave = flushPendingSave
+onBeforeUnmount(async () => {
+  await flushPendingSave()
+  if (store.flushPendingSave === flushPendingSave) store.flushPendingSave = null
+})
 
 const fetchXRayAnalysis = async () => {
   if (!store.activeNode?.content) {
@@ -332,7 +513,12 @@ const fetchXRayAnalysis = async () => {
     const res = await fetch(`${API_BASE}/api/craft/xray`, { 
       method: 'POST', 
       headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ text: store.activeNode.content }) 
+      body: JSON.stringify({
+        text: htmlToText(store.activeNode.content),
+        staccato_threshold: xraySettings.value.staccato_threshold,
+        expansive_threshold: xraySettings.value.expansive_threshold,
+        clutter_sensitivity: xraySettings.value.clutter_sensitivity
+      })
     })
     if (!res.ok) throw new Error('X-Ray extraction failed')
     const data = await res.json()
@@ -347,6 +533,12 @@ const fetchXRayAnalysis = async () => {
     showToast(e.message, 'error') 
   } finally {
     isXRayLoading.value = false
+  }
+}
+
+const refreshXRay = async () => {
+  if (store.isXRayActive) {
+    await fetchXRayAnalysis()
   }
 }
 
@@ -370,19 +562,19 @@ const getSentenceLensClass = (s) => {
       case 'SLACK': return 'xray-slack'
       default: return 'text-zinc-300'
     }
-  } else if (activeXRayLens.value === 'neuro') {
-    const nType = s.neuro_type || ''
-    switch (nType) {
-      case 'ADRENALINE': return 'xray-adrenaline'
-      case 'OXYTOCIN': return 'xray-oxytocin'
-      case 'DOPAMINE': return 'xray-dopamine'
-      case 'SEROTONIN': return 'xray-serotonin'
+  } else if (activeXRayLens.value === 'signals') {
+    const signalType = s.signal_type || ''
+    switch (signalType) {
+      case 'action_cues': return 'xray-action-cues'
+      case 'relational_cues': return 'xray-relational-cues'
+      case 'mystery_cues': return 'xray-mystery-cues'
+      case 'sensory_cues': return 'xray-sensory-cues'
       default: return 'text-zinc-300'
     }
   } else if (activeXRayLens.value === 'cadence') {
     const words = s.words || (s.text ? s.text.split(' ').length : 12)
-    if (words <= 8) return 'xray-escalator'
-    if (words >= 22) return 'xray-resolver'
+    if (words <= xraySettings.value.staccato_threshold) return 'xray-escalator'
+    if (words >= xraySettings.value.expansive_threshold) return 'xray-resolver'
     return 'text-zinc-300'
   } else if (activeXRayLens.value === 'clutter') {
     return s.has_clutter ? 'bg-zinc-900/60' : 'text-zinc-300'
@@ -392,7 +584,7 @@ const getSentenceLensClass = (s) => {
 
 const getSentenceTooltip = (s) => {
   if (activeXRayLens.value === 'energetics') return s.energetics_reason || s.reason
-  if (activeXRayLens.value === 'neuro') return s.neuro_reason
+  if (activeXRayLens.value === 'signals') return s.signal_reason
   if (activeXRayLens.value === 'cadence') return s.cadence_reason
   if (activeXRayLens.value === 'clutter') return s.clutter_reason
   return s.reason
@@ -414,7 +606,7 @@ const elevateSelection = async () => {
       headers: { 'Content-Type': 'application/json' }, 
       body: JSON.stringify({ 
         passage: store.selectedText, 
-        surrounding: store.activeNode?.content || '', 
+        surrounding: htmlToText(store.activeNode?.content || ''),
         scene_id: store.activeNode?.id 
       }) 
     })
@@ -453,8 +645,8 @@ const runMasterTriage = async () => {
     if (!res.ok) throw new Error('Triage failed')
     const data = await res.json()
     if (data.status === 'success') {
-      if (editor) editor.commands.setContent(textToHtml(data.formatted_text))
-      store.activeNode.content = data.formatted_text
+      if (editor) editor.commands.setContent(contentToHtml(data.formatted_text))
+      store.activeNode.content = editor?.getHTML() || data.formatted_text
       let msg = 'Draft Triaged!'
       if (data.new_scenes > 0) msg += ` Splitting ${data.new_scenes} new scenes.`
       store.saveStatus = msg
@@ -471,12 +663,14 @@ onMounted(() => {
   if (store.activeNode?.id) initEditor() 
   window.addEventListener('sniper-scroll', handleSniperScroll)
   window.addEventListener('lens-beat-jump', handleLensBeatJump)
+  window.addEventListener('beforeunload', warnBeforeLeaving)
 })
 
 onBeforeUnmount(() => { 
   if (editor) editor.destroy() 
   window.removeEventListener('sniper-scroll', handleSniperScroll)
   window.removeEventListener('lens-beat-jump', handleLensBeatJump)
+  window.removeEventListener('beforeunload', warnBeforeLeaving)
 })
 </script>
 
@@ -492,10 +686,10 @@ onBeforeUnmount(() => {
 .xray-resolver { background-color: rgba(16, 185, 129, 0.2); color: #6ee7b7; border-bottom: 2px solid rgba(16, 185, 129, 0.6); }
 .xray-pivot { background-color: rgba(245, 158, 11, 0.25); color: #fcd34d; border-bottom: 2px solid rgba(245, 158, 11, 0.7); }
 .xray-slack { background-color: rgba(113, 113, 122, 0.2); color: #a1a1aa; text-decoration: underline dotted #71717a; }
-.xray-adrenaline { background-color: rgba(239, 68, 68, 0.25); color: #fca5a5; border-bottom: 2px solid rgba(239, 68, 68, 0.8); }
-.xray-oxytocin { background-color: rgba(168, 85, 247, 0.25); color: #d8b4fe; border-bottom: 2px solid rgba(168, 85, 247, 0.8); }
-.xray-dopamine { background-color: rgba(6, 182, 212, 0.25); color: #67e8f9; border-bottom: 2px solid rgba(6, 182, 212, 0.8); }
-.xray-serotonin { background-color: rgba(16, 185, 129, 0.25); color: #6ee7b7; border-bottom: 2px solid rgba(16, 185, 129, 0.8); }
+.xray-action-cues { background-color: rgba(239, 68, 68, 0.25); color: #fca5a5; border-bottom: 2px solid rgba(239, 68, 68, 0.8); }
+.xray-relational-cues { background-color: rgba(168, 85, 247, 0.25); color: #d8b4fe; border-bottom: 2px solid rgba(168, 85, 247, 0.8); }
+.xray-mystery-cues { background-color: rgba(6, 182, 212, 0.25); color: #67e8f9; border-bottom: 2px solid rgba(6, 182, 212, 0.8); }
+.xray-sensory-cues { background-color: rgba(16, 185, 129, 0.25); color: #6ee7b7; border-bottom: 2px solid rgba(16, 185, 129, 0.8); }
 .clutter-filter { background-color: rgba(244, 63, 94, 0.35); color: #fda4af; border-bottom: 2px solid #f43f5e; padding: 1px 3px; border-radius: 2px; font-weight: 600; }
 .clutter-crutch { background-color: rgba(245, 158, 11, 0.35); color: #fde68a; border-bottom: 2px solid #f59e0b; padding: 1px 3px; border-radius: 2px; font-weight: 600; }
 .pulse-beat { background-color: rgba(34, 211, 238, 0.22) !important; border-left: 3px solid #22d3ee !important; padding-left: 8px !important; border-radius: 4px; transition: all 0.5s ease; }

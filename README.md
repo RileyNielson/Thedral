@@ -101,43 +101,54 @@ Powered by a local, air-gapped **Llama 3.2:3b** model via Ollama:
 
 ### Prerequisites
 1. **Python 3.11+**
-2. **Node.js 18+ & npm**
-3. **[Ollama](https://ollama.com)** (Optional, for Socratic Mirror & AI Survey)
+2. **Node.js 20.19+ or 22.12+ and npm** (the launchers rebuild the interface at startup)
+3. **[Ollama](https://ollama.com/download)** (Full mode only)
+
+### Choose Lite or Full
+
+Run `Run_Thedral.bat` on Windows or `Run_Thedral.command` on macOS and select a mode. On Windows, `Run_Thedral_AI.bat` is a shortcut that starts directly in Full mode.
+
+- **Lite** installs core dependencies only. It does not require Ollama or an AI model. Writing, organization, and deterministic text analysis remain available; AI-assisted actions are disabled and the app displays a Lite-mode notice.
+- **Full** enables local AI-assisted features through Ollama. Install and start Ollama, then download the configured model (default `llama3.2:3b`) with `ollama pull llama3.2:3b` before launching. The launchers verify that Ollama is responding and the configured model is present.
+
+On first launch, the launcher creates the Python environment and installs the selected dependencies. Each new start rebuilds the frontend from current sources and checks that the backend is ready before opening the browser. Startup output is shown in the backend console on Windows and recorded at `exports/thedral-backend.log` on macOS. Close the backend console on Windows or press **Control-C** in the macOS launcher to stop Thedral; neither launcher terminates unrelated Python processes.
+
+Configuration can be set in a root `.env` file (copy `.env.example` to `.env`). The launchers set `ENABLE_AI` for the chosen mode; other settings, including `STUDIO_MODEL` and `OLLAMA_HOST`, can be customized there.
+
+### Manual setup
 
 ```bash
-# Pull the recommended local 3B model
-ollama pull llama3.2:3b
-Installation
-code
-Bash
-# 1. Clone the sovereign repository
-git clone https://github.com/your-username/Thedral.git
-cd Thedral
+python -m venv venv
+# Windows: venv\Scripts\activate
+# macOS/Linux: source venv/bin/activate
+pip install -r requirements.txt       # Lite
+# For Full, use: pip install -r requirements-ai.txt
+npm --prefix frontend ci
+npm --prefix frontend run build
+python app.py
+```
 
-# 2. Set up Python backend
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install fastapi uvicorn python-docx pydantic ollama
+Set `ENABLE_AI=false` in the environment for Lite mode, or `ENABLE_AI=true` for Full mode. Full mode additionally requires a running Ollama service and the configured local model.
 
-# 3. Set up Frontend interface
-npm install
-Running the Test Suite
-Thedral ships with an end-to-end integration mega-suite that validates database triggers, FTS5 search, 3D manifold construction, and pacing math:
-code
-Bash
+### Running the Test Suite
+
+```bash
 python tests/test_suite.py
-(All 32/32 tests should report [PASS])
-Launching the Studio
-code
-Bash
-# Terminal 1: Backend
+```
+
+### Launching the development interface
+
+```bash
+# Terminal 1: backend
 python app.py
 
-# Terminal 2: Frontend
+# Terminal 2: frontend development server
+cd frontend
 npm run dev -- --host
-Open your browser to: http://localhost:5173
-1-Click Launching (macOS)
-For distraction-free writing without opening a terminal, double-click Run_Thedral.command in the project root. It will silently boot the backend, start Vite, verify Ollama, and open your studio in your browser.
+```
+
+Open `http://localhost:5173`.
+
 Mobile PWA Bridge (Write on Phone/Tablet)
 Ensure your phone and computer are on the same Wi-Fi network.
 In Thedral, click the Phone icon in the top navigation bar.

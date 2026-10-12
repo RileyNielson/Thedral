@@ -2,6 +2,7 @@ import re
 import json
 import sqlite3
 from backend.reducer import get_entity_state_at_tick
+from backend.text_utils import html_to_text
 
 def compile_scene_dossier(conn: sqlite3.Connection, scene_id: str) -> dict:
     """
@@ -27,7 +28,7 @@ def compile_scene_dossier(conn: sqlite3.Connection, scene_id: str) -> dict:
     if not scene:
         return {}
 
-    content = scene["content"] or ""
+    content = html_to_text(scene["content"] or "")
     content_lower = content.lower()
 
     # 2. Detect Active Characters, Nicknames, and Somatic States

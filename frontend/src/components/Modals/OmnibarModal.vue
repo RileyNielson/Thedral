@@ -17,7 +17,7 @@
           @keydown.enter.prevent="selectCurrentResult"
           @keydown.esc="closeOmnibar"
           class="flex-1 bg-transparent text-lg text-white focus:outline-none placeholder-zinc-500 font-serif" 
-          placeholder="Search manuscript, or end with '?' to ask the Librarian..." 
+          placeholder="Search, end with '?' to ask, or type '>' for actions..."
         />
         <span v-if="isLoading" class="text-xs font-mono text-amber-400 animate-pulse ml-2">Searching...</span>
       </div>
@@ -73,7 +73,7 @@
 
       <!-- Footer Help Tray -->
       <div class="px-4 py-2 bg-zinc-950 border-t border-zinc-800 text-[10px] text-zinc-500 flex justify-between font-mono">
-        <span>Use <kbd class="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">↑</kbd> <kbd class="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">↓</kbd> to navigate, <kbd class="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">Enter</kbd> to jump.</span>
+        <span>Type <kbd class="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">&gt;</kbd> for actions · use <kbd class="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">↑</kbd>/<kbd class="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">↓</kbd> then <kbd class="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">Enter</kbd>.</span>
         <span>Press <kbd class="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">Esc</kbd> to return.</span>
       </div>
 
@@ -94,18 +94,41 @@ const answer = ref('')
 const omnibarInput = ref(null)
 const selectedIndex = ref(0)
 const isLoading = ref(false)
+let searchRequestId = 0
+const commands = [
+  { type: 'COMMAND', action: 'write', title: 'Return to writing', subtitle: 'Workspace', preview: 'Open the current scene in the editor.' },
+  { type: 'COMMAND', action: 'outline', title: 'Open outline', subtitle: 'Workspace', preview: 'Review chapter and scene synopses.' },
+  { type: 'COMMAND', action: 'corkboard', title: 'Open corkboard', subtitle: 'Workspace', preview: 'View scenes as index cards.' },
+  { type: 'COMMAND', action: 'new-scene', title: 'Create a scene', subtitle: 'Binder', preview: 'Add a scene to the working manuscript.' },
+  { type: 'COMMAND', action: 'previous-scene', title: 'Go to previous scene', subtitle: 'Navigate', preview: 'Move to the previous scene in this manuscript.' },
+  { type: 'COMMAND', action: 'next-scene', title: 'Go to next scene', subtitle: 'Navigate', preview: 'Move to the next scene in this manuscript.' },
+  { type: 'COMMAND', action: 'import', title: 'Import a manuscript', subtitle: 'Binder', preview: 'Preview an import before adding it.' },
+  { type: 'COMMAND', action: 'export', title: 'Review and export DOCX', subtitle: 'Export', preview: 'Check scene statuses and empty scenes before export.' }
+]
 
 const closeOmnibar = () => {
   store.toggleModal('omnibar', false)
 }
 
 const runSearch = async () => {
+  const requestId = ++searchRequestId
   const q = query.value.trim()
   selectedIndex.value = 0
+
+  if (q.startsWith('>')) {
+    const filter = q.slice(1).trim().toLowerCase()
+    results.value = commands.filter(command =>
+      !filter || `${command.title} ${command.subtitle} ${command.preview}`.toLowerCase().includes(filter)
+    )
+    answer.value = ''
+    isLoading.value = false
+    return
+  }
 
   if (q.length < 2) { 
     results.value = []
     answer.value = ''
+    isLoading.value = false
     return 
   }
 
@@ -121,11 +144,13 @@ const runSearch = async () => {
       })
       if (!res.ok) throw new Error('Librarian endpoint failed')
       const data = await res.json()
+      if (requestId !== searchRequestId) return
       answer.value = data.answer
     } catch(e) { 
+      if (requestId !== searchRequestId) return
       answer.value = 'The Librarian is unreachable at this moment.' 
     } finally {
-      isLoading.value = false
+      if (requestId === searchRequestId) isLoading.value = false
     }
     return
   } else { 
@@ -185,8 +210,10 @@ const runSearch = async () => {
     }))
   }
 
-  results.value = combined
-  isLoading.value = false
+  if (requestId === searchRequestId) {
+    results.value = combined
+    isLoading.value = false
+  }
 }
 
 const navigateResults = (direction) => {
@@ -201,15 +228,28 @@ const selectCurrentResult = () => {
 }
 
 const handleClick = async (res) => {
-  if (res.type === 'SCENE' && res.id) {
-    await store.loadScene(res.id)
-    store.viewMode = 'editor'
+  if (res.type === 'COMMAND') {
+    if (res.action === 'write') store.viewMode = 'editor'
+    else if (res.action === 'outline') store.viewMode = 'outline'
+    else if (res.action === 'corkboard') store.viewMode = 'corkboard'
+    else if (res.action === 'new-scene') await store.createScene()
+    else if (res.action === 'previous-scene') await store.navigateScene(-1)
+    else if (res.action === 'next-scene') await store.navigateScene(1)
+    else if (res.action === 'import') store.toggleModal('import', true)
+    else if (res.action === 'export') store.toggleModal('export', true)
+    closeOmnibar()
+  } else if (res.type === 'SCENE' && res.id) {
+    if (await store.loadScene(res.id)) {
+      store.viewMode = 'editor'
+      closeOmnibar()
+    }
   } else if (res.type === 'CHARACTER' || res.type === 'ITEM') {
     store.toggleModal('cast', true)
+    closeOmnibar()
   } else if (res.type === 'LORE') {
     store.toggleModal('lore', true)
+    closeOmnibar()
   }
-  closeOmnibar()
 }
 
 onMounted(() => {

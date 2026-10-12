@@ -12,7 +12,7 @@
             <LayoutGrid class="w-6 h-6 text-amber-500 shrink-0" /> Corkboard Index Cards
           </h2>
           <p class="text-xs text-zinc-500 font-mono mt-0.5">
-            {{ totalSceneCount }} scene beats across {{ chapters.length }} chapters
+              {{ totalSceneCount }} scene beats across {{ chapters.length }} chapters · {{ store.getBook()?.title || 'No manuscript selected' }}
           </p>
         </div>
 
@@ -124,58 +124,44 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { store, showToast } from '../store.js'
 import { LayoutGrid, PenTool, ArrowRight, Plus } from 'lucide-vue-next'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 const selectedChapterId = ref('ALL')
+watch(() => store.activeBookId, () => { selectedChapterId.value = 'ALL' })
 
-// Flatten chapters from all books in tree
+// Keep the board focused on the selected working manuscript.
 const chapters = computed(() => {
-  const chList = []
-  for (const book of store.tree || []) {
-    for (const ch of book.children || []) {
-      chList.push(ch)
-    }
-  }
-  return chList
+  return store.getBook()?.children?.filter(chapter => chapter.node_type === 'CHAPTER') || []
 })
 
 // Flatten scene cards matching chapter filter
 const cards = computed(() => {
   const result = []
-  for (const book of store.tree || []) {
-    for (const ch of book.children || []) {
-      if (selectedChapterId.value !== 'ALL' && ch.id !== selectedChapterId.value) {
-        continue
-      }
-      for (const sc of ch.children || []) {
-        result.push({
-          ...sc,
-          chapterTitle: ch.title,
-          chapterId: ch.id
-        })
-      }
+  for (const ch of chapters.value) {
+    if (selectedChapterId.value !== 'ALL' && ch.id !== selectedChapterId.value) {
+      continue
+    }
+    for (const sc of ch.children || []) {
+      result.push({
+        ...sc,
+        chapterTitle: ch.title,
+        chapterId: ch.id
+      })
     }
   }
   return result
 })
 
 const totalSceneCount = computed(() => {
-  let count = 0
-  for (const book of store.tree || []) {
-    for (const ch of book.children || []) {
-      count += (ch.children || []).length
-    }
-  }
-  return count
+  return chapters.value.reduce((count, chapter) => count + (chapter.children || []).length, 0)
 })
 
 const openScene = async (sceneId) => {
-  await store.loadScene(sceneId)
-  store.viewMode = 'editor'
+  if (await store.loadScene(sceneId)) store.viewMode = 'editor'
 }
 
 const addNewBeat = async (targetChapterId) => {
