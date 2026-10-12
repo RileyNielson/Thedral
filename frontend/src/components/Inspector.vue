@@ -536,7 +536,13 @@
         <div class="flex items-center justify-between">
           <div>
             <span class="text-[11px] text-zinc-400 font-medium">Simulated reader pass</span>
-            <p class="text-[9px] text-zinc-600">A fresh read from the scene alone—no author goal or explanation is given to the AI. This is a hypothesis, not reader feedback.</p>
+            <p class="text-[9px] text-zinc-600">
+              {{ readingMode === 'scene'
+                ? 'Only this scene is supplied—no author goal or explanation.'
+                : 'The AI receives the most recent preceding manuscript text (up to 3,500 characters), then this scene. No notes or author explanation.'
+              }}
+              This is a hypothesis, not reader feedback.
+            </p>
           </div>
           <button 
             @click="scanHorizon" 
@@ -548,6 +554,14 @@
           </button>
         </div>
 
+        <label class="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[9px] text-zinc-500">
+          <span>Reading context</span>
+          <select v-model="readingMode" :disabled="isScanning" class="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] text-zinc-200 disabled:opacity-60">
+            <option value="scene">Scene alone</option>
+            <option value="sequential">With preceding scenes</option>
+          </select>
+        </label>
+
         <div v-if="simulationHistory.length" class="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5 space-y-2">
           <div class="flex items-center justify-between gap-2">
             <label class="text-[9px] uppercase tracking-wider text-zinc-500" for="reader-simulation-history">Saved first-read pass</label>
@@ -555,16 +569,23 @@
           </div>
           <select id="reader-simulation-history" v-model="selectedSimulationId" class="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-[10px] text-zinc-200">
             <option v-for="(simulation, index) in simulationHistory" :key="simulation.id" :value="simulation.id">
-              Pass {{ simulationHistory.length - index }} · {{ simulation.revision_ref }} · {{ (simulation.created_at || '').split(' ')[0] }} · {{ simulation.source_content_hash.slice(0, 10) }}
+              Pass {{ simulationHistory.length - index }} · {{ simulation.reading_mode === 'sequential' ? 'sequential' : 'scene alone' }} · {{ simulation.revision_ref }} · {{ (simulation.created_at || '').split(' ')[0] }} · {{ simulation.source_content_hash.slice(0, 10) }}
             </option>
           </select>
           <template v-if="selectedSimulation">
             <p class="text-[9px] text-zinc-500">
               {{ selectedSimulation.revision_ref === 'CURRENT' ? 'Saved scene content' : selectedSimulation.revision_ref === 'UNSAVED' ? 'Unsaved editor content' : `Saved revision ${selectedSimulation.revision_ref}` }}
-              · AI analyzed {{ selectedSimulation.analyzed_characters.toLocaleString() }} of {{ selectedSimulation.source_characters.toLocaleString() }} characters
+              · {{ selectedSimulation.analyzed_scene_characters.toLocaleString() }} of {{ selectedSimulation.source_characters.toLocaleString() }} scene characters
+              <template v-if="selectedSimulation.context_characters"> + {{ selectedSimulation.context_characters.toLocaleString() }} prior-context characters</template>
               · {{ selectedSimulation.model_name }} · {{ selectedSimulation.prompt_version }}
             </p>
-            <p v-if="selectedSimulation.prompt_version === 'first-read-v3'" class="text-[9px] text-emerald-300">
+            <p v-if="selectedSimulation.prompt_version === 'first-read-v4'" class="text-[9px] text-emerald-300">
+              Fresh-read pass: {{ selectedSimulation.reading_mode === 'sequential'
+                ? `the AI received ${selectedSimulation.context_characters.toLocaleString()} characters of preceding scene text and the current scene, without author-only context.`
+                : 'the AI received only the scene excerpt, without author-only context.'
+              }}
+            </p>
+            <p v-else-if="selectedSimulation.prompt_version === 'first-read-v3'" class="text-[9px] text-emerald-300">
               Fresh-read pass: the AI received only the scene excerpt, with no author-provided goal or explanation.
             </p>
             <p v-else-if="selectedSimulation.intended_takeaway" class="text-[9px] text-amber-300">
@@ -574,8 +595,13 @@
               The analyzed excerpt matches an earlier pass; its saved observations were reused to keep feedback stable.
             </p>
             <details class="text-[9px] text-zinc-500">
-              <summary class="cursor-pointer hover:text-zinc-300">Show exact scene excerpt sent to AI</summary>
-              <p class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-zinc-900 p-2 text-zinc-400">{{ selectedSimulation.analyzed_text }}</p>
+              <summary class="cursor-pointer hover:text-zinc-300">Show exact manuscript text sent to AI</summary>
+              <div v-if="selectedSimulation.reading_context" class="mt-1 space-y-1">
+                <p class="text-zinc-600">Preceding context window</p>
+                <p class="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-zinc-900 p-2 text-zinc-400">{{ selectedSimulation.reading_context }}</p>
+              </div>
+              <p class="mt-1 text-zinc-600">Current scene excerpt</p>
+              <p class="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-zinc-900 p-2 text-zinc-400">{{ selectedSimulation.analyzed_text }}</p>
             </details>
           </template>
         </div>
@@ -606,7 +632,10 @@
                 <div class="h-full rounded bg-cyan-500/70" :style="{ width: `${item.level * 20}%` }"></div>
               </div>
               <p class="text-[9px] leading-relaxed text-zinc-400"><span class="text-zinc-600">Possible driver:</span> {{ item.cause }}</p>
-              <blockquote class="border-l border-cyan-900/70 pl-2 text-[9px] italic leading-relaxed text-zinc-500">“{{ item.source_excerpt }}”</blockquote>
+              <blockquote class="border-l border-cyan-900/70 pl-2 text-[9px] italic leading-relaxed text-zinc-500">
+                <span v-if="item.evidence_source === 'prior_context'" class="not-italic text-cyan-700">Earlier scene: </span>
+                “{{ item.source_excerpt }}”
+              </blockquote>
             </article>
           </div>
           <p v-if="!readerExperienceDimensions.some(dimension => readerExperienceItems(dimension.type).length)" class="text-[9px] text-zinc-500">
@@ -644,7 +673,10 @@
             <h4 class="text-[9px] font-semibold uppercase tracking-wider" :class="category.color">{{ category.label }}</h4>
             <article v-for="(item, index) in simulationItems(category.type)" :key="`${item.source_excerpt}-${index}`" class="text-[10px] leading-relaxed text-zinc-300">
               <p>{{ item.narrative_claim }}</p>
-              <blockquote v-if="item.source_excerpt" class="border-l border-zinc-700 pl-2 text-[9px] italic text-zinc-500">“{{ item.source_excerpt }}”</blockquote>
+              <blockquote v-if="item.source_excerpt" class="border-l border-zinc-700 pl-2 text-[9px] italic text-zinc-500">
+                <span v-if="item.evidence_source === 'prior_context'" class="not-italic text-cyan-700">Earlier scene: </span>
+                “{{ item.source_excerpt }}”
+              </blockquote>
             </article>
             <p v-if="!simulationItems(category.type).length" class="text-[9px] text-zinc-600">No grounded observations surfaced in this category.</p>
           </section>
@@ -830,6 +862,7 @@ const plainSceneContent = (content = '') => {
 const tutorQuestion = ref('')
 const isTutorThinking = ref(false)
 const isScanning = ref(false)
+const readingMode = ref('scene')
 const isLensLoading = ref(false)
 const selectedRevisionVersion = ref(null)
 const simulationHistory = ref([])
@@ -923,6 +956,7 @@ const simulationComparison = computed(() => {
     simulation.analyzed_content_hash !== selected.analyzed_content_hash
     && simulation.prompt_version === selected.prompt_version
     && simulation.model_name === selected.model_name
+    && (simulation.reading_mode || 'scene') === (selected.reading_mode || 'scene')
   )
   if (!previous) return null
   const normalizeClaim = item => `${item.disclosure_type}:${item.narrative_claim}`.trim().toLowerCase().replace(/\s+/g, ' ')
@@ -1409,7 +1443,8 @@ const scanHorizon = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         scene_id: sceneId,
-        text: content
+        text: content,
+        reading_mode: readingMode.value
       })
     })
     if (!res.ok) throw new Error(`Scan failed (HTTP ${res.status}).`)

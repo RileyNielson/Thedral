@@ -229,6 +229,8 @@ def init_db(custom_path: str | Path | None = None) -> None:
         for column, definition in [
             ("analyzed_content_hash", "TEXT NOT NULL DEFAULT ''"),
             ("reused_from_id", "TEXT"),
+            ("reading_mode", "TEXT NOT NULL DEFAULT 'scene'"),
+            ("reading_context", "TEXT NOT NULL DEFAULT ''"),
         ]:
             if column not in simulation_cols:
                 c.execute(f"ALTER TABLE reader_simulations ADD COLUMN {column} {definition}")

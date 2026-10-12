@@ -8,7 +8,13 @@
           ? 'bg-[#07140e] text-emerald-50 selection:bg-emerald-900/50'
           : store.colorScheme === 'violet'
             ? 'bg-[#140d1e] text-violet-50 selection:bg-violet-900/50'
-            : 'bg-zinc-950 text-zinc-100 selection:bg-indigo-900/50'
+            : store.colorScheme === 'ocean'
+              ? 'bg-[#07131b] text-sky-50 selection:bg-sky-900/50'
+              : store.colorScheme === 'rose'
+                ? 'bg-[#190d13] text-rose-50 selection:bg-rose-900/50'
+                : store.colorScheme === 'graphite'
+                  ? 'bg-[#111315] text-zinc-100 selection:bg-zinc-700/50'
+                  : 'bg-zinc-950 text-zinc-100 selection:bg-indigo-900/50'
     ]"
   >
     <!-- Top Global Command & Navigation Bar -->
@@ -156,6 +162,9 @@ watch(() => store.colorScheme, (theme) => {
   document.body.classList.toggle('candlelight-mode', theme === 'candlelight')
   document.body.classList.toggle('forest-mode', theme === 'forest')
   document.body.classList.toggle('violet-mode', theme === 'violet')
+  document.body.classList.toggle('ocean-mode', theme === 'ocean')
+  document.body.classList.toggle('rose-mode', theme === 'rose')
+  document.body.classList.toggle('graphite-mode', theme === 'graphite')
 })
 
 const handleKeydown = (e) => {
@@ -215,6 +224,9 @@ onMounted(async () => {
   document.body.classList.toggle('candlelight-mode', store.colorScheme === 'candlelight')
   document.body.classList.toggle('forest-mode', store.colorScheme === 'forest')
   document.body.classList.toggle('violet-mode', store.colorScheme === 'violet')
+  document.body.classList.toggle('ocean-mode', store.colorScheme === 'ocean')
+  document.body.classList.toggle('rose-mode', store.colorScheme === 'rose')
+  document.body.classList.toggle('graphite-mode', store.colorScheme === 'graphite')
   window.addEventListener('keydown', handleKeydown)
   store.fetchRuntimeStatus()
   await store.fetchTree()
@@ -276,9 +288,27 @@ body.violet-mode {
   color: #f3e8ff !important;
 }
 
+body.ocean-mode {
+  background-color: #07131b !important;
+  color: #e0f2fe !important;
+}
+
+body.rose-mode {
+  background-color: #190d13 !important;
+  color: #ffe4e6 !important;
+}
+
+body.graphite-mode {
+  background-color: #111315 !important;
+  color: #f4f4f5 !important;
+}
+
 body.candlelight-mode .custom-scrollbar::-webkit-scrollbar-thumb,
 body.forest-mode .custom-scrollbar::-webkit-scrollbar-thumb,
-body.violet-mode .custom-scrollbar::-webkit-scrollbar-thumb {
+body.violet-mode .custom-scrollbar::-webkit-scrollbar-thumb,
+body.ocean-mode .custom-scrollbar::-webkit-scrollbar-thumb,
+body.rose-mode .custom-scrollbar::-webkit-scrollbar-thumb,
+body.graphite-mode .custom-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.6);
 }
 </style>

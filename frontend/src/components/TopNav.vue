@@ -104,7 +104,7 @@
           @click="themeMenuOpen = !themeMenuOpen"
           :class="[
             'px-2 py-1 rounded flex items-center gap-1 transition text-xs border',
-            store.colorScheme === 'candlelight' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.2)]' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-white'
+            store.colorScheme !== 'midnight' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-white'
           ]"
           title="Choose Color Scheme"
         >
@@ -202,10 +202,13 @@ const themeMenuOpen = ref(false)
 const recentOpen = ref(false)
 const recentScenes = computed(() => store.getRecentScenes())
 const themeOptions = [
-  { id: 'midnight', label: 'Midnight', color: '#5b5bd6' },
+  { id: 'midnight', label: 'Midnight', color: '#818cf8' },
   { id: 'candlelight', label: 'Candlelight', color: '#f59e0b' },
   { id: 'forest', label: 'Forest', color: '#22c55e' },
-  { id: 'violet', label: 'Violet', color: '#a78bfa' }
+  { id: 'violet', label: 'Violet', color: '#a78bfa' },
+  { id: 'ocean', label: 'Ocean', color: '#38bdf8' },
+  { id: 'rose', label: 'Rose', color: '#fb7185' },
+  { id: 'graphite', label: 'Graphite', color: '#a1a1aa' }
 ]
 
 const applyTheme = (themeId) => {

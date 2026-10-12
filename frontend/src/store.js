@@ -155,7 +155,7 @@ export const store = reactive({
   },
 
   setColorScheme(scheme) {
-    const allowed = ['midnight', 'candlelight', 'forest', 'violet']
+    const allowed = ['midnight', 'candlelight', 'forest', 'violet', 'ocean', 'rose', 'graphite']
     const nextScheme = allowed.includes(scheme) ? scheme : 'midnight'
     this.colorScheme = nextScheme
     this.isCandlelight = nextScheme === 'candlelight'

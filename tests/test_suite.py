@@ -519,6 +519,20 @@ if api_books:
     """, (active_test_book,)).fetchone()
     feedback_conn.close()
     if feedback_scene:
+        prior_scene_id = f"reader_context_{uuid.uuid4().hex}"
+        prior_chapter_id = f"reader_context_chapter_{uuid.uuid4().hex}"
+        prior_scene_text = f"Earlier scene context marker {uuid.uuid4().hex}."
+        context_conn = get_db()
+        with context_conn:
+            context_conn.execute("""
+                INSERT INTO binder_nodes (id, parent_id, node_type, title, sort_order)
+                VALUES (?, ?, 'CHAPTER', 'Reader context test chapter', -100)
+            """, (prior_chapter_id, active_test_book))
+            context_conn.execute("""
+                INSERT INTO binder_nodes (id, parent_id, node_type, title, sort_order, content)
+                VALUES (?, ?, 'SCENE', 'Reader context test scene', 0, ?)
+            """, (prior_scene_id, prior_chapter_id, prior_scene_text))
+        context_conn.close()
         live_scene_text = "<p>A live draft is compared with its neighboring scenes.</p>"
         analytics_res = client.post(
             f"/api/analytics/reader-experience/{active_test_book}",
@@ -609,11 +623,14 @@ if api_books:
                 "attention": [],
             },
         }
+        sequential_ai_response = json.loads(json.dumps(valid_ai_response))
+        sequential_ai_response["direct"][0]["evidence"] = prior_scene_text
         response_items = iter((
             [],
             {"direct": "not a list"},
             valid_ai_response,
             valid_ai_response,
+            sequential_ai_response,
         ))
         ai_call_count = []
         mock_ollama = types.SimpleNamespace(
@@ -655,6 +672,10 @@ if api_books:
                 **revised_payload,
                 "text": revised_payload["text"] + " An ending beat was added outside the analyzed excerpt.",
             })
+            sequential_simulation = client.post("/api/disclosures/scan", json={
+                **simulation_payload,
+                "reading_mode": "sequential",
+            })
             simulation_history = client.get(
                 f"/api/reader-simulations/scene/{feedback_scene['id']}"
             )
@@ -680,14 +701,14 @@ if api_books:
                 and first_saved_sim.get("model_name")
                 and first_saved_sim.get("prompt_version")
             ),
-            "three new snapshots": len(simulation_history.json().get("simulations", [])) == previous_simulation_count + 3,
+            "four new snapshots": len(simulation_history.json().get("simulations", [])) == previous_simulation_count + 4,
             "source length": first_saved_sim.get("source_characters") == len(html_to_text(simulation_payload["text"])),
             "source persisted": bool(
                 persisted_source and persisted_source["source_text"] == html_to_text(simulation_payload["text"])
             ),
             "new result": first_simulation.json().get("reused") is False,
             "fresh reader contract": (
-                first_saved_sim.get("prompt_version") == "first-read-v3"
+                first_saved_sim.get("prompt_version") == "first-read-v4"
                 and first_saved_sim.get("intended_takeaway") == ""
                 and "author's intended reader takeaway" not in first_saved_sim.get("system_prompt", "").lower()
                 and "The reader sees that a passage is being validated."
@@ -723,7 +744,23 @@ if api_books:
             and outside_excerpt_edit.json().get("reused") is True
             and outside_excerpt_edit.json().get("simulation", {}).get("reused_from_id")
             == revised_simulation.json().get("simulation", {}).get("id")
-            and len(ai_call_count) == 4
+            and len(ai_call_count) == 5
+        )
+        sequential_saved = sequential_simulation.json().get("simulation", {})
+        record_test(
+            "Sequential reader rehearsal uses only preceding manuscript text",
+            sequential_simulation.status_code == 200
+            and sequential_saved.get("reading_mode") == "sequential"
+            and prior_scene_text in sequential_saved.get("reading_context", "")
+            and prior_scene_text in ai_call_count[4]["messages"][1]["content"]
+            and sequential_saved.get("context_characters")
+            == len(sequential_saved.get("reading_context", ""))
+            and any(
+                item.get("disclosure_type") == "DIRECT"
+                and item.get("source_excerpt") == prior_scene_text
+                and item.get("evidence_source") == "prior_context"
+                for item in sequential_saved.get("items", [])
+            ),
         )
         cleanup_conn = get_db()
         with cleanup_conn:
