@@ -519,6 +519,35 @@ if api_books:
     """, (active_test_book,)).fetchone()
     feedback_conn.close()
     if feedback_scene:
+        live_scene_text = "<p>A live draft is compared with its neighboring scenes.</p>"
+        analytics_res = client.post(
+            f"/api/analytics/reader-experience/{active_test_book}",
+            json={"scene_id": feedback_scene["id"], "content": live_scene_text},
+        )
+        analytics_data = analytics_res.json() if analytics_res.status_code == 200 else {}
+        selected_analytics = next(
+            (
+                scene for scene in analytics_data.get("scenes", [])
+                if scene["scene_id"] == feedback_scene["id"]
+            ),
+            {},
+        )
+        record_test(
+            "Reader analytics compare live scene text in manuscript order",
+            analytics_res.status_code == 200
+            and analytics_data.get("selected_index", -1)
+            == next(
+                (
+                    index for index, scene in enumerate(analytics_data.get("scenes", []))
+                    if scene["scene_id"] == feedback_scene["id"]
+                ),
+                None,
+            )
+            and selected_analytics.get("telemetry", {}).get("words")
+            == len(html_to_text(live_scene_text).split())
+            and bool(selected_analytics.get("chapter_title")),
+        )
+
         feedback_post = client.post("/api/reader-feedback", json={
             "scene_id": feedback_scene["id"],
             "revision_ref": "CURRENT",
@@ -544,8 +573,41 @@ if api_books:
             "direct": [{
                 "claim": "The reader sees that a passage is being validated.",
                 "evidence": "sufficiently long passage",
-                "confidence": 0.9,
-            }]
+            }],
+            "reader_experience": {
+                "emotional_arc": [{
+                    "moment": "opening",
+                    "estimate": "Cautious curiosity",
+                    "level": 3,
+                    "cause": "The phrasing withholds what is being validated.",
+                    "evidence": "sufficiently long passage",
+                }],
+                "interest": [{
+                    "moment": "opening",
+                    "estimate": "Moderate interest",
+                    "level": 3,
+                    "cause": "The unexplained validation raises a question.",
+                    "evidence": "validating the scanner response",
+                }],
+                "tension": [{
+                    "moment": "middle",
+                    "estimate": "Low tension",
+                    "level": 2,
+                    "cause": "The passage describes a calm action.",
+                    "evidence": "The surrounding prose remains unchanged.",
+                }],
+                "mystery": [{
+                    "moment": "opening",
+                    "estimate": "Why the passage is being validated",
+                    "level": 3,
+                    "cause": "The purpose is not yet explained.",
+                    "evidence": "validating the scanner response",
+                }],
+                "suspense": [],
+                "character_connection": [],
+                "confusion": [],
+                "attention": [],
+            },
         }
         response_items = iter((
             [],
@@ -556,7 +618,7 @@ if api_books:
         ai_call_count = []
         mock_ollama = types.SimpleNamespace(
             chat=lambda **_kwargs: (
-                ai_call_count.append(True)
+                ai_call_count.append(_kwargs)
                 or {"message": {"content": json.dumps(next(response_items))}}
             )
         )
@@ -624,6 +686,28 @@ if api_books:
                 persisted_source and persisted_source["source_text"] == html_to_text(simulation_payload["text"])
             ),
             "new result": first_simulation.json().get("reused") is False,
+            "fresh reader contract": (
+                first_saved_sim.get("prompt_version") == "first-read-v3"
+                and first_saved_sim.get("intended_takeaway") == ""
+                and "author's intended reader takeaway" not in first_saved_sim.get("system_prompt", "").lower()
+                and "The reader sees that a passage is being validated."
+                not in ai_call_count[2]["messages"][1]["content"]
+            ),
+            "reader experience estimates are grounded and typed": (
+                any(
+                    item.get("disclosure_type") == "EMOTIONAL_ARC"
+                    and item.get("level") == 3
+                    and item.get("cause")
+                    and item.get("source_excerpt") == "sufficiently long passage"
+                    for item in first_saved_sim.get("items", [])
+                )
+                and any(
+                    item.get("disclosure_type") == "MYSTERY"
+                    and item.get("level") == 3
+                    and item.get("source_excerpt") == "validating the scanner response"
+                    for item in first_saved_sim.get("items", [])
+                )
+            ),
         }
         record_test(
             "Reader simulation snapshots persist exact text and AI output",
@@ -631,7 +715,7 @@ if api_books:
             str({name: value for name, value in snapshot_checks.items() if not value}),
         )
         record_test(
-            "Unchanged text and intent reuse the fixed simulation",
+            "Unchanged text reuses the fixed fresh-reader simulation",
             first_saved_sim.get("id") == repeated_saved_sim.get("id")
             and repeated_simulation.json().get("reused") is True
             and revised_simulation.json().get("simulation", {}).get("id") != first_saved_sim.get("id")

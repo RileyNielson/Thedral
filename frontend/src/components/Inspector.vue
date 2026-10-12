@@ -23,7 +23,7 @@
         @click="store.activeInspectorTab = 'telemetry'" 
         :class="['flex-1 py-2.5 font-medium border-b-2 text-center transition', store.activeInspectorTab === 'telemetry' ? 'border-amber-500 text-amber-400' : 'border-transparent text-zinc-500 hover:text-zinc-300']"
       >
-        Telemetry
+        Patterns
       </button>
       <button 
         @click="store.activeInspectorTab = 'socratic'" 
@@ -350,66 +350,77 @@
 
       <!-- TAB 2: TEXTUAL SIGNALS -->
       <div v-if="store.activeInspectorTab === 'telemetry'" class="space-y-4">
-        <div class="grid grid-cols-2 gap-2 text-center font-mono">
-          <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800">
-            <div class="text-[10px] text-zinc-500">Cadence StDev</div>
-            <div class="text-base font-bold text-amber-400">{{ telemetry.cadence_stdev || 0 }}</div>
+        <header class="flex items-start justify-between gap-2">
+          <div class="space-y-1">
+            <h2 class="text-[11px] font-semibold text-zinc-200">Scene patterns in manuscript context</h2>
+            <p class="text-[9px] leading-relaxed text-zinc-500">These are measurable text features, not reader reactions. Comparisons use other scenes in this manuscript, so a difference is descriptive—not a quality judgment.</p>
           </div>
-          <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800">
-            <div class="text-[10px] text-zinc-500">Sentence Avg</div>
-            <div class="text-base font-bold text-amber-400">{{ telemetry.avg_sentence || 0 }}w</div>
-          </div>
+          <button @click="loadManuscriptAnalytics" :disabled="analyticsLoading" class="shrink-0 rounded border border-zinc-700 px-2 py-1 text-[9px] text-zinc-400 hover:text-zinc-200 disabled:opacity-50">
+            {{ analyticsLoading ? 'Updating…' : 'Refresh' }}
+          </button>
+        </header>
+
+        <div v-if="analyticsLoading" class="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-[10px] text-zinc-500">
+          Comparing this scene with the manuscript…
         </div>
-
-        <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800 flex items-center justify-between font-mono">
-          <div>
-            <span class="text-[10px] text-zinc-500 uppercase block">Change vs. previous scene</span>
-            <span class="text-xs text-zinc-300">{{ (telemetry.slope_diagnosis || 'NO_PREVIOUS_SCENE').replaceAll('_', ' ') }}</span>
-          </div>
-          <span class="text-base font-bold text-amber-400">{{ telemetry.tension_elevation ?? '—' }}</span>
+        <div v-else-if="analyticsError" class="rounded-lg border border-rose-900/50 bg-rose-950/20 p-3 text-[10px] text-rose-200">
+          {{ analyticsError }}
         </div>
-
-        <!-- Measurable prose patterns -->
-        <div class="p-3.5 bg-zinc-950 rounded-xl border border-zinc-800 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-amber-400 font-mono flex items-center gap-1.5">
-              <Activity class="w-3.5 h-3.5" /> Textual Signals
-            </span>
-            <span class="text-[9px] font-mono text-zinc-500">{{ telemetry.text_signals?.word_count || 0 }} words</span>
+        <template v-else-if="selectedSceneAnalytics">
+          <div class="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+            <div class="flex items-baseline justify-between gap-2">
+              <span class="text-[10px] uppercase tracking-wider text-amber-400">Estimated silent read</span>
+              <span class="font-mono text-sm font-semibold text-zinc-100">{{ readTimeRange }}</span>
+            </div>
+            <p class="text-[9px] text-zinc-500">
+              {{ selectedSceneAnalytics.telemetry.words.toLocaleString() }} words · estimated at 200–250 words/minute · scene {{ analyticsPosition }} of {{ manuscriptAnalytics.scenes.length }}
+            </p>
+            <p class="text-[9px] text-zinc-500">{{ sceneLengthComparison }}</p>
           </div>
-          <p class="text-[9px] leading-snug text-zinc-500">The text-derived tension estimate is a heuristic based on dialogue ratio, sentence length, and selected action cues—not a measure of reader response.</p>
-          <p class="text-[9px] leading-snug text-zinc-500">Counts of selected words and sentence/dialogue patterns. They do not measure reader feelings, comprehension, or quality.</p>
 
-          <dl class="space-y-1.5 font-mono text-[10px]">
-            <div v-for="signal in textSignalRows" :key="signal.key" class="flex justify-between gap-2">
-              <dt class="text-zinc-400">{{ signal.label }}</dt>
-              <dd class="shrink-0 text-zinc-200">{{ signal.count }} · {{ signal.rate }}/1k words</dd>
-            </div>
-            <div class="border-t border-zinc-800 pt-1.5 flex justify-between gap-2">
-              <dt class="text-zinc-400">Dialogue paragraphs</dt>
-              <dd class="text-zinc-200">{{ telemetry.text_signals?.patterns?.dialogue_paragraph_pct ?? 0 }}%</dd>
-            </div>
-            <div class="flex justify-between gap-2">
-              <dt class="text-zinc-400">Short / long sentences</dt>
-              <dd class="text-zinc-200">{{ telemetry.text_signals?.patterns?.short_sentence_pct ?? 0 }}% / {{ telemetry.text_signals?.patterns?.long_sentence_pct ?? 0 }}%</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div>
-          <label class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1">Filter Verbs Detected</label>
-          <div v-if="Object.keys(telemetry.filters || {}).length" class="space-y-1">
-            <div 
-              v-for="(cnt, v) in telemetry.filters" 
-              :key="v" 
-              class="flex justify-between bg-zinc-950 px-2.5 py-1 rounded border border-zinc-800/50 font-mono text-[11px]"
-            >
-              <span class="text-rose-400">{{ v }}</span>
-              <span class="text-zinc-500">{{ cnt }}</span>
+          <div class="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-3">
+            <div class="text-[10px] uppercase tracking-wider text-amber-400">How this scene is written</div>
+            <div v-for="metric in manuscriptPatternComparisons" :key="metric.label" class="space-y-1">
+              <div class="flex items-baseline justify-between gap-2 text-[10px]">
+                <span class="text-zinc-300">{{ metric.label }}</span>
+                <span class="font-mono text-zinc-100">{{ metric.value }}</span>
+              </div>
+              <p class="text-[9px] text-zinc-500">{{ metric.context }}</p>
             </div>
           </div>
-          <div v-else class="text-zinc-600 italic">No configured filter verbs matched in this scene.</div>
+
+          <div class="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+            <div class="text-[10px] uppercase tracking-wider text-zinc-400">Nearby scene lengths</div>
+            <div v-if="previousSceneAnalytics" class="flex justify-between gap-2 text-[9px]">
+              <span class="truncate text-zinc-500">Before · {{ previousSceneAnalytics.title }}</span>
+              <span class="shrink-0 font-mono text-zinc-300">{{ previousSceneAnalytics.telemetry.words.toLocaleString() }} words</span>
+            </div>
+            <div class="flex justify-between gap-2 text-[9px]">
+              <span class="truncate text-zinc-300">Selected · {{ selectedSceneAnalytics.title }}</span>
+              <span class="shrink-0 font-mono text-zinc-100">{{ selectedSceneAnalytics.telemetry.words.toLocaleString() }} words</span>
+            </div>
+            <div v-if="nextSceneAnalytics" class="flex justify-between gap-2 text-[9px]">
+              <span class="truncate text-zinc-500">After · {{ nextSceneAnalytics.title }}</span>
+              <span class="shrink-0 font-mono text-zinc-300">{{ nextSceneAnalytics.telemetry.words.toLocaleString() }} words</span>
+            </div>
+            <p v-if="!previousSceneAnalytics && !nextSceneAnalytics" class="text-[9px] text-zinc-500">This is the only scene in the manuscript.</p>
+          </div>
+
+          <details class="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5">
+            <summary class="cursor-pointer text-[10px] text-zinc-400 hover:text-zinc-200">Possible filter-word repetitions</summary>
+            <p class="my-2 text-[9px] text-zinc-500">Occurrences to review—not automatic errors. Keep any wording that serves the scene.</p>
+            <div v-if="Object.keys(selectedSceneAnalytics.telemetry.filters || {}).length" class="space-y-1">
+              <div v-for="(count, word) in selectedSceneAnalytics.telemetry.filters" :key="word" class="flex justify-between text-[10px] font-mono">
+                <span class="text-zinc-300">{{ word }}</span><span class="text-zinc-500">{{ count }}×</span>
+              </div>
+            </div>
+            <p v-else class="text-[9px] text-zinc-600">No configured filter words found.</p>
+          </details>
+        </template>
+        <div v-else class="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-[10px] text-zinc-500">
+          Select a scene within a manuscript to compare its patterns.
         </div>
+        <p class="text-[9px] leading-relaxed text-zinc-600">The selected scene uses current editor text; comparison scenes use their saved drafts. Actual reader responses and the AI first-read rehearsal are in the Reader tab. Sentence and dialogue patterns cannot tell us what a reader felt or understood.</p>
       </div>
 
       <!-- TAB 3: SOCRATIC MIRROR & TUTOR -->
@@ -502,10 +513,30 @@
 
       <!-- TAB 4: READER HORIZON -->
       <div v-if="store.activeInspectorTab === 'reader'" class="space-y-4">
+        <section class="rounded-xl border border-emerald-900/50 bg-emerald-950/10 p-3 space-y-2">
+          <header class="flex items-baseline justify-between gap-2">
+            <h2 class="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Actual reader evidence</h2>
+            <span class="text-[9px] font-mono text-zinc-500">n={{ readerFeedbackSummary.responseCount }}</span>
+          </header>
+          <template v-if="readerFeedbackSummary.responseCount">
+            <div v-for="group in readerFeedbackSummary.groups" :key="group.revision" class="space-y-1.5 border-t border-emerald-900/40 pt-2">
+              <p class="text-[9px] text-zinc-400">{{ group.revision === 'CURRENT' ? 'Current draft' : `Version ${group.revision.toLowerCase()}` }} · n={{ group.entries.length }}</p>
+              <p v-if="group.averages" class="text-[9px] leading-relaxed text-emerald-200">{{ group.averages }}</p>
+              <blockquote v-for="entry in group.recentResponses" :key="entry.id" class="line-clamp-4 border-l border-emerald-800 pl-2 text-[10px] leading-relaxed text-zinc-300">
+                “{{ entry.response }}”
+                <footer class="mt-0.5 text-[9px] text-zinc-600">{{ entry.reader_label || 'Reader' }}</footer>
+              </blockquote>
+            </div>
+            <p v-if="readerFeedbackSummary.moreGroups" class="text-[9px] text-zinc-600">More reviewed versions are listed below. Ratings are never averaged across different drafts.</p>
+            <p class="text-[9px] text-zinc-600">Small, self-selected responses are useful signals—not representative audience research.</p>
+          </template>
+          <p v-else class="text-[9px] text-zinc-500">No beta-reader responses recorded for this scene yet. Recorded responses appear here before the AI rehearsal.</p>
+        </section>
+
         <div class="flex items-center justify-between">
           <div>
             <span class="text-[11px] text-zinc-400 font-medium">Simulated reader pass</span>
-            <p class="text-[9px] text-zinc-600">An evidence-grounded AI rehearsal to help revise before recruiting readers—not actual or representative reader feedback.</p>
+            <p class="text-[9px] text-zinc-600">A fresh read from the scene alone—no author goal or explanation is given to the AI. This is a hypothesis, not reader feedback.</p>
           </div>
           <button 
             @click="scanHorizon" 
@@ -533,11 +564,14 @@
               · AI analyzed {{ selectedSimulation.analyzed_characters.toLocaleString() }} of {{ selectedSimulation.source_characters.toLocaleString() }} characters
               · {{ selectedSimulation.model_name }} · {{ selectedSimulation.prompt_version }}
             </p>
-            <p v-if="selectedSimulation.intended_takeaway" class="text-[9px] text-zinc-400">
-              Intent supplied for this pass: {{ selectedSimulation.intended_takeaway }}
+            <p v-if="selectedSimulation.prompt_version === 'first-read-v3'" class="text-[9px] text-emerald-300">
+              Fresh-read pass: the AI received only the scene excerpt, with no author-provided goal or explanation.
+            </p>
+            <p v-else-if="selectedSimulation.intended_takeaway" class="text-[9px] text-amber-300">
+              This older pass included an author-provided takeaway; run a new pass for an uncued fresh read.
             </p>
             <p v-if="selectedSimulation.reused_from_id" class="text-[9px] text-cyan-300">
-              The analyzed excerpt and intent match an earlier pass; its saved observations were reused to keep feedback stable.
+              The analyzed excerpt matches an earlier pass; its saved observations were reused to keep feedback stable.
             </p>
             <details class="text-[9px] text-zinc-500">
               <summary class="cursor-pointer hover:text-zinc-300">Show exact scene excerpt sent to AI</summary>
@@ -546,12 +580,45 @@
           </template>
         </div>
 
+        <div v-if="!selectedSimulation" class="rounded-xl border border-dashed border-zinc-700 bg-zinc-950 p-4 text-center">
+          <h3 class="text-[11px] font-semibold text-zinc-300">No saved first-read pass for this scene</h3>
+          <p class="mt-1 text-[9px] leading-relaxed text-zinc-500">Run the AI rehearsal directly—no setup or author explanation is needed. Each result is saved against its exact scene text so revision comparisons stay grounded.</p>
+        </div>
+
+        <section v-if="selectedSimulation" class="rounded-xl border border-cyan-900/50 bg-cyan-950/10 p-3 space-y-3">
+          <header class="space-y-1">
+            <h3 class="text-[11px] font-bold uppercase tracking-wider text-cyan-300">Estimated reader experience</h3>
+            <p class="text-[9px] leading-relaxed text-zinc-500">AI interpretation of likely experience, beat by beat. The 1–5 levels are rough ordinal estimates from the cited text—not measurements, predictions, or a real reader’s emotional state. Each cause explains what in the prose may create the effect.</p>
+          </header>
+          <div v-for="dimension in readerExperienceDimensions" :key="dimension.key" v-show="readerExperienceItems(dimension.type).length" class="space-y-1.5 border-t border-cyan-900/30 pt-2">
+            <h4 class="text-[9px] font-semibold uppercase tracking-wider text-zinc-300">{{ dimension.label }}</h4>
+            <article v-for="(item, index) in readerExperienceItems(dimension.type)" :key="`${item.source_excerpt}-${index}`" class="rounded-lg bg-zinc-950/80 p-2.5 space-y-1.5">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <span v-if="item.moment" class="mr-1 text-[8px] uppercase tracking-wider text-zinc-600">{{ item.moment }}</span>
+                  <span class="text-[10px] font-medium text-zinc-200">{{ item.narrative_claim }}</span>
+                </div>
+                <span class="shrink-0 rounded border border-cyan-900/60 px-1.5 py-0.5 text-[8px] font-mono text-cyan-200">
+                  {{ readerLevelLabel(item.level) }}
+                </span>
+              </div>
+              <div class="h-1 overflow-hidden rounded bg-zinc-800" :aria-label="`AI estimated level ${item.level} of 5`">
+                <div class="h-full rounded bg-cyan-500/70" :style="{ width: `${item.level * 20}%` }"></div>
+              </div>
+              <p class="text-[9px] leading-relaxed text-zinc-400"><span class="text-zinc-600">Possible driver:</span> {{ item.cause }}</p>
+              <blockquote class="border-l border-cyan-900/70 pl-2 text-[9px] italic leading-relaxed text-zinc-500">“{{ item.source_excerpt }}”</blockquote>
+            </article>
+          </div>
+          <p v-if="!readerExperienceDimensions.some(dimension => readerExperienceItems(dimension.type).length)" class="text-[9px] text-zinc-500">
+            This pass has no structured reader-experience estimates. Run a fresh pass to generate emotional, interest, tension, mystery, suspense, connection, confusion, and attention hypotheses.
+          </p>
+        </section>
+
         <div v-if="loopSignal.active" class="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 space-y-1">
           <h3 class="text-[10px] font-bold uppercase tracking-wider text-amber-300">Possible revision loop</h3>
           <p class="text-[10px] leading-relaxed text-zinc-300">
-            Across {{ loopSignal.revisions_compared }} distinct analyzed excerpts, simulated observations are highly similar
-            ({{ Math.round(loopSignal.similarity * 100) }}% wording overlap). This is not a quality or progress score.
-            Consider pausing, stating the reader effect you want, and making one deliberate experiment—or move on and seek a human read.
+            Similar simulated observations have recurred across {{ loopSignal.revisions_compared }} distinct analyzed excerpts. This is not a quality or progress score.
+            Consider pausing, making one deliberate revision experiment—or move on and seek a human read.
           </p>
         </div>
 
@@ -571,85 +638,17 @@
           </div>
         </div>
         
-        <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-1.5">
-          <div class="font-bold text-amber-400 uppercase text-[10px] flex items-center justify-between">
-            <span class="flex items-center gap-1"><Target class="w-3 h-3" /> What may come through clearly</span>
-            <span class="font-mono text-zinc-600 text-[9px]">
-              {{ simulationItems('DIRECT').length }}
-            </span>
-          </div>
-          <div class="space-y-1">
-            <div 
-              v-for="d in simulationItems('DIRECT')"
-              :key="`${selectedSimulationId}-${d.disclosure_type}-${d.source_excerpt}`"
-              class="text-[11px] text-zinc-300 flex items-start justify-between group"
-            >
-              <span>• {{ d.narrative_claim }}<small v-if="d.source_excerpt" class="block text-[9px] text-zinc-500">“{{ d.source_excerpt }}” · interpretation confidence {{ Math.round((d.confidence ?? 0.5) * 100) }}%</small></span>
-            </div>
-          </div>
-        </div>
-
-        <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-1.5">
-          <div class="font-bold text-cyan-400 uppercase text-[10px] flex items-center justify-between">
-            <span class="flex items-center gap-1"><Search class="w-3 h-3" /> Possible inference or reaction</span>
-            <span class="font-mono text-zinc-600 text-[9px]">
-              {{ simulationItems('INFERRED').length }}
-            </span>
-          </div>
-          <div class="space-y-1">
-            <div 
-              v-for="d in simulationItems('INFERRED')"
-              :key="`${selectedSimulationId}-${d.disclosure_type}-${d.source_excerpt}`"
-              class="text-[11px] text-zinc-300 flex items-start justify-between group"
-            >
-              <div>
-                <span>• {{ d.narrative_claim }}</span>
-                <div v-if="d.source_excerpt || d.clue_evidence" class="text-[9px] text-cyan-500/80 italic ml-2">↳ “{{ d.source_excerpt || d.clue_evidence }}” · interpretation confidence {{ Math.round((d.confidence ?? 0.5) * 100) }}%</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-1.5">
-            <div class="font-bold text-violet-300 uppercase text-[10px] flex items-center justify-between">
-              <span>Open questions · AI hypotheses</span>
-              <span class="font-mono text-zinc-600 text-[9px]">{{ simulationItems('DELAYED').length }}</span>
-            </div>
-            <div v-for="d in simulationItems('DELAYED')" :key="`${selectedSimulationId}-${d.disclosure_type}-${d.source_excerpt}`" class="text-[11px] text-zinc-300 flex items-start justify-between group">
-              <span>• {{ d.narrative_claim }}<small v-if="d.source_excerpt" class="block text-[9px] text-zinc-500">“{{ d.source_excerpt }}” · interpretation confidence {{ Math.round((d.confidence ?? 0.5) * 100) }}%</small></span>
-            </div>
-          </div>
-
-          <div class="p-2.5 bg-zinc-950 rounded-lg border border-rose-900/40 space-y-1.5">
-            <div class="font-bold text-rose-300 uppercase text-[10px] flex items-center justify-between">
-              <span>Possible confusion or attention breaks</span>
-              <span class="font-mono text-zinc-600 text-[9px]">{{ simulationItems('FRICTION').length }}</span>
-            </div>
-            <div v-for="d in simulationItems('FRICTION')" :key="`${selectedSimulationId}-${d.disclosure_type}-${d.source_excerpt}`" class="text-[11px] text-zinc-300">
-              <span>• {{ d.narrative_claim }}<small v-if="d.source_excerpt || d.clue_evidence" class="block text-[9px] text-zinc-500">“{{ d.source_excerpt || d.clue_evidence }}” · interpretation confidence {{ Math.round((d.confidence ?? 0.5) * 100) }}%</small></span>
-            </div>
-          </div>
-
-          <div class="p-2.5 bg-zinc-950 rounded-lg border border-amber-900/40 space-y-1.5">
-            <div class="font-bold text-amber-300 uppercase text-[10px] flex items-center justify-between">
-              <span>Optional revision experiments</span>
-              <span class="font-mono text-zinc-600 text-[9px]">{{ simulationItems('REVISION_FOCUS').length }}</span>
-            </div>
-            <div v-for="d in simulationItems('REVISION_FOCUS')" :key="`${selectedSimulationId}-${d.disclosure_type}-${d.source_excerpt}`" class="text-[11px] text-zinc-300">
-              <span>• {{ d.narrative_claim }}<small v-if="d.source_excerpt || d.clue_evidence" class="block text-[9px] text-zinc-500">Grounded in: “{{ d.source_excerpt || d.clue_evidence }}”</small></span>
-            </div>
-            <p v-if="!simulationItems('REVISION_FOCUS').length" class="text-[9px] text-zinc-600">No revision experiments suggested yet.</p>
-          </div>
-
-          <form @submit.prevent="saveReaderIntent" class="p-2.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-2">
-            <label class="block text-[10px] font-bold uppercase tracking-wider text-amber-300">Your intended reader takeaway
-              <textarea v-model="readerIntent" rows="2" maxlength="1000" class="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-[11px] text-zinc-200" placeholder="What should readers know, infer, or wonder after this scene?" />
-            </label>
-            <button type="submit" :disabled="!readerIntent.trim()" class="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">Save author intent</button>
-            <div v-for="d in (store.activeDisclosures || []).filter(x => x.disclosure_type === 'INTENDED')" :key="d.id" class="flex justify-between gap-2 text-[10px] text-zinc-300">
-              <span>{{ d.narrative_claim }}</span>
-              <button type="button" @click="deleteDisclosure(d.id)" class="text-zinc-600 hover:text-rose-400">Remove</button>
-            </div>
-          </form>
+        <details v-if="selectedSimulation" class="rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 space-y-2">
+          <summary class="cursor-pointer text-[10px] font-semibold text-zinc-400 hover:text-zinc-200">Other first-read observations</summary>
+          <section v-for="category in otherObservationCategories" :key="category.type" class="space-y-1 border-t border-zinc-800 pt-2">
+            <h4 class="text-[9px] font-semibold uppercase tracking-wider" :class="category.color">{{ category.label }}</h4>
+            <article v-for="(item, index) in simulationItems(category.type)" :key="`${item.source_excerpt}-${index}`" class="text-[10px] leading-relaxed text-zinc-300">
+              <p>{{ item.narrative_claim }}</p>
+              <blockquote v-if="item.source_excerpt" class="border-l border-zinc-700 pl-2 text-[9px] italic text-zinc-500">“{{ item.source_excerpt }}”</blockquote>
+            </article>
+            <p v-if="!simulationItems(category.type).length" class="text-[9px] text-zinc-600">No grounded observations surfaced in this category.</p>
+          </section>
+        </details>
 
           <section class="p-3 bg-zinc-950 rounded-xl border border-emerald-900/50 space-y-3">
             <header>
@@ -688,7 +687,6 @@
             </div>
             <p v-else class="text-[10px] text-zinc-600">No reader responses recorded for this scene.</p>
           </section>
-        </div>
       </div>
 
       <!-- TAB 5: LENS (Zoomed-in Chapter Spacetime with Live Reading Bead) -->
@@ -725,24 +723,103 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
-import { Microscope, Sparkles, Loader, Send, Target, Search, Maximize, X, Activity } from '@lucide/vue'
+import { Microscope, Sparkles, Loader, Send, Maximize, X } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 
-const telemetry = computed(() => store.activeNode?.telemetry || store.telemetry || {})
-const textSignalRows = computed(() => {
-  const signals = telemetry.value.text_signals?.signals || {}
-  return [
-    { key: 'action_cues_per_1000_words', label: 'Action-related cues' },
-    { key: 'relational_cues_per_1000_words', label: 'Relational cues' },
-    { key: 'mystery_cues_per_1000_words', label: 'Mystery-related cues' },
-    { key: 'sensory_cues_per_1000_words', label: 'Sensory cues' }
-  ].map(signal => ({
-    ...signal,
-    count: signals[signal.key]?.count ?? 0,
-    rate: signals[signal.key]?.rate ?? 0
-  }))
-}, { immediate: true })
+const manuscriptAnalytics = ref(null)
+const analyticsLoading = ref(false)
+const analyticsError = ref('')
+let analyticsRequest = 0
+const selectedSceneAnalytics = computed(() =>
+  manuscriptAnalytics.value?.scenes.find(scene => scene.scene_id === store.activeNode?.id) || null
+)
+const previousSceneAnalytics = computed(() => {
+  const index = manuscriptAnalytics.value?.selected_index
+  return Number.isInteger(index) && index > 0 ? manuscriptAnalytics.value.scenes[index - 1] : null
+})
+const nextSceneAnalytics = computed(() => {
+  const index = manuscriptAnalytics.value?.selected_index
+  return Number.isInteger(index) ? manuscriptAnalytics.value.scenes[index + 1] || null : null
+})
+const analyticsPosition = computed(() => {
+  const index = manuscriptAnalytics.value?.selected_index
+  return Number.isInteger(index) ? index + 1 : 0
+})
+const readTimeRange = computed(() => {
+  const words = selectedSceneAnalytics.value?.telemetry.words || 0
+  if (!words) return 'No text'
+  const minMinutes = Math.max(1, Math.ceil(words / 250))
+  const maxMinutes = Math.max(1, Math.ceil(words / 200))
+  return minMinutes === maxMinutes ? `~${minMinutes} min` : `~${minMinutes}–${maxMinutes} min`
+})
+const median = values => {
+  const sorted = values.filter(Number.isFinite).sort((left, right) => left - right)
+  if (!sorted.length) return null
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
+}
+const manuscriptPeers = computed(() =>
+  manuscriptAnalytics.value?.scenes.filter(scene => scene.scene_id !== store.activeNode?.id) || []
+)
+const sceneLengthComparison = computed(() => {
+  const words = selectedSceneAnalytics.value?.telemetry.words
+  const typical = median(manuscriptPeers.value.map(scene => scene.telemetry.words))
+  if (!Number.isFinite(words)) return ''
+  if (typical === null) return 'Only scene in this manuscript; no manuscript baseline yet.'
+  const delta = Math.round(words - typical)
+  const detail = delta === 0 ? 'matches' : `${Math.abs(delta)} words ${delta > 0 ? 'above' : 'below'}`
+  return `${detail} the ${Math.round(typical).toLocaleString()}-word median of ${manuscriptPeers.value.length} other scene(s).`
+})
+const manuscriptPatternComparisons = computed(() => {
+  const current = selectedSceneAnalytics.value?.telemetry
+  if (!current) return []
+  const comparisons = [
+    { label: 'Dialogue paragraphs', key: 'dialogue_ratio', suffix: '%', decimals: 1 },
+    { label: 'Average sentence length', key: 'avg_sentence', suffix: ' words', decimals: 1 },
+    { label: 'Sentence-length variation', key: 'cadence_stdev', suffix: ' words', decimals: 1 }
+  ]
+  return comparisons.map(metric => {
+    const value = current[metric.key] || 0
+    const baseline = median(manuscriptPeers.value.map(scene => scene.telemetry[metric.key]))
+    let context = 'No other scenes available for comparison.'
+    if (baseline !== null) {
+      const delta = value - baseline
+      const format = number => `${Number(number.toFixed(metric.decimals))}${metric.suffix}`
+      context = `${format(value)} here vs ${format(baseline)} median across ${manuscriptPeers.value.length} other scene(s) (${delta > 0 ? '+' : ''}${format(delta)}).`
+    }
+    return { label: metric.label, value: `${Number(value.toFixed(metric.decimals))}${metric.suffix}`, context }
+  })
+})
+const loadManuscriptAnalytics = async () => {
+  const scene = store.activeNode
+  const book = scene?.id ? store.findBookForNode(scene.id) : null
+  const requestId = ++analyticsRequest
+  analyticsError.value = ''
+  manuscriptAnalytics.value = null
+  if (!scene?.id || scene.node_type !== 'SCENE' || !book) {
+    analyticsLoading.value = false
+    return
+  }
+  analyticsLoading.value = true
+  try {
+    const response = await fetch(`${API_BASE}/api/analytics/reader-experience/${encodeURIComponent(book.id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scene_id: scene.id, content: scene.content || '' })
+    })
+    if (!response.ok) throw new Error(`Could not compare scene patterns (HTTP ${response.status}).`)
+    const result = await response.json()
+    if (requestId !== analyticsRequest || store.activeNode?.id !== scene.id) return
+    manuscriptAnalytics.value = result
+  } catch (error) {
+    if (requestId === analyticsRequest && store.activeNode?.id === scene?.id) {
+      analyticsError.value = error.message || 'Could not compare scene patterns.'
+    }
+  } finally {
+    if (requestId === analyticsRequest) analyticsLoading.value = false
+  }
+}
 const plainSceneContent = (content = '') => {
   const parsed = new DOMParser().parseFromString(content, 'text/html')
   const paragraphs = Array.from(parsed.body.querySelectorAll('p, li, blockquote'))
@@ -759,7 +836,6 @@ const simulationHistory = ref([])
 const selectedSimulationId = ref('')
 const loopSignal = ref({ active: false, similarity: null, revisions_compared: 0 })
 const readerFeedback = ref([])
-const readerIntent = ref('')
 const feedbackRatings = [
   { key: 'confusion_rating', label: 'Confusion (1=clear, 5=lost)' },
   { key: 'engagement_rating', label: 'Engagement (1=low, 5=high)' },
@@ -787,21 +863,56 @@ const readerFeedbackGroups = computed(() => {
   }
   return Array.from(groups, ([revision, entries]) => {
     const ratings = feedbackRatings.map(rating => {
-      const values = entries.map(entry => entry[rating.key]).filter(Number.isFinite)
+      const values = entries.map(entry => entry[rating.key]).filter(value => value !== null && value !== undefined).map(Number).filter(Number.isFinite)
       if (!values.length) return ''
-      const average = (values.reduce((total, value) => total + value, 0) / values.length).toFixed(1)
-      return `${rating.label.split(' (')[0]} ${average}/5 (n=${values.length})`
+      const mean = values.reduce((total, value) => total + value, 0) / values.length
+      const average = (rating.key === 'confusion_rating' ? 6 - mean : mean).toFixed(1)
+      const label = rating.key === 'confusion_rating' ? 'Clarity' : rating.label.split(' (')[0]
+      return `${label} ${average}/5 (n=${values.length})`
     }).filter(Boolean)
     return { revision, entries, averages: ratings.join(' · ') }
   })
+})
+const readerFeedbackSummary = computed(() => {
+  const groups = readerFeedbackGroups.value.map(group => ({
+    ...group,
+    recentResponses: group.entries.filter(entry => entry.response?.trim()).slice(0, 2)
+  }))
+  return {
+    responseCount: readerFeedback.value.length,
+    groups: groups.slice(0, 3),
+    moreGroups: groups.length > 3
+  }
 })
 const selectedSimulation = computed(() =>
   simulationHistory.value.find(simulation => simulation.id === selectedSimulationId.value)
   || simulationHistory.value[0]
   || null
 )
+const readerExperienceDimensions = [
+  { key: 'emotional-arc', type: 'EMOTIONAL_ARC', label: 'Emotional movement' },
+  { key: 'interest', type: 'READER_INTEREST', label: 'Interest and engagement' },
+  { key: 'tension', type: 'TENSION', label: 'Tension' },
+  { key: 'mystery', type: 'MYSTERY', label: 'Mystery and curiosity' },
+  { key: 'suspense', type: 'SUSPENSE', label: 'Suspense and anticipation' },
+  { key: 'character-connection', type: 'CHARACTER_CONNECTION', label: 'Character connection' },
+  { key: 'confusion', type: 'CONFUSION', label: 'Possible confusion' },
+  { key: 'attention', type: 'ATTENTION', label: 'Attention and pacing' }
+]
+const otherObservationCategories = [
+  { type: 'DIRECT', label: 'What may come through clearly', color: 'text-amber-300' },
+  { type: 'INFERRED', label: 'Possible inference or reaction', color: 'text-cyan-300' },
+  { type: 'DELAYED', label: 'Open questions carried forward', color: 'text-violet-300' },
+  { type: 'FRICTION', label: 'Possible confusion or attention breaks', color: 'text-rose-300' },
+  { type: 'REVISION_FOCUS', label: 'Optional revision experiments', color: 'text-amber-300' }
+]
 const simulationItems = type =>
   selectedSimulation.value?.items.filter(item => item.disclosure_type === type) || []
+const readerExperienceItems = type => simulationItems(type)
+const readerLevelLabel = level => {
+  const labels = { 1: 'Very low · 1/5', 2: 'Low · 2/5', 3: 'Moderate · 3/5', 4: 'High · 4/5', 5: 'Very high · 5/5' }
+  return labels[level] || 'Unrated'
+}
 const simulationComparison = computed(() => {
   const selectedIndex = simulationHistory.value.findIndex(
     simulation => simulation.id === selectedSimulationId.value
@@ -830,7 +941,6 @@ let currentManifest = null
 
 watch(() => store.activeNode?.id, () => {
   selectedRevisionVersion.value = null
-  readerIntent.value = ''
   simulationHistory.value = []
   selectedSimulationId.value = ''
   loopSignal.value = { active: false, similarity: null, revisions_compared: 0 }
@@ -840,6 +950,9 @@ watch(() => store.activeNode?.id, () => {
   })
   loadReaderFeedback()
   loadReaderSimulations()
+})
+watch(() => [store.activeNode?.id, store.activeInspectorTab], ([, tab]) => {
+  if (tab === 'telemetry') loadManuscriptAnalytics()
 })
 
 // Persistent Scene Card Data Proxy (Stored in SQLite binder_nodes.card_data)
@@ -1289,10 +1402,6 @@ const scanHorizon = async () => {
   if (!store.activeNode?.id || !store.activeNode?.content) return
   const sceneId = store.activeNode.id
   const content = store.activeNode.content
-  const intendedTakeaway = (store.activeDisclosures || [])
-    .filter(item => item.disclosure_type === 'INTENDED')
-    .map(item => item.narrative_claim)
-    .join('\n')
   isScanning.value = true
   try {
     const res = await fetch(`${API_BASE}/api/disclosures/scan`, {
@@ -1300,8 +1409,7 @@ const scanHorizon = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         scene_id: sceneId,
-        text: content,
-        intended_takeaway: intendedTakeaway
+        text: content
       })
     })
     if (!res.ok) throw new Error(`Scan failed (HTTP ${res.status}).`)
@@ -1311,8 +1419,8 @@ const scanHorizon = async () => {
         await loadReaderSimulations(data.simulation.id)
       }
       if (data.warnings?.length) showToast(data.warnings.join(' '), 'info')
-      else if (data.reused) showToast('This exact scene and intent already have a saved simulation; showing that result.', 'info')
-      else showToast('First-read simulation saved for this exact scene text and intent.', 'info')
+      else if (data.reused) showToast('This exact scene already has a saved fresh-read simulation; showing that result.', 'info')
+      else showToast('Fresh-read simulation saved for this exact scene text.', 'info')
     } else {
       throw new Error(data.message || 'Reader simulation did not complete.')
     }
@@ -1350,45 +1458,6 @@ const loadReaderSimulations = async (selectedId = '') => {
       loopSignal.value = { active: false, similarity: null, revisions_compared: 0 }
       showToast(error.message || 'Could not load saved reader simulations.', 'error')
     }
-  }
-}
-
-const refreshDisclosures = async () => {
-  if (!store.activeNode?.id) return
-  const response = await fetch(`${API_BASE}/api/disclosures/scene/${encodeURIComponent(store.activeNode.id)}`)
-  if (!response.ok) throw new Error(`Could not refresh Reader Horizon notes (HTTP ${response.status}).`)
-  store.activeDisclosures = await response.json()
-}
-
-const deleteDisclosure = async (id) => {
-  if (!store.activeNode?.id) return
-  try {
-    const response = await fetch(`${API_BASE}/api/disclosures/${id}`, { method: 'DELETE' })
-    if (!response.ok) throw new Error(`Could not remove Reader Horizon note (HTTP ${response.status}).`)
-    await refreshDisclosures()
-  } catch (e) {
-    showToast(e.message || 'Failed to remove Reader Horizon note.', 'error')
-  }
-}
-
-const saveReaderIntent = async () => {
-  if (!store.activeNode?.id || !readerIntent.value.trim()) return
-  try {
-    const response = await fetch(`${API_BASE}/api/disclosures/author-note`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scene_id: store.activeNode.id,
-        disclosure_type: 'INTENDED',
-        narrative_claim: readerIntent.value.trim()
-      })
-    })
-    if (!response.ok) throw new Error(`Could not save intended reader takeaway (HTTP ${response.status}).`)
-    readerIntent.value = ''
-    await refreshDisclosures()
-    showToast('Author intent saved.', 'info')
-  } catch (error) {
-    showToast(error.message || 'Could not save author intent.', 'error')
   }
 }
 

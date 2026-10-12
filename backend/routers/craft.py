@@ -15,11 +15,23 @@ from backend.telemetry import classify_sentence_energetics, classify_paragraph_e
 from backend.text_utils import html_to_text
 
 router = APIRouter(tags=["Craft"])
-READER_SIMULATION_PROMPT_VERSION = "first-read-v1"
-READER_SIMULATION_SYSTEM_PROMPT = """Simulate a careful first-time reader encountering this scene. This is an AI hypothesis to help the author revise before recruiting readers; it is not actual reader feedback and must not be presented as representative or certain. Consider what a reader is likely to understand, infer or feel, wonder about, and where they might lose the thread. If the author supplied an intended takeaway, compare the scene's evidence with that intent and identify any possible gap without assuming the intent is correct.
-Every item MUST cite an exact, short verbatim excerpt from the supplied scene. Keep claims specific to that excerpt. Provide no item when there is no useful observation. Revision experiments should be optional and open-ended, not prescriptive rewrites. Confidence is confidence in the interpretation of the text, not a probability that readers will react that way.
+READER_SIMULATION_PROMPT_VERSION = "first-read-v3"
+READER_SIMULATION_SYSTEM_PROMPT = """Simulate a careful first-time reader encountering this scene without any author-provided explanation, goal, or intended takeaway. This is an AI hypothesis to help the author revise before recruiting readers; it is not actual reader feedback and must not be presented as representative or certain. Consider what a reader can understand from the text alone, what they may infer, wonder about, or misunderstand, and where they might lose the thread. Do not guess what the author intended.
+Estimate the likely experience as the scene unfolds: emotional state and shifts, interest/engagement, tension, mystery/curiosity, suspense/anticipation, character connection, confusion, and attention or pacing changes. Explain what textual beat appears to cause each estimate. These are qualitative AI estimates, not measurements. Use integer levels 1–5 only as an ordinal shorthand: 1 very low, 2 low, 3 moderate, 4 high, 5 very high. Do not imply clinical emotion detection or certainty about actual readers. A score without a specific textual cause and evidence is not useful.
+Every item MUST cite an exact, short verbatim excerpt from the supplied scene. Keep claims specific to that excerpt. Provide no item when there is no useful observation. For emotional_arc, identify the beat position (opening, early, middle, late, ending) and name a plausible emotion or emotional mix; do not force a change if the text does not support one. Interest and tension may rise, fall, or stay steady. Distinguish mystery (a question or information gap the reader wants resolved) from suspense (anticipation of a consequential outcome). Revision experiments should be optional and open-ended, not prescriptive rewrites. Include at most three useful items per dimension; empty arrays are preferable to invented insight.
 Return strict JSON:
-{"direct":[{"claim":"What a first-time reader may clearly understand","evidence":"Exact quote","confidence":0.0}],"inferred":[{"claim":"Possible reader inference or reaction","evidence":"Exact quote","confidence":0.0}],"delayed":[{"claim":"Question or expectation a reader may carry forward","evidence":"Exact quote","confidence":0.0}],"friction":[{"claim":"A possible point of confusion or attention break","evidence":"Exact quote","confidence":0.0}],"revision_focus":[{"claim":"An optional revision experiment or question for the author","evidence":"Exact quote","confidence":0.0}]}"""
+{"reader_experience":{"emotional_arc":[{"moment":"opening|early|middle|late|ending","estimate":"emotion or emotional mix","level":1,"cause":"What in the beat may prompt this","evidence":"Exact quote"}],"interest":[{"moment":"beat position","estimate":"interest level","level":1,"cause":"What draws or loses attention","evidence":"Exact quote"}],"tension":[{"moment":"beat position","estimate":"tension level","level":1,"cause":"What raises, releases, or sustains pressure","evidence":"Exact quote"}],"mystery":[{"moment":"beat position","estimate":"question or information gap","level":1,"cause":"What creates curiosity","evidence":"Exact quote"}],"suspense":[{"moment":"beat position","estimate":"anticipated consequence or outcome","level":1,"cause":"What creates anticipation or uncertainty","evidence":"Exact quote"}],"character_connection":[{"moment":"beat position","estimate":"possible reader connection or distance","level":1,"cause":"What in the character's behavior or situation prompts it","evidence":"Exact quote"}],"confusion":[{"moment":"beat position","estimate":"what may be unclear","level":1,"cause":"What makes orientation or meaning difficult","evidence":"Exact quote"}],"attention":[{"moment":"beat position","estimate":"attention or momentum change","level":1,"cause":"What in the prose or event sequence prompts the change","evidence":"Exact quote"}]},"direct":[{"claim":"What a first-time reader may clearly understand","evidence":"Exact quote"}],"inferred":[{"claim":"A possible reader inference or reaction","evidence":"Exact quote"}],"delayed":[{"claim":"A question or expectation the reader may carry forward","evidence":"Exact quote"}],"friction":[{"claim":"A possible point of confusion or attention break","evidence":"Exact quote"}],"revision_focus":[{"claim":"An optional revision experiment or question for the author","evidence":"Exact quote"}]}"""
+
+READER_EXPERIENCE_DIMENSIONS = {
+    "emotional_arc": ("EMOTIONAL_ARC", "estimate"),
+    "interest": ("READER_INTEREST", "estimate"),
+    "tension": ("TENSION", "estimate"),
+    "mystery": ("MYSTERY", "estimate"),
+    "suspense": ("SUSPENSE", "estimate"),
+    "character_connection": ("CHARACTER_CONNECTION", "estimate"),
+    "confusion": ("CONFUSION", "estimate"),
+    "attention": ("ATTENTION", "estimate"),
+}
 
 class ElevateRequest(BaseModel):
     passage: str
@@ -73,7 +85,6 @@ def get_craft_xray(payload: XRayRequest):
 class ScanDisclosureRequest(BaseModel):
     scene_id: str
     text: str
-    intended_takeaway: str = Field(default="", max_length=1000)
 
 class AddDisclosureRequest(BaseModel):
     scene_id: str
@@ -244,7 +255,7 @@ async def scan_scene_disclosures(payload: ScanDisclosureRequest):
         raise HTTPException(404, "Scene not found")
 
     source_text = html_to_text(payload.text)
-    intended_takeaway = payload.intended_takeaway.strip()
+    intended_takeaway = ""
     content_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
     analyzed_text = source_text[:3500]
     analyzed_hash = hashlib.sha256(analyzed_text.encode("utf-8")).hexdigest()
@@ -289,12 +300,7 @@ async def scan_scene_disclosures(payload: ScanDisclosureRequest):
     elif not ENABLE_AI:
         return {"status": "error", "message": "Reader simulation unavailable (local AI is disabled)."}
     else:
-        prompt_content = (
-            "Scene excerpt (only this excerpt is supplied to this pass):\n"
-            + analyzed_text
-            + "\n\nAuthor's intended reader takeaway:\n"
-            + (intended_takeaway or "Not provided.")
-        )
+        prompt_content = "Scene excerpt (the only manuscript context supplied to this first-read pass):\n" + analyzed_text
         try:
             import ollama
             resp = await asyncio.to_thread(
@@ -335,15 +341,45 @@ async def scan_scene_disclosures(payload: ScanDisclosureRequest):
                 if not claim or not evidence:
                     warnings.append(f"Skipped a {disclosure_type} item without a matching text excerpt.")
                     continue
-                try:
-                    confidence = max(0.0, min(1.0, float(item.get("confidence", 0.5))))
-                except (TypeError, ValueError):
-                    confidence = 0.5
                 items.append({
                     "disclosure_type": disclosure_type.upper(),
                     "narrative_claim": claim,
                     "source_excerpt": evidence,
-                    "confidence": confidence,
+                })
+        experience = data.get("reader_experience", {})
+        if not isinstance(experience, dict):
+            warnings.append("The AI reader-experience estimate had an invalid structure.")
+            experience = {}
+        for dimension, (disclosure_type, estimate_key) in READER_EXPERIENCE_DIMENSIONS.items():
+            observations = experience.get(dimension, [])
+            if not isinstance(observations, list):
+                warnings.append(f"Skipped reader-experience estimates with an invalid {dimension} list.")
+                continue
+            for observation in observations[:3]:
+                if not isinstance(observation, dict):
+                    warnings.append(f"Skipped an invalid {dimension} estimate.")
+                    continue
+                evidence = _quoted_excerpt(analyzed_text, str(observation.get("evidence", "")))
+                estimate = str(observation.get(estimate_key, "")).strip()
+                cause = str(observation.get("cause", "")).strip()
+                level = observation.get("level")
+                if (
+                    not evidence
+                    or not estimate
+                    or not cause
+                    or isinstance(level, bool)
+                    or not isinstance(level, int)
+                    or not 1 <= level <= 5
+                ):
+                    warnings.append(f"Skipped an ungrounded {dimension} estimate.")
+                    continue
+                items.append({
+                    "disclosure_type": disclosure_type,
+                    "narrative_claim": estimate,
+                    "source_excerpt": evidence,
+                    "moment": str(observation.get("moment", "")).strip(),
+                    "cause": cause,
+                    "level": level,
                 })
         system_prompt = READER_SIMULATION_SYSTEM_PROMPT
         result_json = json.dumps(items)
