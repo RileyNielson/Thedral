@@ -10,7 +10,10 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.48.0",
-    "@tiptap/extension-typography": "^3.31.3",
+    "@tiptap/extension-placeholder": "3.31.4",
+    "@tiptap/extension-typography": "3.31.4",
+    "@tiptap/starter-kit": "3.31.4",
+    "@tiptap/vue-3": "3.31.4",
     "plotly.js-dist-min": "^4.1.2",
     "vue": "^3.5.42"
   },
