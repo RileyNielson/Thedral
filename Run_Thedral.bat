@@ -170,7 +170,7 @@ if errorlevel 1 (
 if exist "frontend\node_modules" goto BUILD_FRONTEND
 echo Installing frontend packages...
 pushd frontend
-npm ci
+call npm ci
 if errorlevel 1 (
     popd
     goto FRONTEND_SETUP_FAILED
@@ -180,7 +180,7 @@ popd
 :BUILD_FRONTEND
 echo Building the current studio interface...
 pushd frontend
-npm run build
+call npm run build
 if errorlevel 1 (
     popd
     goto FRONTEND_SETUP_FAILED
