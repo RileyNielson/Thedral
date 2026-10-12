@@ -126,7 +126,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { store, showToast } from '../store.js'
-import { LayoutGrid, PenTool, ArrowRight, Plus } from 'lucide-vue-next'
+import { LayoutGrid, PenTool, ArrowRight, Plus } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 

@@ -84,7 +84,7 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { store, showToast } from '../../store.js'
-import { Search, BrainCircuit, User, BookOpenCheck, FileText, Key } from 'lucide-vue-next'
+import { Search, BrainCircuit, User, BookOpenCheck, FileText, Key } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 

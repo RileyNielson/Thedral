@@ -196,7 +196,7 @@ import { store } from '../store.js'
 import { 
   Menu as MenuIcon, Feather, PenTool, ListTree, LayoutGrid, Globe, Palette,
   BookOpenCheck, Users, Award, Upload, Smartphone, Download, Sliders, Clock3, ClipboardCheck
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 
 const themeMenuOpen = ref(false)
 const recentOpen = ref(false)

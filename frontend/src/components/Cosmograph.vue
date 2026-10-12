@@ -191,7 +191,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { store, showToast } from '../store.js'
-import { Clock, Satellite, AlertTriangle, ExternalLink, Loader, X, Crosshair } from 'lucide-vue-next'
+import { Clock, Satellite, AlertTriangle, ExternalLink, Loader, X, Crosshair } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 

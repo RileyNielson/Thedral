@@ -151,7 +151,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { store, showToast } from '../../store.js'
-import { Users, X, Trash2, Plus } from 'lucide-vue-next'
+import { Users, X, Trash2, Plus } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 

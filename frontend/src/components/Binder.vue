@@ -79,7 +79,7 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
-import { BookMarked, Library, Sparkles, FolderPlus, FilePlus, ChevronRight, ChevronDown, BookOpen, Pencil, Archive, Trash2, Folder, Plus, FileText } from 'lucide-vue-next'
+import { BookMarked, Library, Sparkles, FolderPlus, FilePlus, ChevronRight, ChevronDown, BookOpen, Pencil, Archive, Trash2, Folder, Plus, FileText } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 

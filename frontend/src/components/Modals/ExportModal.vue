@@ -87,7 +87,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { store, showToast } from '../../store.js'
-import { X } from 'lucide-vue-next'
+import { X } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 const isExporting = ref(false)

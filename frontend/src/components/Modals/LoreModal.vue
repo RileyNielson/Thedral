@@ -143,7 +143,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { store, showToast } from '../../store.js'
-import { BookOpenCheck, X, Trash2, ShieldAlert, AlertCircle, Sparkles } from 'lucide-vue-next'
+import { BookOpenCheck, X, Trash2, ShieldAlert, AlertCircle, Sparkles } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 

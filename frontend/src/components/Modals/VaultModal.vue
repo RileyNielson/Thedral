@@ -49,7 +49,7 @@
 <script setup>
 import { onMounted, watch } from 'vue'
 import { store, showToast } from '../../store.js'
-import { Library, X, Trash2 } from 'lucide-vue-next'
+import { Library, X, Trash2 } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 

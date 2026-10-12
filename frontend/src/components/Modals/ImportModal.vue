@@ -121,7 +121,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { store, showToast } from '../../store.js'
-import { FolderDown, X, RefreshCw, Loader, BookOpen, FileText, Upload } from 'lucide-vue-next'
+import { FolderDown, X, RefreshCw, Loader, BookOpen, FileText, Upload } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 

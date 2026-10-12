@@ -126,7 +126,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { store, showToast } from '../../store.js'
-import { Award, X, Mic, ShieldCheck, FileText, Copy, Activity } from 'lucide-vue-next'
+import { Award, X, Mic, ShieldCheck, FileText, Copy, Activity } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
 

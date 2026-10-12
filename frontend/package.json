@@ -11,7 +11,7 @@
   "dependencies": {
     "@lucide/vue": "^1.48.0",
     "@tiptap/extension-typography": "^3.31.3",
-    "lucide-vue-next": "^1.0.0",
+    "plotly.js-dist-min": "^4.1.2",
     "vue": "^3.5.42"
   },
   "devDependencies": {
