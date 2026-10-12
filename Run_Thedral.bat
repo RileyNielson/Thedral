@@ -58,7 +58,15 @@ if errorlevel 1 (
     "%PYTHON%" -m pip install -r "%REQUIREMENTS%"
     if errorlevel 1 goto SETUP_FAILED
 )
-for /f "delims=" %%P in ('"%PYTHON%" -c "from backend.config import PORT; print(PORT)"') do set "PORT=%%P"
+set "CONFIG_FILE=%TEMP%\ThedralPort-%RANDOM%.txt"
+"%PYTHON%" -c "from backend.config import PORT; print(PORT)" > "%CONFIG_FILE%" 2>nul
+if errorlevel 1 (
+    del "%CONFIG_FILE%" >nul 2>&1
+    echo ERROR: Could not read the configured server port.
+    goto FAILED
+)
+set /p "PORT="<"%CONFIG_FILE%"
+del "%CONFIG_FILE%" >nul 2>&1
 if not defined PORT (
     echo ERROR: Could not read the configured server port.
     goto FAILED
@@ -81,8 +89,24 @@ if errorlevel 1 (
     goto FAILED
 )
 
-for /f "delims=" %%M in ('"%PYTHON%" -c "from backend.config import STUDIO_MODEL; print(STUDIO_MODEL)"') do set "MODEL=%%M"
-for /f "delims=" %%H in ('"%PYTHON%" -c "from backend.config import OLLAMA_HOST; print(OLLAMA_HOST)"') do set "OLLAMA_HOST=%%H"
+set "CONFIG_FILE=%TEMP%\ThedralModel-%RANDOM%.txt"
+"%PYTHON%" -c "from backend.config import STUDIO_MODEL; print(STUDIO_MODEL)" > "%CONFIG_FILE%" 2>nul
+if errorlevel 1 (
+    del "%CONFIG_FILE%" >nul 2>&1
+    echo ERROR: Could not read the configured model name.
+    goto FAILED
+)
+set /p "MODEL="<"%CONFIG_FILE%"
+del "%CONFIG_FILE%" >nul 2>&1
+set "CONFIG_FILE=%TEMP%\ThedralOllamaHost-%RANDOM%.txt"
+"%PYTHON%" -c "from backend.config import OLLAMA_HOST; print(OLLAMA_HOST)" > "%CONFIG_FILE%" 2>nul
+if errorlevel 1 (
+    del "%CONFIG_FILE%" >nul 2>&1
+    echo ERROR: Could not read the configured Ollama address.
+    goto FAILED
+)
+set /p "OLLAMA_HOST="<"%CONFIG_FILE%"
+del "%CONFIG_FILE%" >nul 2>&1
 if not defined MODEL (
     echo ERROR: Could not read the configured model name.
     goto FAILED
