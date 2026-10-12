@@ -1,0 +1,12 @@
+# Local Python environments and caches
+/venv/
+/.venv/
+/env/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Local JavaScript dependencies
+/node_modules/
+/frontend/node_modules/
