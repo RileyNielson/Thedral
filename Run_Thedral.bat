@@ -155,6 +155,20 @@ if not errorlevel 1 (
     )
 )
 del "%HEALTH_FILE%" >nul 2>&1
+
+"%PYTHON%" -c "from backend.wiktionary_lexicon import get_lexicon_status; raise SystemExit(0 if get_lexicon_status().get('available') else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo Optional reader enhancement: English Wiktionary data is not installed.
+    echo Download size is about 418 MB. Thedral works without it.
+    choice /c YN /n /m "Download now? [Y/N]: "
+    if errorlevel 2 goto WIKTIONARY_SKIPPED
+    echo Downloading and installing English Wiktionary...
+    "%PYTHON%" -m backend.wiktionary_lexicon --download
+    if errorlevel 1 echo Wiktionary download failed. Continuing without the optional lexicon.
+)
+
+:WIKTIONARY_SKIPPED
 where npm >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Node.js 20.19 or newer is required to build the studio interface.

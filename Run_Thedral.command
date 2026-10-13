@@ -131,6 +131,24 @@ if HEALTH="$(curl -fsS "$BASE_URL/api/health" 2>/dev/null)"; then
     fi
 fi
 
+if ! "$PYTHON" -c "from backend.wiktionary_lexicon import get_lexicon_status; raise SystemExit(0 if get_lexicon_status().get('available') else 1)" >/dev/null 2>&1; then
+    echo
+    echo "Optional reader enhancement: English Wiktionary data is not installed."
+    echo "Download size is about 418 MB. Thedral works without it."
+    read -r -p "Download now? [y/N]: " DOWNLOAD_WIKTIONARY
+    case "${DOWNLOAD_WIKTIONARY:-N}" in
+        [Yy]|[Yy][Ee][Ss])
+            echo "Downloading and installing English Wiktionary..."
+            if ! "$PYTHON" -m backend.wiktionary_lexicon --download; then
+                echo "Wiktionary download failed. Continuing without the optional lexicon."
+            fi
+            ;;
+        *)
+            echo "Skipping optional Wiktionary download."
+            ;;
+    esac
+fi
+
 if [ ! -d "$DIR/frontend/node_modules" ]; then
     echo "Installing frontend packages..."
     if ! npm --prefix "$DIR/frontend" ci; then

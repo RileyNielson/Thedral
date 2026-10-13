@@ -109,7 +109,7 @@ Powered by a local, air-gapped **Llama 3.2:3b** model via Ollama:
 
 ### Choose Lite or Full
 
-Run `Run_Thedral.bat` on Windows or `Run_Thedral.command` on macOS and select a mode. On Windows, `Run_Thedral_AI.bat` is a shortcut that starts directly in Full mode.
+Run `Run_Thedral.bat` on Windows or `Run_Thedral.command` on macOS and select a mode. On Windows, `Run_Thedral_AI.bat` is a shortcut that starts directly in Full mode. If the optional local Wiktionary database is missing, the launchers offer to download it once; declining or a failed download does not prevent Thedral from starting. The downloader reports progress while it streams the compressed dataset.
 
 - **Lite** installs core dependencies only. It does not require Ollama or an AI model. Writing, organization, and deterministic text analysis remain available; AI-assisted actions are disabled and the app displays a Lite-mode notice.
 - **Full** enables local AI-assisted features through Ollama. Install and start Ollama, then download the configured model (default `llama3.2:3b`) with `ollama pull llama3.2:3b` before launching. The launchers verify that Ollama is responding and the configured model is present.
