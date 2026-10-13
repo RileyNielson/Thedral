@@ -2,9 +2,15 @@ import json
 import math
 import re
 import sqlite3
+from backend.entity_names import text_mentions_entity
 from backend.telemetry import calculate_text_telemetry
 from backend.text_utils import html_to_text
 from backend.config import TENSION_KEYWORDS
+
+
+def _mentions_entity(text: str, entity) -> bool:
+    return text_mentions_entity(text, entity["name"], entity["aliases"])
+
 
 # =============================================================================
 # 1. MICRO CHAPTER LENS (Beat-by-Beat Narrative Waveform + Live Location)
@@ -32,14 +38,16 @@ def build_chapter_micro_lens(
 
     c.execute("SELECT entity_id, name, aliases, entity_type FROM canonical_entities")
     all_entities = c.fetchall()
-    location_entities = [e["name"] for e in all_entities if e["entity_type"] == "LOCATION"]
+    location_entities = [e for e in all_entities if e["entity_type"] == "LOCATION"]
 
-    all_chapter_text = " ".join([html_to_text(sc["content"] or "") for sc in scene_rows]).lower()
-    chapter_locations = [loc for loc in location_entities if loc.lower() in all_chapter_text]
+    all_chapter_text = " ".join(html_to_text(sc["content"] or "") for sc in scene_rows)
+    chapter_locations = [loc for loc in location_entities if _mentions_entity(all_chapter_text, loc)]
+    chapter_location_names = [loc["name"] for loc in chapter_locations]
 
     use_geographic_y = len(chapter_locations) >= 2
     if use_geographic_y:
-        loc_to_y = {loc: idx for idx, loc in enumerate(chapter_locations)}
+        loc_to_y = {loc: idx for idx, loc in enumerate(chapter_location_names)}
+        loc_to_y["Unspecified"] = len(loc_to_y)
         y_tick_text = list(loc_to_y.keys())
         y_tick_vals = list(loc_to_y.values())
         y_axis_title = "Chapter Geography"
@@ -59,9 +67,10 @@ def build_chapter_micro_lens(
 
     entity_markers = {}
     global_beat_idx = 0
-    current_loc = chapter_locations[0] if chapter_locations else "Scene Setting"
+    current_loc = "Unspecified" if use_geographic_y else "Scene Setting"
 
     for sc in scene_rows:
+        current_loc = "Unspecified" if use_geographic_y else "Scene Setting"
         sc_id = sc["id"]
         sc_title = sc["title"]
         content = html_to_text(sc["content"] or "")
@@ -78,8 +87,8 @@ def build_chapter_micro_lens(
 
             if use_geographic_y:
                 for loc in chapter_locations:
-                    if loc.lower() in para_lower:
-                        current_loc = loc
+                    if _mentions_entity(para, loc):
+                        current_loc = loc["name"]
                         break
                 y_val = float(loc_to_y.get(current_loc, 0))
                 mode_label = f"Location: {current_loc}"
@@ -130,7 +139,7 @@ def build_chapter_micro_lens(
             beats_text.append(hover_info)
 
             for ent in all_entities:
-                if ent["entity_type"] == "CHARACTER" and ent["name"].lower() in para_lower:
+                if ent["entity_type"] == "CHARACTER" and _mentions_entity(para, ent):
                     ent_name = ent["name"]
                     if ent_name not in entity_markers:
                         entity_markers[ent_name] = {"x": [], "y": [], "z": [], "text": []}
@@ -239,8 +248,9 @@ def build_astrolabe_manifest(
     scene_seq_map = {r["id"]: idx + 1 for idx, r in enumerate(scene_rows)}
 
     # Fetch canonical locations
-    c.execute("SELECT name FROM canonical_entities WHERE entity_type = 'LOCATION' ORDER BY rowid ASC")
-    canonical_locations = [r["name"].strip() for r in c.fetchall()]
+    c.execute("SELECT entity_id, name, aliases, entity_type FROM canonical_entities WHERE entity_type = 'LOCATION' ORDER BY rowid ASC")
+    location_entities = [dict(r) for r in c.fetchall()]
+    canonical_locations = [entity["name"].strip() for entity in location_entities]
 
     scene_ids = [r["id"] for r in scene_rows]
     placeholders = ",".join(["?"] * len(scene_ids))
@@ -261,7 +271,12 @@ def build_astrolabe_manifest(
     for ev in events:
         try:
             d = json.loads(ev["state_delta"])
-            loc_val = d.get("location", "").strip().title()
+            raw_location = d.get("location", "").strip()
+            known_location = next(
+                (loc["name"] for loc in location_entities if _mentions_entity(raw_location, loc)),
+                None,
+            )
+            loc_val = known_location or raw_location.title()
             if loc_val and loc_val not in worldline_locations and loc_val not in canonical_locations:
                 worldline_locations.append(loc_val)
             # Record actual chronological tick for each scene
@@ -278,20 +293,21 @@ def build_astrolabe_manifest(
 
     if not locations:
         locations = ["Unspecified"]
+    elif "Unspecified" not in locations:
+        locations.append("Unspecified")
 
     loc_to_y = {loc: idx for idx, loc in enumerate(locations)}
 
     scene_location_map = {}
-    current_active_loc = locations[0]
 
     for sc in scene_rows:
         sc_id = sc["id"]
-        sc_content = html_to_text(sc["content"] or "").lower()
+        sc_content = html_to_text(sc["content"] or "")
         matched_loc = None
 
-        for loc in locations:
-            if loc.lower() in sc_content or loc.lower() in sc["title"].lower():
-                matched_loc = loc
+        for loc in location_entities:
+            if _mentions_entity(sc_content, loc) or _mentions_entity(sc["title"], loc):
+                matched_loc = loc["name"]
                 break
 
         if not matched_loc:
@@ -299,15 +315,18 @@ def build_astrolabe_manifest(
                 if ev["scene_id"] == sc_id:
                     try:
                         d = json.loads(ev["state_delta"])
-                        if "location" in d and d["location"] in loc_to_y:
-                            matched_loc = d["location"]
-                            break
+                        if "location" in d:
+                            canonical_location = next(
+                                (loc["name"] for loc in location_entities if _mentions_entity(d["location"], loc)),
+                                d["location"],
+                            )
+                            if canonical_location in loc_to_y:
+                                matched_loc = canonical_location
+                                break
                     except Exception:
                         pass
 
-        if matched_loc:
-            current_active_loc = matched_loc
-        scene_location_map[sc_id] = current_active_loc
+        scene_location_map[sc_id] = matched_loc or "Unspecified"
 
     # The arc reflects text-derived telemetry; it does not model reader response.
     tension_estimates = []
@@ -334,8 +353,13 @@ def build_astrolabe_manifest(
         health_val = 1.0
         try:
             d = json.loads(ev["state_delta"])
-            if "location" in d and d["location"] in loc_to_y:
-                loc_name = d["location"]
+            if "location" in d:
+                canonical_location = next(
+                    (loc["name"] for loc in location_entities if _mentions_entity(d["location"], loc)),
+                    d["location"],
+                )
+                if canonical_location in loc_to_y:
+                    loc_name = canonical_location
             health_val = float(d.get("health_score", 1.0))
         except Exception:
             pass
@@ -371,6 +395,34 @@ def build_astrolabe_manifest(
                 artifact_events[eid] = {"name": ev["name"], "points": [], "carrier": ev["carrier_id"]}
             artifact_events[eid]["points"].append(pt)
 
+    c.execute("SELECT entity_id, name, aliases, entity_type FROM canonical_entities WHERE entity_type = 'CHARACTER' ORDER BY rowid ASC")
+    text_traces = {}
+    for entity in c.fetchall():
+        mapped_scenes = {
+            point["scene_id"]
+            for point in character_events.get(entity["entity_id"], {}).get("points", [])
+        }
+        points = []
+        for scene in scene_rows:
+            scene_text = html_to_text(scene["content"] or "")
+            if scene["id"] in mapped_scenes or not _mentions_entity(scene_text, entity):
+                continue
+            scene_id = scene["id"]
+            tick = scene_actual_ticks.get(scene_id, float(scene_seq_map[scene_id]))
+            scene_index = scene_seq_map[scene_id] - 1
+            tension = tension_estimates[scene_index] if 0 <= scene_index < len(tension_estimates) else 0.45
+            loc_name = scene_location_map.get(scene_id, "Unspecified")
+            points.append({
+                "x": tick if time_mode == "chronological" else float(scene_seq_map[scene_id]),
+                "y": loc_to_y.get(loc_name, loc_to_y["Unspecified"]),
+                "z": tension,
+                "scene_id": scene_id,
+                "name": entity["name"],
+                "loc_name": loc_name,
+            })
+        if points:
+            text_traces[entity["entity_id"]] = {"name": entity["name"], "points": points}
+
     traces = []
     palette = ["#f59e0b", "#38bdf8", "#ec4899", "#a855f7", "#10b981", "#fb923c", "#34d399"]
 
@@ -401,6 +453,22 @@ def build_astrolabe_manifest(
             "line": {"color": color, "width": width},
             "marker": {"size": 7, "color": color, "opacity": opacity},
             "opacity": opacity
+        })
+
+    for idx, cdata in enumerate(text_traces.values()):
+        pts = cdata["points"]
+        traces.append({
+            "type": "scatter3d", "mode": "markers", "name": f"Text mentions: {cdata['name']}",
+            "x": [point["x"] for point in pts],
+            "y": [point["y"] for point in pts],
+            "z": [point["z"] for point in pts],
+            "customdata": [point["scene_id"] for point in pts],
+            "text": [
+                f"<b>{point['name']}</b> is named in this scene<br>Text-matched setting: {point['loc_name']}"
+                for point in pts
+            ],
+            "hoverinfo": "text",
+            "marker": {"size": 6, "symbol": "circle-open", "color": palette[idx % len(palette)], "opacity": 0.8},
         })
 
     # Layer 2: Relic Custody Braiding

@@ -88,6 +88,15 @@
             <div class="text-zinc-200 font-mono mt-0.5">{{ item.value }}</div>
           </div>
         </div>
+        <p v-if="isAnalyzing" class="text-[10px] text-violet-300">
+          Preparing the no-AI reader lens for {{ importReport.scenes || 0 }} scenes…
+        </p>
+        <p v-else-if="analysisError" class="text-[10px] text-rose-300">
+          Manuscript imported, but the reader lens could not be prepared: {{ analysisError }}
+        </p>
+        <p v-else-if="analyzedSceneCount" class="text-[10px] text-emerald-300">
+          No-AI reader lens ready for {{ analyzedSceneCount }} scenes. Open the Reader tab to explore it.
+        </p>
         <ul v-if="importReport.warnings?.length" class="space-y-1.5 text-[10px] text-amber-200/90">
           <li v-for="warning in importReport.warnings" :key="warning" class="flex gap-2"><span class="text-amber-400">!</span><span>{{ warning }}</span></li>
         </ul>
@@ -129,6 +138,9 @@ const fileInput = ref(null)
 const localManuscripts = ref([])
 const isDiscovering = ref(false)
 const isImporting = ref(false)
+const isAnalyzing = ref(false)
+const analyzedSceneCount = ref(0)
+const analysisError = ref('')
 const isPreviewing = ref(false)
 const pendingPath = ref('')
 const pendingFile = ref(null)
@@ -164,6 +176,8 @@ const clearPreview = () => {
   importReport.value = null
   previewTitle.value = ''
   importComplete.value = false
+  analyzedSceneCount.value = 0
+  analysisError.value = ''
 }
 
 const readResponse = async (response, fallback) => {
@@ -228,6 +242,7 @@ const confirmImport = async () => {
     if (data.status === 'success') {
       importReport.value = data.report || importReport.value
       importComplete.value = true
+      store.readerStoryCache = null
       window.dispatchEvent(new Event('refresh-tree'))
       await store.fetchTree()
       if (data.first_scene_id) {
@@ -235,6 +250,26 @@ const confirmImport = async () => {
       }
       store.viewMode = 'editor'
       showToast('Manuscript imported into Binder!', 'success')
+      const book = data.first_scene_id ? store.findBookForNode(data.first_scene_id) : null
+      if (book) {
+        isAnalyzing.value = true
+        analysisError.value = ''
+        store.saveStatus = 'Preparing no-AI reader lens...'
+        try {
+          const analysisResponse = await fetch(
+            `${API_BASE}/api/analytics/reader-story/${encodeURIComponent(book.id)}/all`
+          )
+          const analysis = await readResponse(analysisResponse, 'Reader analysis failed')
+          store.readerStoryCache = analysis
+          analyzedSceneCount.value = analysis.scene_count
+          store.activeInspectorTab = 'reader'
+        } catch (error) {
+          analysisError.value = error.message || 'Could not prepare the reader lens.'
+          showToast(`Manuscript imported, but reader analysis failed: ${analysisError.value}`, 'error')
+        } finally {
+          isAnalyzing.value = false
+        }
+      }
     }
   } catch (e) {
     showToast(`Import Error: ${e.message}`, 'error')

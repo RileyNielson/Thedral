@@ -180,6 +180,7 @@ record_test("Craft X-Ray Classifies Energetics (Escalators/Slack/Pivots)", "ESCA
 print(f"\n{BOLD}4. Clutter Shield & Entity Verification{RESET}")
 
 from backend.guardrails import is_valid_character_name, sanitize_entity_type
+from backend.entity_names import entity_name_forms, parse_entity_aliases, text_mentions_entity
 
 record_test("Valid Character Allowed (Ellie)", is_valid_character_name("Ellie"))
 record_test("Valid Character Allowed (Lord Malakor)", is_valid_character_name("Lord Malakor"))
@@ -189,6 +190,40 @@ record_test("Clutter Shield Blocks Generic Mobs (Guards)", not is_valid_characte
 
 record_test("Sanitize Demotes Clutter to CLUTTER", sanitize_entity_type("Lantern") == "CLUTTER")
 record_test("Sanitize Preserves Legitimate Character", sanitize_entity_type("Captain Vance", "CHARACTER") == "CHARACTER")
+record_test("Author-confirmed worldbuilding terms remain trackable", sanitize_entity_type("Aetherite", "WORLD_TERM") == "WORLD_TERM")
+record_test(
+    "Alias parsing supports old delimiters and new JSON name lists",
+    parse_entity_aliases('["Lady Mara", "Mare", "Captain Vale"]')
+    == ["Lady Mara", "Mare", "Captain Vale"]
+    and parse_entity_aliases("Lady Mara, Mare; Captain Vale")
+    == ["Lady Mara", "Mare", "Captain Vale"],
+)
+record_test(
+    "Alias matching is case-insensitive, whole-name, and deduplicated",
+    entity_name_forms("Mara Vale", '["Mare", "MARA VALE"]') == ["Mara Vale", "Mare"]
+    and text_mentions_entity("The Captain Vale entered.", "Mara Vale", '["Captain Vale"]')
+    and not text_mentions_entity("The Captain Valerian waited.", "Mara Vale", '["Vale"]'),
+)
+
+from backend.routers.entities import _candidate_names
+candidate_scenes = [
+    {"id": "scene-a", "title": "A", "content": "Rowan met Aetherite beneath the Silver Archive."},
+    {"id": "scene-b", "title": "B", "content": "They found Aetherite glowing beneath the Silver Archive."},
+]
+candidate_results = _candidate_names(candidate_scenes, [])
+record_test(
+    "Entity discovery surfaces recurring invented terms with evidence",
+    {candidate["name"] for candidate in candidate_results} == {"Aetherite", "Silver Archive"}
+    and all(candidate["mentions"] == 2 and candidate["examples"] for candidate in candidate_results),
+)
+registered_candidates = _candidate_names(
+    candidate_scenes,
+    [{"name": "Aetherite", "aliases": "The Aether"}],
+)
+record_test(
+    "Entity discovery excludes names already confirmed in canon",
+    all(candidate["name"] != "Aetherite" for candidate in registered_candidates),
+)
 
 # =============================================================================
 # 5. 3D ASTROLABE (COSMOGRAPH & CHAPTER LENS)
@@ -228,13 +263,19 @@ astro_conn.execute("""
 astro_conn.execute("INSERT INTO binder_nodes VALUES ('book_1', NULL, 'default', 'BOOK', 'Book One', 10.0, '', 0, 0, '')")
 astro_conn.execute("INSERT INTO binder_nodes VALUES ('ch_1', 'book_1', 'default', 'CHAPTER', 'Chapter One', 10.0, '', 0, 0, '')")
 three_beat_prose = (
-    "She considered the silent docks and wondered what had happened to the light.\n\n"
-    "\"Drop the weapon!\" the guard shouted, stepping forward.\n\n"
-    "Cold steel cleaved through the night air. Blood hissed upon the flagstones."
+    "She considered the Docks and wondered what had happened to the light.\n\n"
+    "\"Drop the weapon!\" the guard shouted near the North Gate and Gatehouse.\n\n"
+    "Cold steel cleaved through the night air. Valentine watched; Vale ran past the Gatehouse."
 )
 astro_conn.execute("""
     INSERT INTO binder_nodes VALUES ('sc_1', 'ch_1', 'default', 'SCENE', 'The Confrontation', 10.0, ?, 36, 0, 'Combat at Docks')
 """, (three_beat_prose,))
+astro_conn.execute("""
+    INSERT INTO canonical_entities VALUES
+    ('mara', 'Mara Vale', 'CHARACTER', 'Captain Vale, Vale', ''),
+    ('iron_docks', 'Iron Docks', 'LOCATION', 'the Docks', ''),
+    ('north_gate', 'North Gate', 'LOCATION', 'Gate', '')
+""")
 astro_conn.commit()
 
 macro_manifest = build_astrolabe_manifest(astro_conn, book_id='book_1')
@@ -245,6 +286,17 @@ beats_trace = micro_manifest["data"][0] if micro_manifest["data"] else {}
 num_beats = len(beats_trace.get("x", []))
 record_test("Chapter Lens Maps Paragraph Beats (Not 1 Dot)", num_beats == 3)
 record_test("Chapter Lens Encodes Clickable Beat Navigation Data", len(beats_trace.get("customdata", [])) == 3 and isinstance(beats_trace["customdata"][0], dict))
+micro_cast = next((trace for trace in micro_manifest["data"] if trace.get("name") == "Cast: Mara Vale"), {})
+record_test(
+    "Chapter Lens Matches Confirmed Character Aliases Without Substring False Positives",
+    len(micro_cast.get("x", [])) == 1,
+)
+macro_mention = next((trace for trace in macro_manifest["data"] if trace.get("name") == "Text mentions: Mara Vale"), {})
+record_test(
+    "Cosmograph Maps Text Mentions and Confirmed Location Aliases",
+    len(macro_mention.get("x", [])) == 1
+    and macro_mention["text"][0].endswith("Iron Docks"),
+)
 
 astro_conn.close()
 
@@ -461,10 +513,196 @@ record_test("Deducts Voice Match Score for Dialect Contamination", voice_audit["
 # =============================================================================
 print(f"\n{BOLD}8. FastAPI Router API Contracts & Endpoints{RESET}")
 
+from backend.reader_story import analyze_reader_story
+from backend.reader_story import _turns
+
+story_read = analyze_reader_story(
+    [
+        {
+            "scene_id": "setup",
+            "title": "Before Dawn",
+            "content": "Mara promised to find the silver key before dawn. She loved the dog and waited for him.",
+        },
+        {
+            "scene_id": "payoff",
+            "title": "The Floodgate",
+            "content": (
+                "Mara found the silver key, but the floodgate failed. "
+                "The dog died before morning. Mara trembled alone. "
+                "Mara asked, 'What happened?' She said nothing. Mara lied about the key. "
+                "Mara said the passage was perfectly safe, then the bridge failed."
+            ),
+        },
+    ],
+    "payoff",
+    (
+        "Mara found the silver key, but the floodgate failed. "
+        "The dog died before morning. Mara trembled alone. "
+        "Mara asked, 'What happened?' She said nothing. Mara lied about the key. "
+        "Mara said the passage was perfectly safe, then the bridge failed."
+    ),
+)
+record_test(
+    "Deterministic reader story analysis links payoff, turns, loss, empathy, irony, subtext, and trust",
+    any(item["kind"] == "payoff" for item in story_read["threads"])
+    and any(item["kind"] == "yes_but" for item in story_read["turns"])
+    and any(item["kind"] == "loss" for item in story_read["emotional_payoffs"])
+    and any(item["kind"] == "empathy" for item in story_read["empathy_moments"])
+    and any(item["kind"] == "subtext" for item in story_read["subtext_moments"])
+    and any(item["kind"] == "irony" for item in story_read["irony_moments"])
+    and any(item["kind"] == "trust_shift" for item in story_read["trust_shifts"])
+    and all(
+        item.get("setup_evidence") and item.get("payoff_evidence")
+        for item in (
+            [item for item in story_read["threads"] if item["kind"] != "setup"]
+            + story_read["emotional_payoffs"]
+            + story_read["empathy_moments"]
+            + story_read["irony_moments"]
+            + story_read["trust_shifts"]
+        )
+    ),
+)
+turn_kinds = {
+    item["kind"] for item in _turns([
+        "She found the key, but the gate failed.",
+        "She lost the key, but found the old map.",
+        "She found the key, and then opened the gate.",
+        "She lost the key, and then the gate failed.",
+    ])
+}
+record_test(
+    "Story turn reader recognizes yes/no with but/and patterns",
+    turn_kinds == {"yes_but", "no_but", "yes_and", "no_and"},
+)
+same_scene_loss = analyze_reader_story(
+    [{
+        "scene_id": "single-scene",
+        "title": "The Last Walk",
+        "content": "The child held the dog's paw all night. The dog died before dawn.",
+    }],
+    "single-scene",
+    "The child held the dog's paw all night. The dog died before dawn.",
+)
+record_test(
+    "Reader story analysis makes a direct, evidence-linked grief prediction",
+    any(item["kind"] == "loss" for item in same_scene_loss["emotional_payoffs"])
+    and "will land as grief" in same_scene_loss["emotional_payoffs"][0]["reaction"]
+    and "held the dog's paw" in same_scene_loss["emotional_payoffs"][0]["setup_evidence"]
+    and "dog died" in same_scene_loss["emotional_payoffs"][0]["payoff_evidence"],
+)
+
+import backend.wiktionary_lexicon as wiktionary
+from backend.wiktionary_lexicon import expand_lexical_terms, get_lexicon_status, is_english_word
+
+with tempfile.TemporaryDirectory() as wiktionary_temp:
+    wiktionary_path = Path(wiktionary_temp) / "wiktionary.sqlite"
+    source_path = Path(wiktionary_temp) / "source.sqlite"
+    source_conn = sqlite3.connect(source_path)
+    source_conn.executescript("""
+        CREATE TABLE entries (id INTEGER PRIMARY KEY, word TEXT, lang TEXT);
+        CREATE TABLE senses (id INTEGER PRIMARY KEY, entry_id INTEGER);
+        CREATE TABLE glosses (sense_id INTEGER, gloss_text TEXT);
+        CREATE TABLE synonyms (sense_id INTEGER, synonym_text TEXT);
+        CREATE TABLE word_forms (entry_id INTEGER, form TEXT);
+        INSERT INTO entries VALUES (1, 'love', 'English'), (2, 'cherish', 'English'), (3, 'cherished', 'English');
+        INSERT INTO senses VALUES (10, 1), (20, 2);
+        INSERT INTO glosses VALUES (10, 'to feel deep affection'), (20, 'to hold dear');
+        INSERT INTO synonyms VALUES (10, 'cherish');
+        INSERT INTO word_forms VALUES (2, 'cherished');
+    """)
+    source_conn.commit()
+    source_conn.close()
+    with patch.object(wiktionary, "WIKTIONARY_DB_PATH", wiktionary_path):
+        wiktionary_install = wiktionary.install_wiktionary_database(source_path)
+    love_terms = expand_lexical_terms({"love"}, wiktionary_path)
+    lexical_story = analyze_reader_story(
+        [{
+            "scene_id": "lexical-scene",
+            "title": "The Last Walk",
+            "content": "The child cherished the dog. The dog died before dawn.",
+        }],
+        "lexical-scene",
+        "The child cherished the dog. The dog died before dawn.",
+        lexicon_path=wiktionary_path,
+    )
+    lexical_status = get_lexicon_status(wiktionary_path)
+    english_word_found = is_english_word("love", wiktionary_path)
+record_test(
+    "Wiktionary SQLite adapter links synonyms and inflected forms into the reader lens",
+    wiktionary_install["available"]
+    and {"cherish", "cherished"}.issubset(love_terms)
+    and english_word_found
+    and any(item["kind"] == "loss" for item in lexical_story["emotional_payoffs"])
+    and lexical_story["lexicon"]["available"]
+    and lexical_status["license"] == "CC BY-SA 4.0"
+    and "huggingface.co/datasets/cstr/en-wiktionary-sqlite-full" in lexical_status["source"],
+    detail=(
+        f"install={wiktionary_install['available']}, terms={love_terms}, "
+        f"word={english_word_found}, "
+        f"analysis_lexicon={lexical_story['lexicon']}, "
+        f"payoffs={lexical_story['emotional_payoffs']}, status={lexical_status}"
+    ),
+)
+
 from backend.main import app
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
+
+with tempfile.TemporaryDirectory() as candidate_api_temp:
+    candidate_db_path = Path(candidate_api_temp) / "candidate_test.sqlite"
+    init_db(candidate_db_path)
+    candidate_conn = get_db(candidate_db_path)
+    candidate_conn.executemany("""
+        INSERT INTO binder_nodes (id, parent_id, node_type, title, content, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, [
+        ("candidate_book", None, "BOOK", "Candidate Book", "", 1),
+        ("candidate_chapter", "candidate_book", "CHAPTER", "Chapter", "", 1),
+        ("candidate_scene_a", "candidate_chapter", "SCENE", "Scene A", "Rowan met Aetherite beneath the Silver Archive.", 1),
+        ("candidate_scene_b", "candidate_chapter", "SCENE", "Scene B", "They found Aetherite glowing beneath the Silver Archive.", 2),
+    ])
+    candidate_conn.commit()
+    candidate_conn.close()
+    with patch("backend.routers.entities.get_db", lambda: get_db(candidate_db_path)), \
+         patch("backend.routers.entities.get_lexicon_status", return_value={"available": False}):
+        candidate_response = client.get("/api/entities/candidates/candidate_book")
+        register_alias_response = client.post(
+            "/api/entities/quick-register",
+            json={
+                "name": "Mara Vale",
+                "entity_type": "CHARACTER",
+                "aliases": ["Mare", "Captain Vale", "The Fox"],
+            },
+        )
+        alias_update_response = client.put(
+            "/api/entities/mara_vale/aliases",
+            json={"aliases": ["Mare", "Captain Vale", "The Fox", "Lady Vale"]},
+        )
+        conflicting_alias_response = client.post(
+            "/api/entities/quick-register",
+            json={
+                "name": "Rowan Hale",
+                "entity_type": "CHARACTER",
+                "aliases": ["The Fox"],
+            },
+        )
+candidate_api_result = candidate_response.json()
+record_test(
+    "Entity candidate endpoint scans book prose without auto-registering names",
+    candidate_response.status_code == 200
+    and {candidate["name"] for candidate in candidate_api_result["candidates"]}
+    == {"Aetherite", "Silver Archive"}
+    and not candidate_api_result["wiktionary_available"],
+)
+record_test(
+    "Characters keep multiple aliases and reject conflicting identity names",
+    register_alias_response.status_code == 200
+    and alias_update_response.status_code == 200
+    and alias_update_response.json()["aliases"]
+    == ["Mare", "Captain Vale", "The Fox", "Lady Vale"]
+    and conflicting_alias_response.status_code == 409,
+)
 
 health_res = client.get("/api/health")
 record_test(
@@ -519,6 +757,39 @@ if api_books:
     """, (active_test_book,)).fetchone()
     feedback_conn.close()
     if feedback_scene:
+        story_read_res = client.post(
+            f"/api/analytics/reader-story/{active_test_book}",
+            json={
+                "scene_id": feedback_scene["id"],
+                "content": "Mara found the key, but the floodgate failed.",
+            },
+        )
+        record_test(
+            "Reader story analytics endpoint returns rule-based scene turns",
+            story_read_res.status_code == 200
+            and story_read_res.json().get("method", "").startswith("Transparent text-pattern rules")
+            and any(turn.get("kind") == "yes_but" for turn in story_read_res.json().get("turns", [])),
+        )
+        imported_story_read = client.get(
+            f"/api/analytics/reader-story/{active_test_book}/all"
+        )
+        imported_story_data = imported_story_read.json() if imported_story_read.status_code == 200 else {}
+        imported_scene = next(
+            (
+                scene for scene in imported_story_data.get("analyses", [])
+                if scene["scene_id"] == feedback_scene["id"]
+            ),
+            {},
+        )
+        record_test(
+            "Whole-manuscript no-AI reader analysis returns cached scene results",
+            imported_story_read.status_code == 200
+            and imported_story_data.get("scene_count") == len(imported_story_data.get("analyses", []))
+            and imported_scene.get("analysis", {}).get("scene_id") == feedback_scene["id"]
+            and imported_scene.get("content") is not None
+            and imported_scene.get("analysis", {}).get("method", "").startswith("Transparent text-pattern rules"),
+        )
+
         prior_scene_id = f"reader_context_{uuid.uuid4().hex}"
         prior_chapter_id = f"reader_context_chapter_{uuid.uuid4().hex}"
         prior_scene_text = f"Earlier scene context marker {uuid.uuid4().hex}."
@@ -526,7 +797,7 @@ if api_books:
         with context_conn:
             context_conn.execute("""
                 INSERT INTO binder_nodes (id, parent_id, node_type, title, sort_order)
-                VALUES (?, ?, 'CHAPTER', 'Reader context test chapter', -100)
+                VALUES (?, ?, 'CHAPTER', 'Reader context test chapter', -1000000000000)
             """, (prior_chapter_id, active_test_book))
             context_conn.execute("""
                 INSERT INTO binder_nodes (id, parent_id, node_type, title, sort_order, content)
@@ -761,7 +1032,19 @@ if api_books:
                 and item.get("evidence_source") == "prior_context"
                 for item in sequential_saved.get("items", [])
             ),
+            str({
+                "status": sequential_simulation.status_code,
+                "reading_mode": sequential_saved.get("reading_mode"),
+                "context": sequential_saved.get("reading_context"),
+                "prompt_has_context": prior_scene_text in ai_call_count[4]["messages"][1]["content"],
+                "items": sequential_saved.get("items"),
+            }),
         )
+        context_cleanup = get_db()
+        with context_cleanup:
+            context_cleanup.execute("DELETE FROM binder_nodes WHERE id = ?", (prior_scene_id,))
+            context_cleanup.execute("DELETE FROM binder_nodes WHERE id = ?", (prior_chapter_id,))
+        context_cleanup.close()
         cleanup_conn = get_db()
         with cleanup_conn:
             for simulation_id in (

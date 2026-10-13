@@ -1,6 +1,7 @@
 import re
 import json
 import sqlite3
+from backend.entity_names import text_mentions_entity
 from backend.reducer import get_entity_state_at_tick
 from backend.text_utils import html_to_text
 
@@ -29,7 +30,6 @@ def compile_scene_dossier(conn: sqlite3.Connection, scene_id: str) -> dict:
         return {}
 
     content = html_to_text(scene["content"] or "")
-    content_lower = content.lower()
 
     # 2. Detect Active Characters, Nicknames, and Somatic States
     c.execute("""
@@ -42,12 +42,7 @@ def compile_scene_dossier(conn: sqlite3.Connection, scene_id: str) -> dict:
     active_cast = []
     active_char_entities = []
     for char in all_chars:
-        # Build search list of primary name + all registered aliases/nicknames
-        names_to_check = [char["name"].lower()]
-        if char["aliases"]:
-            names_to_check.extend([a.strip().lower() for a in char["aliases"].split(",") if a.strip()])
-
-        matched = any(re.search(r'\b' + re.escape(n) + r'\b', content_lower) for n in names_to_check)
+        matched = text_mentions_entity(content, char["name"], char["aliases"])
         if matched:
             active_char_entities.append(char["entity_id"])
             state = get_entity_state_at_tick(conn, char["entity_id"], 100.0)

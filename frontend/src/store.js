@@ -112,6 +112,7 @@ export const store = reactive({
   },
 
   // Narrative Horizons & Inferences
+  readerStoryCache: null,
   activeDisclosures: [],
   sceneCritiques: [],
   astrolabeAnomalies: [],
@@ -392,6 +393,7 @@ export const store = reactive({
       if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to persist scene`)
       this.activeNode.content = htmlContent
       this.activeNode.word_count = contentToPlainText(htmlContent).split(/\s+/).filter(Boolean).length
+      this.readerStoryCache = null
       this.saveStatus = 'saved'
       return true
     } catch (err) {

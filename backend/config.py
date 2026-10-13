@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -13,6 +14,15 @@ PROJECT_ROOT = BACKEND_DIR.parent
 STATIC_DIR = PROJECT_ROOT / "static"
 EXPORTS_DIR = PROJECT_ROOT / "exports"
 DB_PATH = PROJECT_ROOT / "studio_vault.db"
+if os.environ.get("THEDRAL_DATA_DIR"):
+    DATA_DIR = Path(os.environ["THEDRAL_DATA_DIR"]).expanduser()
+elif sys.platform == "darwin":
+    DATA_DIR = Path.home() / "Library" / "Application Support" / "Thedral"
+elif os.name == "nt":
+    DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Thedral"
+else:
+    DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "Thedral"
+WIKTIONARY_DB_PATH = DATA_DIR / "wiktionary.sqlite"
 
 # Ensure required runtime directories exist on disk
 os.makedirs(EXPORTS_DIR, exist_ok=True)

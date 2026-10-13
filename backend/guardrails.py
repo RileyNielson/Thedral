@@ -60,6 +60,7 @@ def sanitize_entity_type(name: str, proposed_type: str | None = None) -> str:
     - 'CHARACTER': Verified sentient individuals.
     - 'ITEM': Crucial plot devices, weapons, keys, documents.
     - 'LOCATION': Named physical environments or structures.
+    - 'FACTION' and 'WORLD_TERM': Author-confirmed groups and invented vocabulary.
     - 'CLUTTER': Rejected ambient noise (food, furniture, common nouns).
     """
     if not name or not name.strip():
@@ -72,7 +73,7 @@ def sanitize_entity_type(name: str, proposed_type: str | None = None) -> str:
         return "CLUTTER"
 
     raw_type = (proposed_type or "CHARACTER").strip().upper()
-    if raw_type not in ["CHARACTER", "ITEM", "LOCATION"]:
+    if raw_type not in ["CHARACTER", "ITEM", "LOCATION", "FACTION", "WORLD_TERM"]:
         raw_type = "CHARACTER"
 
     # Demote invalid character names to CLUTTER

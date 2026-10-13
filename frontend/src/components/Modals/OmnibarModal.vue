@@ -180,16 +180,26 @@ const runSearch = async () => {
     const entityRes = await fetch(`${API_BASE}/api/entities`)
     if (entityRes.ok) {
       const entities = await entityRes.json()
+      const parseAliases = (value) => {
+        if (!value) return []
+        try {
+          const parsed = JSON.parse(value)
+          if (Array.isArray(parsed)) return parsed
+        } catch {
+          // Legacy database rows store aliases as delimited text.
+        }
+        return value.split(/[,;\n|]+/).map(alias => alias.trim()).filter(Boolean)
+      }
       entities
         .filter(e => 
           e.name.toLowerCase().includes(q.toLowerCase()) || 
-          (e.aliases && e.aliases.toLowerCase().includes(q.toLowerCase()))
+          parseAliases(e.aliases).some(alias => alias.toLowerCase().includes(q.toLowerCase()))
         )
         .forEach(e => combined.push({ 
           type: e.entity_type, 
           title: e.name, 
           subtitle: e.role || e.entity_type, 
-          preview: `Aliases: ${e.aliases || 'None'} • Status: ${e.status || 'Active'}`, 
+          preview: `Also known as: ${parseAliases(e.aliases).join(', ') || 'None'} • Status: ${e.status || 'Active'}`,
           id: null 
         }))
     }

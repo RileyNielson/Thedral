@@ -533,6 +533,50 @@
           <p v-else class="text-[9px] text-zinc-500">No beta-reader responses recorded for this scene yet. Recorded responses appear here before the AI rehearsal.</p>
         </section>
 
+        <section class="rounded-xl border border-violet-900/50 bg-violet-950/10 p-3 space-y-2.5">
+          <header class="space-y-1">
+            <div class="flex items-center justify-between gap-2">
+              <h2 class="text-[10px] font-bold uppercase tracking-wider text-violet-300">Story underneath · no AI</h2>
+              <span v-if="readerStoryLoading" class="text-[9px] text-zinc-500">Following the threads…</span>
+            </div>
+            <p class="text-[9px] leading-relaxed text-zinc-500">
+              {{ readerStoryAnalysis?.disclaimer || 'These are confident predictions of a typical reader’s experience, grounded in the manuscript—not a guarantee that every reader will react the same way.' }}
+            </p>
+            <p class="text-[9px] leading-relaxed text-zinc-500">
+              No AI: ready across the manuscript after import, and refreshes from the live draft after you pause while this tab is open.
+            </p>
+            <p v-if="readerStoryAnalysis?.lexicon?.available" class="text-[9px] leading-relaxed text-emerald-300/80">
+              Local Wiktionary word forms and synonyms are expanding the story cues.
+            </p>
+            <p v-else class="text-[9px] leading-relaxed text-zinc-600">
+              Local Wiktionary word-form expansion is not installed yet.
+            </p>
+          </header>
+          <p v-if="readerStoryError" class="text-[9px] text-rose-300">{{ readerStoryError }}</p>
+          <template v-else-if="readerStoryAnalysis">
+            <template v-for="group in readerStoryGroups" :key="group.key">
+              <article v-for="(insight, index) in group.items" :key="`${group.key}-${index}`" class="rounded-lg border border-zinc-800/80 bg-zinc-950/80 p-2.5 space-y-1.5">
+                <div class="flex items-baseline justify-between gap-2">
+                  <h3 class="text-[10px] font-semibold text-violet-200">{{ insight.headline }}</h3>
+                  <span class="shrink-0 text-[8px] text-zinc-600">{{ insight.confidence }}</span>
+                </div>
+                <p class="text-[10px] leading-relaxed text-zinc-300">{{ insight.reaction }}</p>
+                <div v-if="insight.setup_evidence" class="space-y-0.5">
+                  <p class="text-[8px] uppercase tracking-wider text-zinc-600">Earlier · {{ insight.setup_title || 'the setup' }}</p>
+                  <button @click="jumpToStoryEvidence(insight.setup_scene_id, insight.setup_evidence)" class="block w-full border-l border-violet-900/70 pl-2 text-left text-[9px] italic text-zinc-400 hover:text-violet-200">“{{ insight.setup_evidence }}”</button>
+                </div>
+                <div v-if="insight.payoff_evidence || insight.evidence" class="space-y-0.5">
+                  <p class="text-[8px] uppercase tracking-wider text-zinc-600">{{ insight.setup_evidence ? 'Here' : `Here · paragraph ${insight.paragraph}` }}</p>
+                  <button @click="jumpToStoryEvidence(insight.payoff_scene_id, insight.payoff_evidence || insight.evidence)" class="block w-full border-l border-violet-900/70 pl-2 text-left text-[9px] italic text-zinc-400 hover:text-violet-200">“{{ insight.payoff_evidence || insight.evidence }}”</button>
+                </div>
+              </article>
+            </template>
+            <p v-if="!readerStoryGroups.length" class="text-[9px] leading-relaxed text-zinc-500">
+              {{ readerStoryAnalysis.summary }} Try giving a question, promise, or clear reversal room on the page; this reader lens only calls out patterns it can point to.
+            </p>
+          </template>
+        </section>
+
         <div class="flex items-center justify-between">
           <div>
             <span class="text-[11px] text-zinc-400 font-medium">Simulated reader pass</span>
@@ -762,6 +806,9 @@ const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.host
 const manuscriptAnalytics = ref(null)
 const analyticsLoading = ref(false)
 const analyticsError = ref('')
+const readerStoryAnalysis = ref(null)
+const readerStoryLoading = ref(false)
+const readerStoryError = ref('')
 let analyticsRequest = 0
 const selectedSceneAnalytics = computed(() =>
   manuscriptAnalytics.value?.scenes.find(scene => scene.scene_id === store.activeNode?.id) || null
@@ -942,6 +989,28 @@ const otherObservationCategories = [
 const simulationItems = type =>
   selectedSimulation.value?.items.filter(item => item.disclosure_type === type) || []
 const readerExperienceItems = type => simulationItems(type)
+const readerStoryGroups = computed(() => {
+  const analysis = readerStoryAnalysis.value
+  if (!analysis) return []
+  return [
+    { key: 'threads', items: analysis.threads || [] },
+    { key: 'turns', items: analysis.turns || [] },
+    { key: 'emotional-payoffs', items: analysis.emotional_payoffs || [] },
+    { key: 'empathy-moments', items: analysis.empathy_moments || [] },
+    { key: 'subtext-moments', items: analysis.subtext_moments || [] },
+    { key: 'irony-moments', items: analysis.irony_moments || [] },
+    { key: 'trust-shifts', items: analysis.trust_shifts || [] }
+  ].filter(group => group.items.length)
+})
+const jumpToStoryEvidence = async (sceneId, text) => {
+  if (!text) return
+  if (sceneId && sceneId !== store.activeNode?.id) {
+    if (!await store.loadScene(sceneId)) return
+  }
+  store.viewMode = 'editor'
+  await nextTick()
+  window.dispatchEvent(new CustomEvent('sniper-scroll', { detail: { text } }))
+}
 const readerLevelLabel = level => {
   const labels = { 1: 'Very low · 1/5', 2: 'Low · 2/5', 3: 'Moderate · 3/5', 4: 'High · 4/5', 5: 'Very high · 5/5' }
   return labels[level] || 'Unrated'
@@ -984,6 +1053,13 @@ watch(() => store.activeNode?.id, () => {
   })
   loadReaderFeedback()
   loadReaderSimulations()
+})
+let readerStoryRequest = 0
+let readerStoryTimer
+watch(() => [store.activeNode?.id, store.activeNode?.content, store.activeInspectorTab], ([, , tab]) => {
+  if (tab !== 'reader') return
+  clearTimeout(readerStoryTimer)
+  readerStoryTimer = setTimeout(loadReaderStoryAnalysis, 350)
 })
 watch(() => [store.activeNode?.id, store.activeInspectorTab], ([, tab]) => {
   if (tab === 'telemetry') loadManuscriptAnalytics()
@@ -1496,6 +1572,45 @@ const loadReaderSimulations = async (selectedId = '') => {
   }
 }
 
+const loadReaderStoryAnalysis = async () => {
+  const sceneId = store.activeNode?.id
+  const bookId = sceneId ? store.findBookForNode(sceneId)?.id : ''
+  const requestId = ++readerStoryRequest
+  readerStoryAnalysis.value = null
+  readerStoryError.value = ''
+  if (!sceneId || !bookId || store.activeInspectorTab !== 'reader') {
+    readerStoryLoading.value = false
+    return
+  }
+  const cachedScene = store.readerStoryCache?.book_id === bookId
+    ? store.readerStoryCache.analyses?.find(item => item.scene_id === sceneId)
+    : null
+  if (cachedScene && cachedScene.content === (store.activeNode?.content || '')) {
+    readerStoryAnalysis.value = cachedScene.analysis
+    readerStoryLoading.value = false
+    return
+  }
+  readerStoryLoading.value = true
+  try {
+    const response = await fetch(`${API_BASE}/api/analytics/reader-story/${encodeURIComponent(bookId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scene_id: sceneId, content: store.activeNode?.content || '' })
+    })
+    if (!response.ok) throw new Error(`Could not follow story threads (HTTP ${response.status}).`)
+    const result = await response.json()
+    if (requestId === readerStoryRequest && store.activeNode?.id === sceneId) {
+      readerStoryAnalysis.value = result
+    }
+  } catch (error) {
+    if (requestId === readerStoryRequest && store.activeNode?.id === sceneId) {
+      readerStoryError.value = error.message || 'Could not follow story threads.'
+    }
+  } finally {
+    if (requestId === readerStoryRequest) readerStoryLoading.value = false
+  }
+}
+
 const loadReaderFeedback = async () => {
   const sceneId = store.activeNode?.id
   const requestId = ++readerFeedbackRequest
@@ -1565,6 +1680,7 @@ onMounted(() => {
   if (store.activeNode?.id) {
     loadReaderFeedback()
     loadReaderSimulations()
+    if (store.activeInspectorTab === 'reader') loadReaderStoryAnalysis()
   }
   if (store.activeInspectorTab === 'lens') {
     nextTick(() => renderMiniAstrolabe())
@@ -1572,6 +1688,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(readerStoryTimer)
+  readerStoryRequest += 1
   window.removeEventListener('editor-scroll-beat', handleScrollBeat)
 })
 </script>

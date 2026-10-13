@@ -96,7 +96,7 @@ def init_db(custom_path: str | Path | None = None) -> None:
             name TEXT NOT NULL,
             entity_type TEXT NOT NULL, -- 'CHARACTER', 'ITEM', 'LOCATION', 'FACTION'
             role TEXT DEFAULT 'SUPPORTING', -- 'PROTAGONIST', 'ANTAGONIST', 'SUPPORTING', 'MINOR'
-            aliases TEXT DEFAULT '', -- Comma-separated: 'Captain, Vance, The Old Crow'
+            aliases TEXT DEFAULT '', -- JSON list of alternate names; legacy delimited values are still read
             sensory_profile TEXT DEFAULT '', -- 'Smells of scorched sulfur; clipped vocal rasp'
             status TEXT DEFAULT 'ALIVE', -- 'ALIVE', 'WOUNDED', 'DECEASED', 'UNKNOWN'
             parent_location_id TEXT, -- Geographic hierarchy

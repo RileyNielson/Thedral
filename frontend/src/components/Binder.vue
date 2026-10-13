@@ -35,10 +35,10 @@
             <input v-if="editingNodeId === book.id" :id="'rename-' + book.id" v-model="editingTitle" @keyup.enter="saveRename(book)" @blur="saveRename(book)" @click.stop class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" />
             <span v-else class="truncate tracking-wide">{{ book.title }}</span>
           </div>
-          <div class="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition">
-            <button @click.stop="startRename(book, $event)" title="Rename" class="p-0.5 hover:text-amber-400 text-zinc-600 transition"><Pencil class="w-3 h-3" /></button>
-            <button @click.stop="checkInBook(book)" title="Check in to Bookcase" class="p-0.5 hover:text-amber-400 text-zinc-600 transition"><Archive class="w-3.5 h-3.5" /></button>
-            <button @click.stop="deleteNode(book)" title="Delete" class="p-0.5 hover:text-rose-400 text-zinc-600 transition"><Trash2 class="w-3.5 h-3.5" /></button>
+          <div class="shrink-0 flex items-center space-x-0.5">
+            <button @click.stop="startRename(book, $event)" title="Rename manuscript" aria-label="Rename manuscript" class="p-1 text-zinc-400 hover:text-amber-300 focus-visible:text-amber-300 rounded transition"><Pencil class="w-3 h-3" /></button>
+            <button @click.stop="checkInBook(book)" title="Check in to Bookcase" aria-label="Check in to Bookcase" class="p-1 text-zinc-400 hover:text-amber-300 focus-visible:text-amber-300 rounded transition"><Archive class="w-3.5 h-3.5" /></button>
+            <button @click.stop="deleteNode(book)" title="Delete manuscript" aria-label="Delete manuscript" class="p-1 text-zinc-400 hover:text-rose-300 focus-visible:text-rose-300 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
           </div>
         </div>
         <div v-show="!isCollapsed(book.id)" v-for="chapter in book.children" :key="chapter.id" class="ml-2">
@@ -50,10 +50,10 @@
               <input v-if="editingNodeId === chapter.id" :id="'rename-' + chapter.id" v-model="editingTitle" @keyup.enter="saveRename(chapter)" @blur="saveRename(chapter)" @click.stop class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" />
               <span v-else class="truncate">{{ chapter.title }}</span>
             </div>
-            <div class="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition">
-              <button @click.stop="startRename(chapter, $event)" title="Rename" class="p-0.5 hover:text-amber-400 text-zinc-500 transition"><Pencil class="w-3 h-3" /></button>
-              <button @click.stop="addSceneTo(chapter.id)" title="Add Scene" class="p-0.5 hover:text-white text-zinc-500 transition"><Plus class="w-3 h-3" /></button>
-              <button @click.stop="deleteNode(chapter)" title="Delete" class="p-0.5 hover:text-rose-400 text-zinc-600 transition"><Trash2 class="w-3.5 h-3.5" /></button>
+            <div class="shrink-0 flex items-center space-x-0.5">
+              <button @click.stop="startRename(chapter, $event)" title="Rename chapter" aria-label="Rename chapter" class="p-1 text-zinc-400 hover:text-amber-300 focus-visible:text-amber-300 rounded transition"><Pencil class="w-3 h-3" /></button>
+              <button @click.stop="addSceneTo(chapter.id)" title="Add scene to chapter" aria-label="Add scene to chapter" class="p-1 text-zinc-400 hover:text-white focus-visible:text-white rounded transition"><Plus class="w-3 h-3" /></button>
+              <button @click.stop="deleteNode(chapter)" title="Delete chapter" aria-label="Delete chapter" class="p-1 text-zinc-400 hover:text-rose-300 focus-visible:text-rose-300 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
             </div>
           </div>
           <div v-show="!isCollapsed(chapter.id)" v-for="scene in chapter.children" :key="scene.id" class="ml-4">
@@ -63,10 +63,10 @@
                 <input v-if="editingNodeId === scene.id" :id="'rename-' + scene.id" v-model="editingTitle" @keyup.enter="saveRename(scene)" @blur="saveRename(scene)" @click.stop class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" />
                 <span v-else class="truncate">{{ scene.title }}</span>
               </div>
-              <div class="flex items-center space-x-1.5 opacity-0 group-hover:opacity-100 transition">
+              <div class="shrink-0 flex items-center space-x-1">
                 <span class="text-[10px] text-zinc-500 font-mono">{{ scene.word_count || 0 }}w</span>
-                <button @click.stop="startRename(scene, $event)" title="Rename" class="p-0.5 hover:text-amber-400 text-zinc-500 transition"><Pencil class="w-3 h-3" /></button>
-                <button @click.stop="deleteNode(scene)" title="Delete" class="p-0.5 hover:text-rose-400 text-zinc-600 transition"><Trash2 class="w-3.5 h-3.5" /></button>
+                <button @click.stop="startRename(scene, $event)" title="Rename scene" aria-label="Rename scene" class="p-1 text-zinc-400 hover:text-amber-300 focus-visible:text-amber-300 rounded transition"><Pencil class="w-3 h-3" /></button>
+                <button @click.stop="deleteNode(scene)" title="Delete scene" aria-label="Delete scene" class="p-1 text-zinc-400 hover:text-rose-300 focus-visible:text-rose-300 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
               </div>
             </div>
           </div>
@@ -109,6 +109,7 @@ const addChapter = async () => {
   try {
     const response = await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: bookId, node_type: 'CHAPTER', title: 'New Chapter' }) })
     if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to create chapter`)
+    store.readerStoryCache = null
     collapsed.value[bookId] = false
     await fetchTree()
   } catch (e) { showToast(e.message, "error") }
@@ -128,6 +129,7 @@ const addSceneTo = async (chId) => {
     const res = await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: chId, node_type: 'SCENE', title: 'New Scene' }) })
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to create scene`)
     const data = await res.json()
+    store.readerStoryCache = null
     await fetchTree()
     await selectNode(data.id)
   } catch (e) { showToast(e.message, "error") }
@@ -148,7 +150,9 @@ const saveRename = async (node) => {
   node.title = newTitle
   if (store.activeNode?.id === node.id) store.activeNode.title = newTitle
   try {
-    await fetch(`${API_BASE}/api/node/${node.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle }) })
+    const response = await fetch(`${API_BASE}/api/node/${node.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle }) })
+    if (!response.ok) throw new Error(`HTTP ${response.status}: Rename failed`)
+    store.readerStoryCache = null
     await fetchTree()
   } catch(e) { showToast("Rename failed.", "error") }
 }
@@ -168,6 +172,7 @@ const deleteNode = async (node) => {
   try {
     const res = await fetch(`${API_BASE}/api/node/${node.id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error('Delete failed on server')
+    store.readerStoryCache = null
     // Crucial: Clear active node so it doesn't auto-save and recreate itself
     if (store.activeNode?.id === node.id || store.activeNode?.parent_id === node.id || store.activeNode?.book_id === node.id) {
       store.activeNode = null
@@ -183,6 +188,7 @@ const autoTitleScenes = async () => {
     const bId = store.activeBookId || null
     const res = await fetch(`${API_BASE}/api/binder/auto-title-scenes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ book_id: bId }) })
     if (!res.ok) throw new Error('Auto-titling failed')
+    store.readerStoryCache = null
     await fetchTree()
   } catch(e) { showToast("Auto-titling failed.", "error") }
 }
