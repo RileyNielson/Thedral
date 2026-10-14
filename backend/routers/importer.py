@@ -3,6 +3,8 @@ import uuid
 import zipfile
 import shutil
 import tempfile
+import subprocess
+import sys
 from urllib.parse import unquote, urlparse
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
@@ -152,6 +154,35 @@ def _parse_rtf(path: str):
 def discover_local_files():
     return scan_local_manuscripts(with_status=True)
 
+def _native_choose(kind: str) -> str:
+    """Open the operating system's own chooser, which can select .scriv packages that browsers cannot."""
+    folder = kind == "folder"
+    if sys.platform == "darwin":
+        verb = "choose folder" if folder else "choose file"
+        script = f'POSIX path of ({verb} with prompt "Choose a Scrivener project (.scriv) or manuscript")'
+        cmd = ["osascript", "-e", script]
+    elif sys.platform.startswith("win"):
+        if folder:
+            ps = "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; if($d.ShowDialog() -eq 'OK'){$d.SelectedPath}"
+        else:
+            ps = "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; if($d.ShowDialog() -eq 'OK'){$d.FileName}"
+        cmd = ["powershell", "-NoProfile", "-Command", ps]
+    else:
+        cmd = ["zenity", "--file-selection"] + (["--directory"] if folder else [])
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        raise HTTPException(501, detail="This computer can't open a chooser from Thedral. Paste the path instead.")
+    return result.stdout.strip().rstrip("/") if result.returncode == 0 else ""
+
+
+@router.post("/api/import/choose")
+def choose_local_path(kind: str = "folder"):
+    if kind not in {"folder", "file"}:
+        raise HTTPException(400, detail="kind must be 'folder' or 'file'")
+    return {"path": _native_choose(kind)}
+
+
 @router.post("/api/import/local-path")
 def import_local_path(payload: LocalPathImport):
     p = _clean_user_path(payload.path)
@@ -185,7 +216,7 @@ def preview_local_path(payload: LocalPathImport):
         raise HTTPException(400, detail=f"Import Preview Failed: {str(e)}")
 
 @router.post("/api/import/upload")
-async def import_uploaded_file(file: UploadFile = File(...)):
+def import_uploaded_file(file: UploadFile = File(...)):
     filename = file.filename or "Uploaded_Manuscript"
     temp_dir = str(EXPORTS_DIR)
     temp_path = os.path.join(temp_dir, f"temp_{uuid.uuid4().hex[:6]}_{os.path.basename(filename)}")
@@ -207,7 +238,7 @@ async def import_uploaded_file(file: UploadFile = File(...)):
 
 
 @router.post("/api/import/preview/upload")
-async def preview_uploaded_file(file: UploadFile = File(...)):
+def preview_uploaded_file(file: UploadFile = File(...)):
     filename = file.filename or "Uploaded_Manuscript"
     temp_path = os.path.join(str(EXPORTS_DIR), f"temp_{uuid.uuid4().hex[:6]}_{os.path.basename(filename)}")
     extract_dir = temp_path + "_extracted"

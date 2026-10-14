@@ -11,7 +11,7 @@
         type="file" 
         ref="fileInput" 
         @change="handleFileUpload" 
-        accept=".docx,.doc,.txt,.md,.rtf,.zip" 
+        accept=".docx,.doc,.txt,.md,.rtf,.zip,.scriv,.scrivx" 
         class="hidden" 
       />
 
@@ -124,7 +124,7 @@
             />
             <button type="submit" :disabled="!typedPath.trim() || isImporting || isPreviewing" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 font-bold rounded-lg text-xs transition">Preview</button>
           </form>
-          <p class="text-[10px] text-zinc-500">A .scriv project is a folder, so the Browse button can't pick it. Paste its path (drag the folder into this box, or in Finder choose Option-Cmd-C), or upload a ZIP of it.</p>
+          <p class="text-[10px] text-zinc-500">A .scriv project is a folder, so the file picker can't select it. Use "Choose Scrivener project..." below, paste its path, or upload a ZIP of it.</p>
         </div>
         <div class="flex items-center justify-between">
           <div class="text-xs text-zinc-400">
@@ -138,6 +138,16 @@
             class="px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition border border-zinc-700/50"
           >
             <Upload class="w-3.5 h-3.5" /> Browse File...
+          </button>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <div class="text-[10px] text-zinc-500">Scrivener projects are folders. Use this chooser to pick the .scriv project directly.</div>
+          <button
+            @click="chooseScrivener"
+            :disabled="isImporting || isPreviewing"
+            class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 text-xs font-bold rounded-lg shrink-0 transition"
+          >
+            Choose Scrivener project...
           </button>
         </div>
       </div>
@@ -213,9 +223,23 @@ const readResponse = async (response, fallback) => {
 }
 
 const friendlyError = (e) =>
-  e instanceof TypeError
+  e?.name === 'TimeoutError'
+    ? 'The preview took too long. Large Scrivener zips with many images are slow; try "Choose Scrivener project..." instead.'
+    : e instanceof TypeError
     ? 'Could not reach the Thedral server. Make sure the launcher window is still open, then reload this page.'
     : e.message
+
+const chooseScrivener = async () => {
+  try {
+    const response = await fetch(`${API_BASE}/api/import/choose?kind=folder`, { method: 'POST' })
+    const data = await readResponse(response, 'Could not open the chooser')
+    if (!data.path) return
+    typedPath.value = data.path
+    await previewLocalFile(data.path)
+  } catch (e) {
+    showToast(friendlyError(e), 'error')
+  }
+}
 
 const previewTypedPath = () => previewLocalFile(typedPath.value.trim())
 
@@ -328,7 +352,8 @@ const handleFileUpload = async (event) => {
   try {
     const res = await fetch(`${API_BASE}/api/import/preview/upload`, {
       method: 'POST',
-      body: fd
+      body: fd,
+      signal: AbortSignal.timeout(120000)
     })
     const data = await readResponse(res, 'Upload preview failed')
     previewTitle.value = data.title
