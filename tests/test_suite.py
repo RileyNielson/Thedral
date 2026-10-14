@@ -940,6 +940,21 @@ if api_books:
             f"/api/analytics/reader-story/{active_test_book}",
             json={"scene_id": "not_a_scene", "content": "Text."},
         )
+        import backend.routers.analytics as _analytics_module
+        _original_analyze = _analytics_module.analyze_reader_story
+        def _flaky_analyze(scenes, scene_id, content, *args, **kwargs):
+            if scene_id == feedback_scene["id"]:
+                raise RuntimeError("simulated analyzer bug")
+            return _original_analyze(scenes, scene_id, content, *args, **kwargs)
+        _analytics_module.analyze_reader_story = _flaky_analyze
+        try:
+            flaky_res = client.get(f"/api/analytics/reader-story/{active_test_book}/all")
+        finally:
+            _analytics_module.analyze_reader_story = _original_analyze
+        record_test(
+            "Whole-book reader analysis survives one failing scene",
+            flaky_res.status_code == 200 and flaky_res.json().get("failed_scenes") == 1,
+        )
         record_test(
             "Reader story for a non-scene node returns an empty result instead of an error",
             story_chapter_res.status_code == 200 and "not in the manuscript" in story_chapter_res.json().get("summary", ""),

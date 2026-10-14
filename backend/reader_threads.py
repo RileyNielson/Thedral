@@ -103,6 +103,8 @@ def _find_reader_threads(
         if candidate["kind"] == "commitment":
             candidate["recurrence"] += 2
     current_paragraphs = _paragraphs(current_text)
+    current_terms = _key_terms(current_text)
+    paragraph_terms = [_key_terms(paragraph) for paragraph in current_paragraphs]
     events = []
     for promise in candidates:
         same_scene = promise["scene_index"] == selected_index
@@ -127,16 +129,16 @@ def _find_reader_threads(
             })
             continue
 
-        overlap = promise["terms"] & _key_terms(current_text)
+        overlap = promise["terms"] & current_terms
         if not overlap:
             continue
         matching_paragraph = next(
             (
-                paragraph for paragraph in current_paragraphs
-                if len(promise["terms"] & _key_terms(paragraph)) >= min(2, len(promise["terms"]))
+                paragraph for paragraph, terms in zip(current_paragraphs, paragraph_terms)
+                if len(promise["terms"] & terms) >= min(2, len(promise["terms"]))
                 or (
                     len(promise["terms"]) == 1
-                    and bool(promise["terms"] & _key_terms(paragraph))
+                    and bool(promise["terms"] & terms)
                     and bool(cues["resolution"].search(paragraph))
                 )
             ),

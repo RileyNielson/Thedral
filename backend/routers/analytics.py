@@ -1,3 +1,4 @@
+import logging
 import threading
 
 from fastapi import APIRouter, HTTPException
@@ -163,18 +164,26 @@ def get_reader_story_analytics(book_id: str, payload: ReaderExperienceAnalyticsR
 @router.get("/api/analytics/reader-story/{book_id}/all")
 def get_all_reader_story_analytics(book_id: str):
     scenes = _reader_story_scenes(book_id)
+    analyses = []
+    failed = 0
+    for scene in scenes:
+        try:
+            analysis = analyze_reader_story(scenes, scene["scene_id"], scene["content"])
+        except Exception:
+            # One unusual scene must not block the rest; the live panel retries it when opened.
+            logging.getLogger(__name__).exception("Reader analysis failed for scene %s", scene["scene_id"])
+            failed += 1
+            continue
+        analyses.append({
+            "scene_id": scene["scene_id"],
+            "title": scene["title"],
+            "content": scene["content"],
+            "analysis": analysis,
+        })
     return {
         "book_id": book_id,
         "scene_count": len(scenes),
-        "analyses": [
-            {
-                "scene_id": scene["scene_id"],
-                "title": scene["title"],
-                "content": scene["content"],
-                "analysis": analyze_reader_story(scenes, scene["scene_id"], scene["content"]),
-            }
-            for scene in scenes
-        ],
+        "failed_scenes": failed,
+        "analyses": analyses,
         "method": "Transparent text-pattern rules; no generative AI is used for these insights.",
     }
-

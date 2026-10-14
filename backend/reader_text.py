@@ -1,4 +1,5 @@
 import re
+from functools import lru_cache
 
 from backend.text_utils import html_to_text
 from backend.reader_cues import _key_terms, _sentences
@@ -13,10 +14,12 @@ _IDIOMS = re.compile(
 )
 
 
+@lru_cache(maxsize=50000)
 def _clean(text: str) -> str:
     return _IDIOMS.sub(" ", text)
 
 
+@lru_cache(maxsize=200000)
 def _search(pattern: re.Pattern, text: str):
     return pattern.search(_clean(text))
 

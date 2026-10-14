@@ -295,7 +295,8 @@ const confirmImport = async () => {
           )
           const analysis = await readResponse(analysisResponse, 'Reader analysis failed')
           store.readerStoryCache = analysis
-          analyzedSceneCount.value = analysis.scene_count
+          analyzedSceneCount.value = analysis.scene_count - (analysis.failed_scenes || 0)
+          if (analysis.failed_scenes) showToast(`${analysis.failed_scenes} scene(s) couldn't be pre-analyzed; they'll be analyzed when you open them.`, 'info')
           store.activeInspectorTab = 'reader'
         } catch (error) {
           analysisError.value = error.message || 'Could not prepare the reader lens.'
