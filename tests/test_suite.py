@@ -911,6 +911,14 @@ if api_books:
             and story_read_res.json().get("method", "").startswith("Transparent text-pattern rules")
             and any(turn.get("kind") == "yes_but" for turn in story_read_res.json().get("turns", [])),
         )
+        story_chapter_res = client.post(
+            f"/api/analytics/reader-story/{active_test_book}",
+            json={"scene_id": "not_a_scene", "content": "Text."},
+        )
+        record_test(
+            "Reader story for a non-scene node returns an empty result instead of an error",
+            story_chapter_res.status_code == 200 and "not in the manuscript" in story_chapter_res.json().get("summary", ""),
+        )
         imported_story_read = client.get(
             f"/api/analytics/reader-story/{active_test_book}/all"
         )

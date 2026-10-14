@@ -782,7 +782,7 @@ export function useInspectorState() {
     const sameScene = readerStoryAnalysis.value?.scene_id === sceneId
     if (!sameScene) readerStoryAnalysis.value = null
     readerStoryError.value = ''
-    if (!sceneId || !bookId || store.activeInspectorTab !== 'reader') {
+    if (!sceneId || !bookId || store.activeNode?.node_type !== 'SCENE' || store.activeInspectorTab !== 'reader') {
       readerStoryLoading.value = false
       return
     }
@@ -801,14 +801,20 @@ export function useInspectorState() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scene_id: sceneId, content: store.activeNode?.content || '' })
       })
-      if (!response.ok) throw new Error(`Could not follow story threads (HTTP ${response.status}).`)
+      if (!response.ok) {
+        let detail = ''
+        try { detail = (await response.json()).detail || '' } catch { /* body was not JSON */ }
+        throw new Error(`Could not follow story threads (HTTP ${response.status}${detail ? `: ${detail}` : ''}).`)
+      }
       const result = await response.json()
       if (requestId === readerStoryRequest && store.activeNode?.id === sceneId) {
         readerStoryAnalysis.value = result
       }
     } catch (error) {
       if (requestId === readerStoryRequest && store.activeNode?.id === sceneId) {
-        readerStoryError.value = error.message || 'Could not follow story threads.'
+        readerStoryError.value = error instanceof TypeError
+          ? 'Could not reach the Thedral server. Make sure the launcher window is still open, then reload this page.'
+          : error.message || 'Could not follow story threads.'
       }
     } finally {
       if (requestId === readerStoryRequest) readerStoryLoading.value = false

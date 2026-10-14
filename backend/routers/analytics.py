@@ -156,9 +156,7 @@ def get_reader_experience_analytics(book_id: str, payload: ReaderExperienceAnaly
 @router.post("/api/analytics/reader-story/{book_id}")
 def get_reader_story_analytics(book_id: str, payload: ReaderExperienceAnalyticsRequest):
     scenes = _reader_story_scenes(book_id)
-    if not any(scene["scene_id"] == payload.scene_id for scene in scenes):
-        raise HTTPException(404, "Scene not found in this manuscript")
-
+    # An unknown id (a chapter, or a scene moved or archived mid-edit) gets the analyzer's empty result, not an error.
     return analyze_reader_story(scenes, payload.scene_id, payload.content)
 
 
