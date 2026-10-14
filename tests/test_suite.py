@@ -855,6 +855,31 @@ _t0 = _time.time()
 _analyze_story([{"scene_id": "long", "title": "Long", "content": _long_html}], "long", _long_html)
 record_test("Reader analysis stays fast on a very long single scene", _time.time() - _t0 < 15)
 
+import sys as _sys, types as _types
+with tempfile.TemporaryDirectory() as title_temp:
+    title_db = Path(title_temp) / "t.sqlite"
+    init_db(title_db)
+    title_conn = get_db(title_db)
+    _long = "<p>" + "The storm broke over the harbor and everyone ran. " * 3 + "</p>"
+    title_conn.executemany("""
+        INSERT INTO binder_nodes (id, parent_id, node_type, title, content, sort_order) VALUES (?, ?, ?, ?, ?, ?)
+    """, [
+        ("tb", None, "BOOK", "T", "", 1), ("tc", "tb", "CHAPTER", "C", "", 1),
+        ("t1", "tc", "SCENE", "Scene 1", _long, 1), ("t2", "tc", "SCENE", "Opening", _long, 2),
+        ("t3", "tc", "SCENE", "Untitled", _long, 3), ("t4", "tc", "SCENE", "Scene 4", "<p>Hi</p>", 4),
+    ])
+    title_conn.commit()
+    title_conn.close()
+    _fake = _types.ModuleType("ollama")
+    _fake.chat = lambda **kwargs: {"message": {"content": "Storm Over Harbor"}}
+    with patch.dict(_sys.modules, {"ollama": _fake}), patch("backend.routers.binder_tools.ENABLE_AI", True), \
+         patch("backend.routers.binder_tools.get_db", lambda: get_db(title_db)):
+        title_res = client.post("/api/binder/auto-title-scenes", json={"book_id": "tb"}).json()
+record_test(
+    "Auto-title retitles placeholder scenes and reports what it skipped",
+    title_res["updated_count"] == 2 and title_res["skipped_named"] == 1 and title_res["skipped_short"] == 1,
+)
+
 health_res = client.get("/api/health")
 record_test(
     "GET /api/health Reports Active AI Mode",

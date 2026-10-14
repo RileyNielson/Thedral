@@ -190,7 +190,17 @@ const autoTitleScenes = async () => {
     if (!res.ok) throw new Error('Auto-titling failed')
     store.readerStoryCache = null
     const result = await res.json()
-    showToast(result.ai_generated ? `AI titled ${result.updated_count} scene(s). Rename any you dislike.` : 'AI is off, so scenes were not retitled.', 'info')
+    if (!result.ai_generated) {
+      showToast('AI is off or Ollama is not installed, so scenes were not retitled.', 'info')
+    } else if (result.updated_count) {
+      showToast(`AI titled ${result.updated_count} scene(s). Rename any you dislike.`, 'info')
+    } else {
+      const reasons = []
+      if (result.skipped_named) reasons.push(`${result.skipped_named} already have names (only “Scene 1”-style or untitled scenes are retitled)`)
+      if (result.skipped_short) reasons.push(`${result.skipped_short} are too short`)
+      if (result.failed) reasons.push(`${result.failed} failed${result.error ? `: ${result.error}` : ' (the AI gave no usable title)'}`)
+      showToast(`No scenes were retitled: ${reasons.join('; ') || 'there are no scenes in this book'}.`, 'info')
+    }
     await fetchTree()
   } catch(e) { showToast("Auto-titling failed.", "error") }
 }

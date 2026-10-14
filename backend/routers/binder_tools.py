@@ -90,12 +90,21 @@ async def auto_title_scenes(payload: AutoTitleRequest):
     scenes = c.fetchall()
 
     updated = 0
+    skipped_named = 0
+    skipped_short = 0
+    failed = 0
+    first_error = ""
+    placeholder = re.compile(r"^\s*(?:(?:scene|section|untitled(?: scene)?|new scene|chapter scene)\s*\d*|\d+|)\s*$", re.I)
     prompt_tpl = "Read this scene opening and give it a punchy 2-to-4 word cinematic title. OUTPUT ONLY THE TITLE - NO QUOTES.\n\nScene Opening:\n"
 
     for sc in scenes:
         text = html_to_text(sc["content"] or "").strip()
-        if len(text) < 30: continue
-        if not re.match(r"^Scene\s+\d+$", sc["title"], re.I): continue
+        if not placeholder.match(sc["title"] or ""):
+            skipped_named += 1
+            continue
+        if len(text) < 30:
+            skipped_short += 1
+            continue
 
         try:
             resp = await asyncio.to_thread(
@@ -110,11 +119,18 @@ async def auto_title_scenes(payload: AutoTitleRequest):
                 with conn:
                     conn.execute("UPDATE binder_nodes SET title = ? WHERE id = ?", (clean_title.title(), sc["id"]))
                 updated += 1
-        except Exception:
-            continue
+            else:
+                failed += 1
+        except Exception as error:
+            failed += 1
+            first_error = first_error or str(error)[:200]
 
     conn.close()
-    return {"status": "success", "updated_count": updated, "ai_generated": True}
+    return {
+        "status": "success", "updated_count": updated, "ai_generated": True,
+        "skipped_named": skipped_named, "skipped_short": skipped_short,
+        "failed": failed, "error": first_error,
+    }
 
 @router.post("/api/binder/triage-scene/{scene_id}")
 async def master_triage_scene(scene_id: str):
