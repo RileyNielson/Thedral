@@ -993,6 +993,7 @@ const readerStoryGroups = computed(() => {
   const analysis = readerStoryAnalysis.value
   if (!analysis) return []
   return [
+    { key: 'experience-moments', items: analysis.experience_moments || [] },
     { key: 'threads', items: analysis.threads || [] },
     { key: 'turns', items: analysis.turns || [] },
     { key: 'emotional-payoffs', items: analysis.emotional_payoffs || [] },

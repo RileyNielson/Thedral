@@ -591,6 +591,51 @@ record_test(
     and "dog died" in same_scene_loss["emotional_payoffs"][0]["payoff_evidence"],
 )
 
+noisy_text = (
+    "I was standing dead center in the crossroads. He stopped dead and the mirror was held together by wire. "
+    "Everyone loved to give that shadow credit. Frantically, my trembling hands shook. "
+    "\"Did you hear that?\" a guard shrieked. Who gave the order to butcher my father in that alley?"
+)
+noisy_read = analyze_reader_story(
+    [{"scene_id": "noisy", "title": "Chase", "content": noisy_text}], "noisy", noisy_text
+)
+record_test(
+    "Reader story ignores idioms, physical fear, and guard dialogue instead of inventing grief or care",
+    not noisy_read["emotional_payoffs"]
+    and not noisy_read["empathy_moments"]
+    and all("Did you hear" not in item["payoff_evidence"] for item in noisy_read["threads"])
+    and any("father" in item["payoff_evidence"] for item in noisy_read["threads"]),
+)
+
+from backend.reader_feel import analyze_reader_feel
+
+def _feel_scene():
+    long_run = " ".join(["The corridor ran on past more gilded doors and statues, and the guards kept coming."] * 5)
+    paragraphs = [
+        "Don't get caught. Of all my rules for theft, it was the only one I hadn't broken until now.",
+        "I walked like a cat on a hot roof, and I hated every minute of it. Why did tonight have to be the night?",
+        long_run, "Run.", "Move or die.", "Hide.",
+        "I had known it was tonight; in fact I'd bet my entire escape on it. " + long_run,
+        "In theory.",
+        "\"Perring is half-blind,\" the Captain hissed, trembling. \"Quiet! You want to summon the Knight?\"",
+        "The guards were terrified. \"The Knight comes for us,\" the boy whispered, shaking.",
+        "Lord Perring told them the Knight had cornered him. Of course, I thought; I was the one who did it.",
+        "Our fear of the Knight grew. Then the Knight left, and the Knight was gone.",
+        "Soon, the Knight was going to have to be afraid of me.",
+    ]
+    return "".join(f"<p>{p}</p>" for p in paragraphs) + "<p>" + "I kept going like a thief with a plan. " * 20 + "</p>"
+
+feel_kinds = {item["kind"] for item in analyze_reader_feel(_feel_scene())}
+record_test(
+    "Reader feel estimates hook, undercut, fear of the unseen, and closing target from prose alone",
+    {"hook", "undercut", "fear_of_unseen"}.issubset(feel_kinds),
+    detail=str(feel_kinds),
+)
+record_test(
+    "Reader feel stays silent on chapter headings and illustration tags",
+    not analyze_reader_feel("<p>CHAPTER I.</p><p>[Illustration: a house]</p>" * 6),
+)
+
 import backend.wiktionary_lexicon as wiktionary
 from backend.wiktionary_lexicon import expand_lexical_terms, get_lexicon_status, is_english_word
 

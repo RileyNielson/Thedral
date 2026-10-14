@@ -131,6 +131,15 @@ if HEALTH="$(curl -fsS "$BASE_URL/api/health" 2>/dev/null)"; then
     fi
 fi
 
+if PORT_OWNER="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $1 " (PID " $2 ")"; exit}')" \
+    && [ -n "$PORT_OWNER" ]; then
+    echo "ERROR: Port $PORT is already in use by $PORT_OWNER, and it is not a healthy Thedral."
+    echo "Close that program (or run: kill ${PORT_OWNER##*PID }" | sed 's/)$//; s/$/)/'
+    echo "Then run this launcher again."
+    read -r -p "Press Return to close."
+    exit 1
+fi
+
 if ! "$PYTHON" -c "from backend.wiktionary_lexicon import get_lexicon_status; raise SystemExit(0 if get_lexicon_status().get('available') else 1)" >/dev/null 2>&1; then
     echo
     echo "Optional reader enhancement: English Wiktionary data is not installed."

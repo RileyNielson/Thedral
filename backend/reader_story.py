@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from backend.config import WIKTIONARY_DB_PATH
+from backend.reader_feel import analyze_reader_feel
 from backend.text_utils import html_to_text
 from backend.wiktionary_lexicon import expand_lexical_terms, get_lexicon_status
 
@@ -19,8 +20,8 @@ _STOP_WORDS = {
 }
 _PROMISE_CUES = re.compile(
     r"\b(?:promise[sd]?|swore|sworn|vowed|owe[sd]?|have to|has to|"
-    r"must|won['’]t stop|won['’]t rest|until i|until we|one day|"
-    r"going to|set out to|need to|needs to)\b",
+    r"must|won['’]t stop|won['’]t rest|one day|"
+    r"was going to|set out to|need to|needs to)\b",
     re.IGNORECASE,
 )
 _POSITIVE_CUES = re.compile(
@@ -42,18 +43,19 @@ _RESOLUTION_CUES = re.compile(
     re.IGNORECASE,
 )
 _LOSS_CUES = re.compile(
-    r"\b(?:died|death|dead|funeral|grief|mourn(?:ed|ing)?|goodbye|"
-    r"never came back|was gone forever)\b",
+    r"\b(?:died|dies|funeral|grief|mourn(?:ed|ing)?|goodbye|killed|murdered|"
+    r"butchered|passed away|death of|never came back|(?:was|is) gone forever)\b",
     re.IGNORECASE,
 )
 _CARE_CUES = re.compile(
-    r"\b(?:loved|love|trusted|held|protected|comforted|waited for|"
-    r"slept beside|followed|loyal|best friend|saved|cared for)\b",
+    r"\b(?:loved(?! to\b)|trusted|protected|comforted|waited for|slept beside|"
+    r"loyal|best friend|cared for|raised me|taught me|tucked me|"
+    r"held (?:(?:the )?\w+['’]s|his|her|their|my|our) (?:hand|paw|face|head|body)s?)\b",
     re.IGNORECASE,
 )
 _VULNERABILITY_CUES = re.compile(
-    r"\b(?:afraid|alone|ashamed|terrified|shaking|trembl\w*|cried|wept|"
-    r"begged|wounded|injured|confessed|admitted|couldn['’]t stop)\b",
+    r"\b(?:afraid|alone|ashamed|terrified|cried|wept|sobbed|"
+    r"begged|confessed|admitted|couldn['’]t stop crying)\b",
     re.IGNORECASE,
 )
 _REVERSAL_CUES = re.compile(
@@ -141,16 +143,65 @@ def _named_terms(text: str) -> set[str]:
     }
 
 
+_IDIOMS = re.compile(
+    r"\b(?:dead (?:center|centre|sprint|silent|still|end|air|weight|quiet|ahead|"
+    r"asleep|tired|serious|calm|on)|stopped dead|stopped short|"
+    r"(?:held|hold|holding) (?:together|on|tight|steady|up|back|still|out)|"
+    r"(?:dead|stopped) in (?:his|her|their|my) tracks|wrong (?:way|turn|side|door)|"
+    r"dead (?:rodents?|leaves|wood|weeds?))\b",
+    re.IGNORECASE,
+)
+
+
+def _clean(text: str) -> str:
+    return _IDIOMS.sub(" ", text)
+
+
+def _search(pattern: re.Pattern, text: str):
+    return pattern.search(_clean(text))
+
+
+def _in_dialogue(sentence: str) -> bool:
+    return any(mark in sentence for mark in '"“”')
+
+
+_KIN = {
+    "father", "mother", "brother", "sister", "son", "daughter", "wife", "husband",
+    "mentor", "friend", "dad", "mom", "grandmother", "grandfather", "uncle", "aunt",
+}
+
+
+_GENERIC = {
+    "his", "her", "him", "she", "its", "our", "who", "how", "why", "all", "one",
+    "was", "had", "for", "and", "but", "not", "the", "you", "own", "way", "day",
+    "night", "time", "life", "eyes", "hand", "hands", "heart", "back", "like",
+}
+
+
+def _anchors(text: str) -> set[str]:
+    terms = {re.sub(r"['’]s$", "", term) for term in _key_terms(text)}
+    return {term for term in terms if len(term) > 2 and term not in _GENERIC}
+
+
+def _windows(text: str):
+    """Yield (sentence, sentence plus its predecessor), newest first, so a pronoun
+    subject can lean on the sentence that names who it is."""
+    sentences = _sentences(text)
+    for index in range(len(sentences) - 1, -1, -1):
+        previous = sentences[index - 1] if index else ""
+        yield sentences[index], f"{previous} {sentences[index]}"
+
+
 def _first_matching_sentence(text: str, pattern: re.Pattern) -> str:
     return next(
-        (sentence for sentence in _sentences(text) if pattern.search(sentence)),
+        (sentence for sentence in _sentences(text) if _search(pattern, sentence)),
         "",
     )
 
 
 def _last_matching_sentence(text: str, pattern: re.Pattern) -> str:
     return next(
-        (sentence for sentence in reversed(_sentences(text)) if pattern.search(sentence)),
+        (sentence for sentence in reversed(_sentences(text)) if _search(pattern, sentence)),
         "",
     )
 
@@ -160,8 +211,8 @@ def _scene_text(scene: dict) -> str:
 
 
 def _state(text: str, cues: dict[str, re.Pattern]) -> str | None:
-    positive = bool(cues["positive"].search(text))
-    negative = bool(cues["negative"].search(text))
+    positive = bool(_search(cues["positive"], text))
+    negative = bool(_search(cues["negative"], text))
     if positive == negative:
         return None
     return "yes" if positive else "no"
@@ -217,8 +268,11 @@ def _promise_candidates(scenes: list[dict], cues: dict[str, re.Pattern]) -> list
     for scene_index, scene in enumerate(scenes):
         for paragraph_index, paragraph in enumerate(_paragraphs(_scene_text(scene)), 1):
             for sentence in _sentences(paragraph):
-                is_question = "?" in sentence
-                is_promise = bool(cues["promise"].search(sentence))
+                is_question = (
+                    "?" in sentence and not _in_dialogue(sentence)
+                    and len(sentence.split()) >= 6
+                )
+                is_promise = bool(_search(cues["promise"], sentence))
                 if not (is_question or is_promise):
                     continue
                 terms = _key_terms(sentence)
@@ -244,6 +298,14 @@ def _find_reader_threads(
         {**scenes[selected_index], "content": current_text},
     ]
     candidates = _promise_candidates(reading_scenes, cues)
+    for candidate in candidates:
+        rest = current_text.replace(candidate["evidence"], " ")
+        rest_words = re.findall(r"[a-z][a-z'’-]{2,}", rest.lower())
+        candidate["recurrence"] = sum(
+            1 for term in candidate["terms"] if 1 <= rest_words.count(term) <= 8
+        )
+        if candidate["kind"] == "commitment":
+            candidate["recurrence"] += 2
     current_paragraphs = _paragraphs(current_text)
     events = []
     for promise in candidates:
@@ -265,6 +327,7 @@ def _find_reader_threads(
                 "payoff_scene_id": reading_scenes[selected_index]["scene_id"],
                 "confidence": "Clear setup",
                 "paragraph": promise["paragraph"],
+                "recurrence": promise["recurrence"],
             })
             continue
 
@@ -320,7 +383,11 @@ def _find_reader_threads(
                 None,
             ),
         })
-    return events[-8:]
+    setups = [event for event in events if event["kind"] == "setup"]
+    others = [event for event in events if event["kind"] != "setup"]
+    setups = sorted(setups, key=lambda event: -event.pop("recurrence"))[:3]
+    setups.sort(key=lambda event: event["paragraph"])
+    return (others + setups)[-8:]
 
 
 def _loss_and_care(
@@ -335,7 +402,14 @@ def _loss_and_care(
         loss_match = cues["loss"].search(paragraph)
         if loss_match:
             prior_text += "\n\n" + paragraph[:loss_match.start()]
-        care_evidence = _last_matching_sentence(prior_text, cues["care"])
+        loss_anchors = _anchors(loss_evidence)
+        care_evidence = next(
+            (
+                sentence for sentence, window in _windows(prior_text)
+                if _search(cues["care"], sentence) and loss_anchors & _anchors(window)
+            ),
+            "",
+        )
         if loss_evidence and care_evidence:
             care_scene = next(
                 (
@@ -379,9 +453,15 @@ def _empathy_moments(
         vulnerability_match = cues["vulnerability"].search(paragraph)
         if vulnerability_match:
             prior_text += "\n\n" + paragraph[:vulnerability_match.start()]
-        care_evidence = _last_matching_sentence(prior_text, cues["care"])
-        shared_terms = _named_terms(prior_text) & _named_terms(vulnerability_evidence)
-        if vulnerability_evidence and care_evidence and shared_terms:
+        vulnerability_anchors = _anchors(vulnerability_evidence)
+        care_evidence = next(
+            (
+                sentence for sentence, window in _windows(prior_text)
+                if _search(cues["care"], sentence) and vulnerability_anchors & _anchors(window)
+            ),
+            "",
+        )
+        if vulnerability_evidence and care_evidence:
             care_scene = next(
                 (
                     scene for scene in reversed(scenes[:selected_index])
@@ -544,8 +624,12 @@ def analyze_reader_story(
     subtext_moments = _subtext_moments(text)
     irony_moments = _irony_moments(text, cues)
     trust_shifts = _trust_shifts(scenes, selected_index, text, cues)
+    experience_moments = analyze_reader_feel(current_content)
+    for moment in experience_moments:
+        moment["setup_scene_id"] = selected_scene_id
+        moment["payoff_scene_id"] = selected_scene_id
     insights = (
-        len(threads) + len(turns) + len(emotional_payoffs)
+        len(experience_moments) + len(threads) + len(turns) + len(emotional_payoffs)
         + len(empathy_moments) + len(subtext_moments)
         + len(irony_moments) + len(trust_shifts)
     )
@@ -558,6 +642,7 @@ def analyze_reader_story(
         "scene_id": selected_scene_id,
         "scene_index": selected_index,
         "summary": summary,
+        "experience_moments": experience_moments,
         "threads": threads,
         "turns": turns,
         "emotional_payoffs": emotional_payoffs,
