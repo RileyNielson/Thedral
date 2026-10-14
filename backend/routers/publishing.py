@@ -4,16 +4,11 @@ import json
 import time
 import uuid
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from backend.database import get_db
 from backend.text_utils import html_to_text
-from backend.publishing import (
-    generate_narrator_pack, 
-    generate_authorship_certificate, 
-    generate_query_synopsis,
-    generate_manuscript_prose_signals
-)
+from backend.publishing import generate_query_synopsis
 from backend.compiler import compile_book_to_docx
 from backend.config import ENABLE_AI, EXPORTS_DIR
 
@@ -41,25 +36,6 @@ class PublishingProfileRequest(BaseModel):
     query_text: str = ""
     sample_scene_ids: list[str] = Field(default_factory=list)
     included_chapter_ids: list[str] | None = None
-
-
-class SubmissionCreate(BaseModel):
-    recipient: str
-    sent_at: str
-    status: str = "SENT"
-    response_due: str = ""
-    notes: str = ""
-
-
-class SubmissionUpdate(BaseModel):
-    recipient: str
-    sent_at: str
-    status: str
-    response_due: str = ""
-    notes: str = ""
-
-
-SUBMISSION_STATUSES = {"PREPARING", "SENT", "REQUESTED", "REJECTED", "ACCEPTED", "WITHDRAWN"}
 
 
 def _book_or_404(conn, book_id: str):
@@ -148,68 +124,6 @@ def save_publishing_profile(book_id: str, payload: PublishingProfileRequest):
     return {"status": "saved"}
 
 
-@router.get("/api/publishing/submissions/{book_id}")
-def get_submissions(book_id: str):
-    conn = get_db()
-    _book_or_404(conn, book_id)
-    rows = conn.execute(
-        "SELECT id, recipient, sent_at, status, response_due, notes, created_at, updated_at FROM submission_records WHERE book_id = ? ORDER BY sent_at DESC, created_at DESC",
-        (book_id,),
-    ).fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-
-@router.post("/api/publishing/submissions/{book_id}")
-def create_submission(book_id: str, payload: SubmissionCreate):
-    if payload.status not in SUBMISSION_STATUSES:
-        raise HTTPException(400, "Unsupported submission status")
-    if not payload.recipient.strip():
-        raise HTTPException(400, "Recipient is required")
-    conn = get_db()
-    _book_or_404(conn, book_id)
-    record_id = f"submission_{uuid.uuid4().hex}"
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    with conn:
-        conn.execute("""
-            INSERT INTO submission_records
-            (id, book_id, recipient, sent_at, status, response_due, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (record_id, book_id, payload.recipient.strip(), payload.sent_at, payload.status, payload.response_due, payload.notes, now, now))
-    conn.close()
-    return {"id": record_id, "status": "created"}
-
-
-@router.put("/api/publishing/submissions/{submission_id}")
-def update_submission(submission_id: str, payload: SubmissionUpdate):
-    if payload.status not in SUBMISSION_STATUSES:
-        raise HTTPException(400, "Unsupported submission status")
-    if not payload.recipient.strip():
-        raise HTTPException(400, "Recipient is required")
-    conn = get_db()
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    with conn:
-        result = conn.execute("""
-            UPDATE submission_records SET recipient = ?, sent_at = ?, status = ?, response_due = ?, notes = ?, updated_at = ?
-            WHERE id = ?
-        """, (payload.recipient.strip(), payload.sent_at, payload.status, payload.response_due, payload.notes, now, submission_id))
-    conn.close()
-    if not result.rowcount:
-        raise HTTPException(404, "Submission record not found")
-    return {"status": "updated"}
-
-
-@router.delete("/api/publishing/submissions/{submission_id}")
-def delete_submission(submission_id: str):
-    conn = get_db()
-    with conn:
-        result = conn.execute("DELETE FROM submission_records WHERE id = ?", (submission_id,))
-    conn.close()
-    if not result.rowcount:
-        raise HTTPException(404, "Submission record not found")
-    return {"status": "deleted"}
-
-
 @router.get("/api/publishing/exports/{book_id}")
 def get_export_history(book_id: str):
     conn = get_db()
@@ -284,21 +198,6 @@ def create_export(payload: ExportRequest):
     return FileResponse(file_path, filename=filename, headers={"X-Thedral-Export-Id": export_id, "X-Thedral-Content-SHA256": content_hash})
 
 
-@router.get("/api/publishing/drafting-history")
-def get_drafting_history(book_id: str | None = None):
-    result = generate_authorship_certificate(book_id)
-    if result.get("status") != "success":
-        raise HTTPException(404, result.get("message", "No manuscript found"))
-    return result
-
-@router.get("/api/publishing/narrator-pack", response_class=PlainTextResponse)
-def get_narrator_pack(book_id: str | None = None):
-    return generate_narrator_pack(book_id)
-
-@router.get("/api/publishing/authorship-proof")
-def get_authorship_proof(book_id: str | None = None):
-    return generate_authorship_certificate(book_id)
-
 @router.post("/api/publishing/synopsis")
 def get_synopsis(payload: SynopsisRequest):
     if not ENABLE_AI:
@@ -307,12 +206,3 @@ def get_synopsis(payload: SynopsisRequest):
     ok = not text.startswith(("Could not generate", "Not enough scenes"))
     return {"synopsis": text, "ai_generated": ok, "engine": "local-ai" if ok else "deterministic"}
 
-@router.get("/api/publishing/prose-signals")
-def get_prose_signals(book_id: str | None = None):
-    """Count selected word and sentence patterns in a manuscript."""
-    return generate_manuscript_prose_signals(book_id)
-
-@router.get("/api/compile/docx")
-def download_manuscript(book_id: str | None = None):
-    out_path = compile_book_to_docx(book_id)
-    return FileResponse(out_path, filename="Thedral_Manuscript.docx")

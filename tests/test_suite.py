@@ -794,6 +794,36 @@ record_test(
     and conflicting_alias_response.status_code == 409,
 )
 
+with tempfile.TemporaryDirectory() as auto_temp:
+    auto_db_path = Path(auto_temp) / "auto.sqlite"
+    init_db(auto_db_path)
+    auto_conn = get_db(auto_db_path)
+    auto_conn.executemany("""
+        INSERT INTO binder_nodes (id, parent_id, node_type, title, content, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, [
+        ("auto_book", None, "BOOK", "Auto Book", "", 1),
+        ("auto_ch", "auto_book", "CHAPTER", "Chapter", "", 1),
+        ("auto_a", "auto_ch", "SCENE", "A", "Rowan Hale walked to Kestrel Bay. Rowan Hale waited.", 1),
+        ("auto_b", "auto_ch", "SCENE", "B", "Kestrel Bay was quiet. Rowan Hale left Kestrel Bay.", 2),
+    ])
+    auto_conn.commit()
+    auto_conn.close()
+    with patch("backend.routers.entities.get_db", lambda: get_db(auto_db_path)), \
+         patch("backend.routers.entities.get_lexicon_status", return_value={"available": False}):
+        auto_first = client.post("/api/entities/auto-detect/auto_book").json()
+        auto_types = {item["name"]: item["entity_type"] for item in auto_first["added"]}
+        auto_again = client.post("/api/entities/auto-detect/auto_book").json()
+        auto_removed = client.delete("/api/entities/rowan_hale")
+        auto_after_dismiss = client.post("/api/entities/auto-detect/auto_book").json()
+        auto_confirm = client.post("/api/entities/kestrel_bay/confirm")
+record_test(
+    "Auto-detect tracks confident names, guesses type, never re-adds, and respects dismissals",
+    auto_types == {"Rowan Hale": "CHARACTER", "Kestrel Bay": "LOCATION"}
+    and auto_again["added"] == [] and auto_removed.status_code == 200
+    and auto_after_dismiss["added"] == [] and auto_confirm.status_code == 200,
+)
+
 health_res = client.get("/api/health")
 record_test(
     "GET /api/health Reports Active AI Mode",
@@ -815,12 +845,6 @@ record_test("GET /api/entities Returns Canonical Cast", entities_res.status_code
 lore_res = client.get("/api/lore")
 record_test("GET /api/lore Returns Living Lexicon", lore_res.status_code == 200 and isinstance(lore_res.json(), list))
 
-authorship_res = client.get("/api/publishing/authorship-proof")
-record_test("GET /api/publishing/authorship-proof Generates Cryptographic Hash", authorship_res.status_code == 200 and "verification_hash" in authorship_res.json())
-
-signals_res = client.get("/api/publishing/prose-signals")
-record_test("GET /api/publishing/prose-signals Returns Measured Text Patterns", signals_res.status_code == 200 and "text_signals" in signals_res.json())
-
 api_books = tree_res.json()
 if api_books:
     active_test_book = api_books[0]["id"]
@@ -829,10 +853,6 @@ if api_books:
 
     profile_res = client.get(f"/api/publishing/profile/{active_test_book}")
     record_test("GET /api/publishing/profile Returns Saved Export Settings", profile_res.status_code == 200 and "included_chapter_ids" in profile_res.json())
-
-    history_res = client.get(f"/api/publishing/drafting-history?book_id={active_test_book}")
-    history_text = history_res.json().get("report_text", "").lower() if history_res.status_code == 200 else ""
-    record_test("GET /api/publishing/drafting-history Avoids Authorship Claims", history_res.status_code == 200 and "sha-256" in history_text and "does not" in history_text)
 
     proposals_res = client.get(f"/api/narrative/proposals?book_id={active_test_book}")
     record_test("GET /api/narrative/proposals Returns Pending Survey Suggestions", proposals_res.status_code == 200 and isinstance(proposals_res.json(), list))
@@ -1318,19 +1338,29 @@ record_test(
 client.delete(f"/api/node/{_ser_book['id']}")
 client.delete("/api/lore/Glimmerstone")
 
-_note_book = client.post("/api/node", json={"node_type": "BOOK", "title": "Note Book"}).json()
-_note_ch = client.post("/api/node", json={"node_type": "CHAPTER", "title": "C", "parent_id": _note_book["id"]}).json()
-_note_sc = client.post("/api/node", json={"node_type": "SCENE", "title": "S", "parent_id": _note_ch["id"]}).json()
-_note_made = client.post("/api/disclosures/author-note", json={"scene_id": _note_sc["id"], "disclosure_type": "INTENDED", "narrative_claim": "She is afraid."})
-_note_rows = client.get(f"/api/disclosures/scene/{_note_sc['id']}").json()
-_note_del = client.delete(f"/api/disclosures/{_note_rows[0]['id']}") if _note_rows else None
-_note_gone = client.delete("/api/disclosures/99999999")
+import sqlite3 as _sq, tempfile as _tf
+from backend.wiktionary_lexicon import expand_lexical_terms as _expand, get_lexicon_status as _lex_status
+_lex_dir = _tf.mkdtemp()
+_lex_path = os.path.join(_lex_dir, "wikt.sqlite")
+_lx = _sq.connect(_lex_path)
+_lx.executescript("""
+CREATE TABLE entries (id INTEGER PRIMARY KEY, word TEXT, title TEXT, redirect TEXT, pos TEXT, pos_title TEXT, lang_code TEXT, lang TEXT, etymology_text TEXT);
+CREATE TABLE senses (id INTEGER PRIMARY KEY, entry_id INTEGER, sense_index INTEGER);
+CREATE TABLE glosses (id INTEGER PRIMARY KEY, sense_id INTEGER, gloss_text TEXT, gloss_order INTEGER);
+CREATE TABLE forms (id INTEGER PRIMARY KEY, entry_id INTEGER, form_text TEXT, sense_index INTEGER);
+CREATE TABLE synonyms (id INTEGER PRIMARY KEY, entry_id INTEGER, synonym_word TEXT, sense_index INTEGER);
+INSERT INTO entries (id, word, pos, lang_code, lang) VALUES (1, 'Kill', 'verb', 'en', 'English');
+INSERT INTO forms (entry_id, form_text) VALUES (1, 'killed'), (1, 'Kills');
+INSERT INTO synonyms (entry_id, synonym_word) VALUES (1, 'slay'), (1, 'I-495');
+""")
+_lx.commit(); _lx.close()
+_lex_terms = _expand(["kill", "whisper"], _lex_path)
 record_test(
-    "Author notes: create, list as AUTHOR, delete, 404 when missing",
-    _note_made.status_code == 200 and len(_note_rows) == 1 and _note_rows[0]["source"] == "AUTHOR"
-    and _note_del is not None and _note_del.status_code == 200 and _note_gone.status_code == 404,
+    "Wiktionary: real-schema synonyms and forms expand; gaps get regular forms; noise dropped",
+    _lex_status(_lex_path)["available"]
+    and {"slay", "killed", "whispered", "whispering"} <= _lex_terms
+    and "i-495" not in _lex_terms and "kill" not in _lex_terms,
 )
-client.delete(f"/api/node/{_note_book['id']}")
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _fe_missing = []

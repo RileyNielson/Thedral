@@ -261,8 +261,8 @@ export function useInspectorState() {
   watch(() => [store.activeNode?.id, store.activeNode?.content, store.activeInspectorTab], ([, , tab]) => {
     if (tab !== 'reader') return
     clearTimeout(readerStoryTimer)
-    readerStoryTimer = setTimeout(loadReaderStoryAnalysis, 350)
-  })
+    readerStoryTimer = setTimeout(loadReaderStoryAnalysis, 900)
+  }, { immediate: true })
   watch(() => [store.activeNode?.id, store.activeInspectorTab], ([, tab]) => {
     if (tab === 'telemetry') loadManuscriptAnalytics()
   })
@@ -779,7 +779,8 @@ export function useInspectorState() {
     const sceneId = store.activeNode?.id
     const bookId = sceneId ? store.findBookForNode(sceneId)?.id : ''
     const requestId = ++readerStoryRequest
-    readerStoryAnalysis.value = null
+    const sameScene = readerStoryAnalysis.value?.scene_id === sceneId
+    if (!sameScene) readerStoryAnalysis.value = null
     readerStoryError.value = ''
     if (!sceneId || !bookId || store.activeInspectorTab !== 'reader') {
       readerStoryLoading.value = false

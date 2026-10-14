@@ -29,10 +29,8 @@ backend.routers.craft:_reader_loop_signal
 backend.routers.craft:_scene_revision_ref
 backend.routers.craft:_serialize_simulation
 backend.routers.craft:_store_reader_simulation
-backend.routers.craft:add_author_horizon_note
 backend.routers.craft:ask_socratic_tutor
 backend.routers.craft:create_reader_feedback
-backend.routers.craft:delete_disclosure
 backend.routers.craft:delete_reader_feedback
 backend.routers.craft:elevate_prose
 backend.routers.craft:get_book_reader_feedback
@@ -93,3 +91,5 @@ backend.routers.binder:restore_node_revision
 backend.routers.binder:toggle_book_archive
 backend.routers.binder:update_node
 backend.models:init_db
+backend.routers.entities:auto_detect_entities
+backend.routers.entities:confirm_entity

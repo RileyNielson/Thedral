@@ -21,8 +21,6 @@ from backend.routers.reader_simulation import (  # noqa: F401
     _scene_revision_ref,
     _serialize_simulation,
     _store_reader_simulation,
-    add_author_horizon_note,
-    delete_disclosure,
     get_scene_disclosures,
     get_scene_reader_simulations,
     scan_scene_disclosures,

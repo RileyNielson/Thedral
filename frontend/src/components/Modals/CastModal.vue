@@ -62,8 +62,8 @@
       <section class="bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-3 shrink-0 space-y-2">
         <div class="flex items-center justify-between gap-2">
           <div>
-            <div class="text-[10px] font-bold text-cyan-300 uppercase tracking-wider font-mono">Untracked manuscript names</div>
-            <p class="text-[10px] text-zinc-500 mt-1">Recurring capitalized terms are suggestions only. Confirm what each one means.</p>
+            <div class="text-[10px] font-bold text-cyan-300 uppercase tracking-wider font-mono">Other possible names</div>
+            <p class="text-[10px] text-zinc-500 mt-1">Names Thedral was less sure about. Confirm what each one means, or ignore them.</p>
           </div>
           <button
             @click="findCandidates"
@@ -196,6 +196,17 @@
               >
                 {{ ent.entity_type }}
               </span>
+            </div>
+            <div v-if="ent.auto_detected" class="mt-1 flex items-center gap-2 text-[10px]">
+              <span class="text-zinc-500">Found automatically. Is this right?</span>
+              <select :value="ent.entity_type" @change="retypeEntity(ent, $event.target.value)" class="bg-zinc-900 border border-zinc-700 rounded px-1 py-0.5 text-[10px] text-zinc-300">
+                <option value="CHARACTER">Character</option>
+                <option value="LOCATION">Place</option>
+                <option value="ITEM">Artifact</option>
+                <option value="FACTION">Group</option>
+                <option value="WORLD_TERM">World term</option>
+              </select>
+              <button @click="confirmEntity(ent)" class="px-1.5 py-0.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded">Keep</button>
             </div>
             <div v-if="parseAliasList(ent.aliases).length" class="text-[10px] text-zinc-500 truncate mt-0.5 font-mono">
               Also known as: {{ parseAliasList(ent.aliases).join(' · ') }}
@@ -440,7 +451,43 @@ const deleteEntity = async (eid) => {
   }
 }
 
-watch(() => store.modals.cast, (newVal) => { 
-  if (newVal) fetchEntities() 
+const confirmEntity = async (entity) => {
+  await fetch(`${API_BASE}/api/entities/${encodeURIComponent(entity.entity_id)}/confirm`, { method: 'POST' })
+  await fetchEntities()
+}
+
+const retypeEntity = async (entity, entityType) => {
+  try {
+    const res = await fetch(`${API_BASE}/api/entities/quick-register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: entity.name, entity_type: entityType, aliases: parseAliasList(entity.aliases) })
+    })
+    if (!res.ok) throw new Error((await res.json()).detail || 'Could not change type')
+    await fetchEntities()
+  } catch (error) {
+    showToast(error.message, 'error')
+    await fetchEntities()
+  }
+}
+
+const autoDetect = async () => {
+  const bookId = store.getBook()?.id
+  if (!bookId) return
+  try {
+    const res = await fetch(`${API_BASE}/api/entities/auto-detect/${encodeURIComponent(bookId)}`, { method: 'POST' })
+    if (!res.ok) return
+    const { added = [] } = await res.json()
+    if (added.length) showToast(`Added ${added.length} names found in your manuscript`, 'info')
+  } catch (error) {
+    // Auto-detection is a convenience; the directory still works without it.
+  }
+}
+
+watch(() => store.modals.cast, async (newVal) => {
+  if (!newVal) return
+  await fetchEntities()
+  await autoDetect()
+  await fetchEntities()
 })
 </script>

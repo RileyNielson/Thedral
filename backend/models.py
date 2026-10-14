@@ -104,6 +104,8 @@ def init_db(custom_path: str | Path | None = None) -> None:
             created_at TEXT
         )""")
 
+        c.execute("CREATE TABLE IF NOT EXISTS entity_dismissals (name_key TEXT PRIMARY KEY)")
+
         # Self-healing migration for canonical_entities
         c.execute("PRAGMA table_info(canonical_entities)")
         existing_ent_cols = [r[1] for r in c.fetchall()]
@@ -113,7 +115,8 @@ def init_db(custom_path: str | Path | None = None) -> None:
             ("sensory_profile", "TEXT DEFAULT ''"),
             ("status", "TEXT DEFAULT 'ALIVE'"),
             ("parent_location_id", "TEXT"),
-            ("created_at", "TEXT")
+            ("created_at", "TEXT"),
+            ("auto_detected", "INTEGER DEFAULT 0")
         ]:
             if col not in existing_ent_cols:
                 c.execute(f"ALTER TABLE canonical_entities ADD COLUMN {col} {ctype};")

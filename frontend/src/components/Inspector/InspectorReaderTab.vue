@@ -1,5 +1,46 @@
 <template>
   <div v-if="store.activeInspectorTab === 'reader'" class="space-y-4">
+    <section class="rounded-xl border border-violet-900/50 bg-violet-950/10 p-3 space-y-2.5">
+      <header class="space-y-1">
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="text-[10px] font-bold uppercase tracking-wider text-violet-300">Story underneath · no AI</h2>
+          <span v-if="readerStoryLoading" class="text-[9px] text-zinc-500">Following the threads…</span>
+        </div>
+        <p class="text-[9px] leading-relaxed text-zinc-500">
+          Updates quietly after you pause typing. These are predictions grounded in your text, not a guarantee of how every reader will react.
+        </p>
+        <InspectorLexiconStatus />
+      </header>
+      <p v-if="readerStoryError" class="text-[9px] text-rose-300">{{ readerStoryError }}</p>
+      <template v-else-if="readerStoryAnalysis">
+        <template v-for="group in visibleStoryGroups" :key="group.key">
+          <article v-for="(insight, index) in group.items" :key="`${group.key}-${index}`" class="rounded-lg border border-zinc-800/80 bg-zinc-950/80 p-2.5 space-y-1.5">
+            <div class="flex items-baseline justify-between gap-2">
+              <h3 class="text-[10px] font-semibold text-violet-200">{{ insight.headline }}</h3>
+              <span class="shrink-0 text-[8px] text-zinc-600">{{ insight.confidence }}</span>
+            </div>
+            <p class="text-[10px] leading-relaxed text-zinc-300">{{ insight.reaction }}</p>
+            <div v-if="insight.setup_evidence" class="space-y-0.5">
+              <p class="text-[8px] uppercase tracking-wider text-zinc-600">Earlier · {{ insight.setup_title || 'the setup' }}</p>
+              <button @click="jumpToStoryEvidence(insight.setup_scene_id, insight.setup_evidence)" class="block w-full border-l border-violet-900/70 pl-2 text-left text-[9px] italic text-zinc-400 hover:text-violet-200">“{{ insight.setup_evidence }}”</button>
+            </div>
+            <div v-if="insight.payoff_evidence || insight.evidence" class="space-y-0.5">
+              <p class="text-[8px] uppercase tracking-wider text-zinc-600">{{ insight.setup_evidence ? 'Here' : `Here · paragraph ${insight.paragraph}` }}</p>
+              <button @click="jumpToStoryEvidence(insight.payoff_scene_id, insight.payoff_evidence || insight.evidence)" class="block w-full border-l border-violet-900/70 pl-2 text-left text-[9px] italic text-zinc-400 hover:text-violet-200">“{{ insight.payoff_evidence || insight.evidence }}”</button>
+            </div>
+          </article>
+        </template>
+        <button v-if="hiddenStoryCount > 0 || showFullBreakdown && totalStoryCount > 3" @click="showFullBreakdown = !showFullBreakdown" class="w-full rounded border border-violet-900/50 py-1 text-[10px] text-violet-300 hover:bg-violet-950/30">
+          {{ showFullBreakdown ? 'Show fewer' : `Show full breakdown (${hiddenStoryCount} more)` }}
+        </button>
+        <p v-if="!readerStoryGroups.length" class="text-[9px] leading-relaxed text-zinc-500">
+          {{ readerStoryAnalysis.summary }} Try giving a question, promise, or clear reversal room on the page; this reader lens only calls out patterns it can point to.
+        </p>
+      </template>
+    </section>
+
+    <details class="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 space-y-3">
+      <summary class="cursor-pointer text-[10px] font-bold uppercase tracking-wider text-zinc-400">More: beta-reader responses and optional AI rehearsal</summary>
     <section class="rounded-xl border border-emerald-900/50 bg-emerald-950/10 p-3 space-y-2">
       <header class="flex items-baseline justify-between gap-2">
         <h2 class="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Actual reader evidence</h2>
@@ -18,50 +59,6 @@
         <p class="text-[9px] text-zinc-600">Small, self-selected responses are useful signals—not representative audience research.</p>
       </template>
       <p v-else class="text-[9px] text-zinc-500">No beta-reader responses recorded for this scene yet. Recorded responses appear here before the AI rehearsal.</p>
-    </section>
-
-    <section class="rounded-xl border border-violet-900/50 bg-violet-950/10 p-3 space-y-2.5">
-      <header class="space-y-1">
-        <div class="flex items-center justify-between gap-2">
-          <h2 class="text-[10px] font-bold uppercase tracking-wider text-violet-300">Story underneath · no AI</h2>
-          <span v-if="readerStoryLoading" class="text-[9px] text-zinc-500">Following the threads…</span>
-        </div>
-        <p class="text-[9px] leading-relaxed text-zinc-500">
-          {{ readerStoryAnalysis?.disclaimer || 'These are confident predictions of a typical reader’s experience, grounded in the manuscript—not a guarantee that every reader will react the same way.' }}
-        </p>
-        <p class="text-[9px] leading-relaxed text-zinc-500">
-          No AI: ready across the manuscript after import, and refreshes from the live draft after you pause while this tab is open.
-        </p>
-        <p v-if="readerStoryAnalysis?.lexicon?.available" class="text-[9px] leading-relaxed text-emerald-300/80">
-          Local Wiktionary word forms and synonyms are expanding the story cues.
-        </p>
-        <p v-else class="text-[9px] leading-relaxed text-zinc-600">
-          Local Wiktionary word-form expansion is not installed yet.
-        </p>
-      </header>
-      <p v-if="readerStoryError" class="text-[9px] text-rose-300">{{ readerStoryError }}</p>
-      <template v-else-if="readerStoryAnalysis">
-        <template v-for="group in readerStoryGroups" :key="group.key">
-          <article v-for="(insight, index) in group.items" :key="`${group.key}-${index}`" class="rounded-lg border border-zinc-800/80 bg-zinc-950/80 p-2.5 space-y-1.5">
-            <div class="flex items-baseline justify-between gap-2">
-              <h3 class="text-[10px] font-semibold text-violet-200">{{ insight.headline }}</h3>
-              <span class="shrink-0 text-[8px] text-zinc-600">{{ insight.confidence }}</span>
-            </div>
-            <p class="text-[10px] leading-relaxed text-zinc-300">{{ insight.reaction }}</p>
-            <div v-if="insight.setup_evidence" class="space-y-0.5">
-              <p class="text-[8px] uppercase tracking-wider text-zinc-600">Earlier · {{ insight.setup_title || 'the setup' }}</p>
-              <button @click="jumpToStoryEvidence(insight.setup_scene_id, insight.setup_evidence)" class="block w-full border-l border-violet-900/70 pl-2 text-left text-[9px] italic text-zinc-400 hover:text-violet-200">“{{ insight.setup_evidence }}”</button>
-            </div>
-            <div v-if="insight.payoff_evidence || insight.evidence" class="space-y-0.5">
-              <p class="text-[8px] uppercase tracking-wider text-zinc-600">{{ insight.setup_evidence ? 'Here' : `Here · paragraph ${insight.paragraph}` }}</p>
-              <button @click="jumpToStoryEvidence(insight.payoff_scene_id, insight.payoff_evidence || insight.evidence)" class="block w-full border-l border-violet-900/70 pl-2 text-left text-[9px] italic text-zinc-400 hover:text-violet-200">“{{ insight.payoff_evidence || insight.evidence }}”</button>
-            </div>
-          </article>
-        </template>
-        <p v-if="!readerStoryGroups.length" class="text-[9px] leading-relaxed text-zinc-500">
-          {{ readerStoryAnalysis.summary }} Try giving a question, promise, or clear reversal room on the page; this reader lens only calls out patterns it can point to.
-        </p>
-      </template>
     </section>
 
     <div class="flex items-center justify-between">
@@ -250,13 +247,13 @@
         </div>
         <p v-else class="text-[10px] text-zinc-600">No reader responses recorded for this scene.</p>
       </section>
-    <InspectorIntentNotes />
+    </details>
   </div>
 </template>
 
 <script setup>
-import InspectorIntentNotes from './InspectorIntentNotes.vue'
-import { inject } from 'vue'
+import InspectorLexiconStatus from './InspectorLexiconStatus.vue'
+import { computed, inject, ref } from 'vue'
 import { store, showToast } from '../../store.js'
 import { API_BASE } from '@/api'
 import { Sparkles } from '@lucide/vue'
@@ -289,4 +286,20 @@ const {
   simulationHistory,
   simulationItems
 } = inject('inspectorState')
+
+const QUIET_LIMIT = 3
+const showFullBreakdown = ref(false)
+const totalStoryCount = computed(() => readerStoryGroups.value.reduce((sum, group) => sum + group.items.length, 0))
+const hiddenStoryCount = computed(() => Math.max(0, totalStoryCount.value - QUIET_LIMIT))
+const visibleStoryGroups = computed(() => {
+  if (showFullBreakdown.value) return readerStoryGroups.value
+  let remaining = QUIET_LIMIT
+  const groups = []
+  for (const group of readerStoryGroups.value) {
+    if (remaining <= 0) break
+    groups.push({ ...group, items: group.items.slice(0, remaining) })
+    remaining -= group.items.length
+  }
+  return groups
+})
 </script>

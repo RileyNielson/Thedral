@@ -28,6 +28,12 @@ _NON_NAME_CAPITALS = {
     "or", "our", "she", "so", "the", "their", "them", "they", "this", "to",
     "us", "we", "you", "your",
 }
+_SENTENCE_OPENERS = {
+    "then", "when", "but", "after", "before", "while", "suddenly", "now", "with", "without", "by", "from",
+    "once", "later", "still", "there", "here", "what", "why", "how", "where", "who", "yes", "no", "oh",
+    "well", "maybe", "perhaps", "however", "meanwhile", "although", "though", "because", "since", "until",
+    "every", "each", "some", "all", "one", "two", "that", "these", "those", "there's", "i'm", "i'll", "i'd",
+}
 _ENTITY_TYPES = {"CHARACTER", "ITEM", "LOCATION", "FACTION", "WORLD_TERM"}
 
 
@@ -48,8 +54,6 @@ def _candidate_names(
         text = html_to_text(scene["content"] or "")
         for sentence in sentence_split.split(text):
             matches = list(capitalized.finditer(sentence))
-            if matches and matches[0].start() < 3:
-                matches = matches[1:]
             run = []
             runs = []
             for match in matches:
@@ -60,6 +64,14 @@ def _candidate_names(
             if run:
                 runs.append(run)
             for name_parts in runs:
+                if name_parts[0].start() < 3:
+                    # A sentence opener is only a name when it leads a multi-word name such as "Rowan Hale".
+                    if name_parts[0].group(0).casefold() in _SENTENCE_OPENERS:
+                        name_parts = name_parts[1:]
+                    elif len(name_parts) < 2:
+                        continue
+                if not name_parts:
+                    continue
                 name = " ".join(part.group(0) for part in name_parts).strip(" .-'’")
                 if len(name) < 2 or name.casefold() in _NON_NAME_CAPITALS:
                     continue
@@ -135,6 +147,76 @@ def get_entity_candidates(book_id: str):
         conn.close()
 
 
+_PLACE_WORDS = {
+    "castle", "city", "river", "mountain", "mountains", "forest", "kingdom", "village", "town", "lake",
+    "sea", "ocean", "tower", "island", "valley", "bridge", "harbor", "harbour", "keep", "hall", "road",
+    "street", "bay", "port", "woods", "desert", "temple", "inn", "tavern", "palace", "fortress",
+}
+_GROUP_WORDS = {"guild", "order", "house", "clan", "council", "army", "legion", "company", "brotherhood", "court"}
+
+
+def _guess_entity_type(name: str) -> str:
+    words = {part.casefold() for part in name.split()}
+    if len(words) > 1 and words & _PLACE_WORDS:
+        return "LOCATION"
+    if len(words) > 1 and words & _GROUP_WORDS:
+        return "FACTION"
+    return "CHARACTER"
+
+
+def _is_confident(candidate: dict, lexicon_available: bool) -> bool:
+    if candidate["mentions"] < 3 or candidate["scene_count"] < 2:
+        return False
+    if lexicon_available and candidate.get("in_wiktionary"):
+        return False
+    return lexicon_available or len(candidate["name"].split()) > 1 or candidate["mentions"] >= 5
+
+
+@router.post("/api/entities/auto-detect/{book_id}")
+def auto_detect_entities(book_id: str):
+    """Track confident recurring names automatically; the author only corrects mistakes."""
+    data = get_entity_candidates(book_id)
+    conn = get_db()
+    added = []
+    try:
+        dismissed = {row[0] for row in conn.execute("SELECT name_key FROM entity_dismissals")}
+        for candidate in data["candidates"]:
+            if candidate["name"].casefold() in dismissed or not _is_confident(candidate, data["wiktionary_available"]):
+                continue
+            entity_type = sanitize_entity_type(candidate["name"], _guess_entity_type(candidate["name"]))
+            if entity_type == "CLUTTER":
+                continue
+            eid = re.sub(r'\W+', '_', candidate["name"].lower())
+            try:
+                _reject_name_conflicts(conn, eid, candidate["name"], [])
+            except HTTPException:
+                continue
+            with conn:
+                cursor = conn.execute("""
+                    INSERT OR IGNORE INTO canonical_entities
+                    (entity_id, name, entity_type, role, aliases, sensory_profile, status, axioms, created_at, auto_detected)
+                    VALUES (?, ?, ?, 'SUPPORTING', '[]', '', 'ALIVE', '{}', ?, 1)
+                """, (eid, candidate["name"], entity_type, time.strftime("%Y-%m-%d %H:%M:%S")))
+            if cursor.rowcount:
+                added.append({"entity_id": eid, "name": candidate["name"], "entity_type": entity_type})
+        return {"added": added}
+    finally:
+        conn.close()
+
+
+@router.post("/api/entities/{entity_id}/confirm")
+def confirm_entity(entity_id: str):
+    conn = get_db()
+    try:
+        with conn:
+            cursor = conn.execute("UPDATE canonical_entities SET auto_detected = 0 WHERE entity_id = ?", (entity_id,))
+        if not cursor.rowcount:
+            raise HTTPException(404, "Entity not found")
+        return {"status": "confirmed"}
+    finally:
+        conn.close()
+
+
 @router.post("/api/entities/quick-register")
 def register_entity(payload: QuickEntity):
     """Registers a character or artifact, enforcing the Clutter Shield."""
@@ -159,8 +241,11 @@ def register_entity(payload: QuickEntity):
                 VALUES (?, ?, ?, ?, ?, '', 'ALIVE', '{}', ?)
                 ON CONFLICT(entity_id) DO UPDATE SET
                     entity_type = excluded.entity_type,
+                    auto_detected = 0,
                     aliases = CASE WHEN excluded.aliases != '[]' THEN excluded.aliases ELSE canonical_entities.aliases END
             """, (eid, name_clean, safe_type, payload.role, serialize_entity_aliases(aliases), now))
+        with conn:
+            conn.execute("DELETE FROM entity_dismissals WHERE name_key = ?", (name_clean.casefold(),))
         return {"status": "registered", "entity_id": eid, "entity_type": safe_type}
     finally:
         conn.close()
@@ -212,6 +297,9 @@ def delete_entity(entity_id: str):
     """Safely deletes an entity, clearing referencing worldlines and relationships first to satisfy foreign keys."""
     conn = get_db()
     with conn:
+        row = conn.execute("SELECT name, auto_detected FROM canonical_entities WHERE entity_id = ?", (entity_id,)).fetchone()
+        if row and row["auto_detected"]:
+            conn.execute("INSERT OR IGNORE INTO entity_dismissals (name_key) VALUES (?)", (row["name"].casefold(),))
         conn.execute("DELETE FROM canonical_worldlines WHERE entity_id = ?", (entity_id,))
         conn.execute("DELETE FROM entity_relationships WHERE source_id = ? OR target_id = ?", (entity_id, entity_id))
         conn.execute("DELETE FROM canonical_entities WHERE entity_id = ?", (entity_id,))

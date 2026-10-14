@@ -1,11 +1,40 @@
+import threading
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.database import get_db
 from backend.telemetry import calculate_text_telemetry
 from backend.reader_story import analyze_reader_story
+from backend.wiktionary_lexicon import download_wiktionary_database, get_lexicon_status
 
 router = APIRouter(tags=["Binder"])
+
+_lexicon_job = {"state": "idle", "error": ""}
+
+
+def _run_lexicon_download():
+    try:
+        download_wiktionary_database()
+        _lexicon_job.update(state="done", error="")
+    except Exception as exc:
+        _lexicon_job.update(state="failed", error=str(exc))
+
+
+@router.get("/api/lexicon/status")
+def lexicon_status():
+    return {**get_lexicon_status(), "download": dict(_lexicon_job)}
+
+
+@router.post("/api/lexicon/download")
+def lexicon_download():
+    """Start the one-time Wiktionary download in the background; poll /api/lexicon/status."""
+    if get_lexicon_status()["available"]:
+        return {"state": "done", "error": ""}
+    if _lexicon_job["state"] != "running":
+        _lexicon_job.update(state="running", error="")
+        threading.Thread(target=_run_lexicon_download, daemon=True).start()
+    return dict(_lexicon_job)
 
 class ReaderExperienceAnalyticsRequest(BaseModel):
     scene_id: str

@@ -72,19 +72,9 @@
             <a :href="`${API_BASE}/api/publishing/exports/${item.id}/download`" class="shrink-0 text-amber-400 hover:underline">Download</a>
           </div>
         </section>
-        <section class="rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
-          <h3 class="text-xs font-semibold text-zinc-200">More downloads</h3>
-          <div class="flex flex-wrap gap-2 text-[10px]">
-            <a :href="`${API_BASE}/api/compile/docx?book_id=${encodeURIComponent(activeBook?.id || '')}`" class="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800">Quick draft .docx (no formatting)</a>
-            <button @click="loadCertificate" class="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800">Writing-history certificate</button>
-          </div>
-          <template v-if="certificate">
-            <pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-zinc-800 bg-zinc-900 p-2 text-[10px] text-zinc-400">{{ certificate.certificate_text }}</pre>
-            <button @click="copyCertificate" class="text-[10px] text-amber-400 hover:underline">Copy certificate text</button>
-          </template>
-        </section>
         <footer class="flex flex-wrap justify-end gap-2">
           <button @click="close" class="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800">Keep writing</button>
+          <button @click="openQueryPackage" class="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800">Query package…</button>
           <button @click="saveSettings" :disabled="isExporting" class="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800">Save settings</button>
           <button @click="exportDocument" :disabled="!activeBook || !includedScenes.length || isExporting" class="rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-zinc-950 hover:bg-amber-400 disabled:opacity-50">
             {{ isExporting ? 'Saving…' : 'Export DOCX' }}
@@ -103,23 +93,9 @@ import { X } from '@lucide/vue'
 import { API_BASE } from '@/api'
 const isExporting = ref(false)
 const history = ref([])
-const certificate = ref(null)
-const loadCertificate = async () => {
-  try {
-    const res = await fetch(`${API_BASE}/api/publishing/authorship-proof?book_id=${encodeURIComponent(activeBook.value?.id || '')}`)
-    if (!res.ok) throw new Error('Could not build the certificate.')
-    certificate.value = await res.json()
-  } catch (err) {
-    showToast(err.message, 'error')
-  }
-}
-const copyCertificate = async () => {
-  try {
-    await navigator.clipboard.writeText(certificate.value?.certificate_text || '')
-    showToast('Certificate copied', 'success')
-  } catch (err) {
-    showToast('Copy failed', 'error')
-  }
+const openQueryPackage = () => {
+  store.toggleModal('export', false)
+  store.toggleModal('queryPackage', true)
 }
 const selectedChapterIds = ref([])
 const profile = reactive({

@@ -139,14 +139,6 @@
         <span class="hidden sm:inline">Cast</span>
       </button>
 
-      <button 
-        @click="store.toggleModal('career', true)" 
-        class="px-2 py-1 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700/50 flex items-center gap-1.5 transition text-xs font-medium"
-      >
-        <Award class="w-3.5 h-3.5 text-amber-500" /> 
-        <span class="hidden sm:inline">Publish</span>
-      </button>
-
       <button
         @click="store.toggleModal('review', true)"
         class="px-2 py-1 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700/50 flex items-center gap-1.5 transition text-xs font-medium"
@@ -162,14 +154,6 @@
       >
         <Upload class="w-3.5 h-3.5" /> 
         <span class="hidden sm:inline">Import</span>
-      </button>
-
-      <button 
-        @click="store.toggleModal('connect', true)" 
-        class="px-2 py-1 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700/50 flex items-center gap-1 transition text-xs"
-      >
-        <Smartphone class="w-3.5 h-3.5" /> 
-        <span class="hidden lg:inline">Phone</span>
       </button>
 
       <button
@@ -195,7 +179,7 @@ import { ref, computed } from 'vue'
 import { store } from '../store.js'
 import { 
   Menu as MenuIcon, Feather, PenTool, ListTree, LayoutGrid, Globe, Palette,
-  BookOpenCheck, Users, Award, Upload, Smartphone, Download, Sliders, Clock3, ClipboardCheck
+  BookOpenCheck, Users, Upload, Download, Sliders, Clock3, ClipboardCheck
 } from '@lucide/vue'
 
 const themeMenuOpen = ref(false)

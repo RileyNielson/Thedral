@@ -118,12 +118,10 @@
     <CastModal v-if="store.modals.cast" />
     <LoreModal v-if="store.modals.lore" />
     <VaultModal v-if="store.modals.vault" />
-    <CareerModal v-if="store.modals.career" />
-    <ConnectModal v-if="store.modals.connect" />
     <ImportModal v-if="store.modals.import" />
     <ExportModal v-if="store.modals.export" />
     <ReviewModal v-if="store.modals.review" />
-    <SubmissionModal v-if="store.modals.submission" />
+    <QueryPackageModal v-if="store.modals.queryPackage" />
 
   </div>
 </template>
@@ -145,12 +143,10 @@ const OmnibarModal = defineAsyncComponent(() => import('./components/Modals/Omni
 const CastModal = defineAsyncComponent(() => import('./components/Modals/CastModal.vue'))
 const LoreModal = defineAsyncComponent(() => import('./components/Modals/LoreModal.vue'))
 const VaultModal = defineAsyncComponent(() => import('./components/Modals/VaultModal.vue'))
-const CareerModal = defineAsyncComponent(() => import('./components/Modals/CareerModal.vue'))
-const ConnectModal = defineAsyncComponent(() => import('./components/Modals/ConnectModal.vue'))
 const ImportModal = defineAsyncComponent(() => import('./components/Modals/ImportModal.vue'))
 const ExportModal = defineAsyncComponent(() => import('./components/Modals/ExportModal.vue'))
 const ReviewModal = defineAsyncComponent(() => import('./components/Modals/ReviewModal.vue'))
-const SubmissionModal = defineAsyncComponent(() => import('./components/Modals/SubmissionModal.vue'))
+const QueryPackageModal = defineAsyncComponent(() => import('./components/Modals/QueryPackageModal.vue'))
 
 const dismissToast = (id) => {
   const index = toasts.findIndex(t => t.id === id)

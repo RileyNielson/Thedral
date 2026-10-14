@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 import json
 import sqlite3
-import time
 import uuid
 import re
 from typing import Literal
@@ -310,45 +309,5 @@ def get_scene_reader_simulations(scene_id: str):
         "simulations": simulations,
         "loop_signal": _reader_loop_signal(simulations),
     }
-
-
-@router.post("/api/disclosures/author-note")
-def add_author_horizon_note(payload: AuthorHorizonNote):
-    allowed_types = {"INTENDED", "DIRECT", "INFERRED", "DELAYED"}
-    if payload.disclosure_type not in allowed_types:
-        raise HTTPException(400, "Unsupported Reader Horizon note type")
-    conn = get_db()
-    scene = conn.execute(
-        "SELECT id FROM binder_nodes WHERE id = ? AND node_type = 'SCENE'",
-        (payload.scene_id,),
-    ).fetchone()
-    if not scene:
-        conn.close()
-        raise HTTPException(404, "Scene not found")
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    with conn:
-        conn.execute("""
-            INSERT INTO reader_disclosures
-            (scene_id, disclosure_type, narrative_claim, clue_evidence, source_excerpt, confidence, source, status, created_at)
-            VALUES (?, ?, ?, ?, ?, NULL, 'AUTHOR', 'ACTIVE', ?)
-        """, (
-            payload.scene_id, payload.disclosure_type, payload.narrative_claim.strip(),
-            payload.clue_evidence.strip(), payload.source_excerpt.strip(), now,
-        ))
-    conn.close()
-    return {"status": "created"}
-
-@router.delete("/api/disclosures/{item_id}")
-def delete_disclosure(item_id: int):
-    conn = get_db()
-    try:
-        with conn:
-            cur = conn.execute("DELETE FROM reader_disclosures WHERE id = ?", (item_id,))
-        if not cur.rowcount:
-            raise HTTPException(404, "Note not found")
-        return {"status": "deleted"}
-    finally:
-        conn.close()
-
 
 

@@ -79,13 +79,12 @@ Powered by a local, air-gapped **Llama 3.2:3b** model via Ollama:
 3. **The Sovereign Intent Inquiry**: Poses divergent artistic paths, leaving all choices to the author.
 4. **Cross-Genre Tutor**: Teaches narrative craft levers using examples from an unrelated genre to prevent the author from copying the model's diction.
 
-### 5. Deterministic Publishing & Authorship Suite
-- **Cryptographic Proof of Authorship**: Generates a tamper-evident SHA-256 audit certificate derived from the append-only SQLite WAL revision history, proving multi-session organic human drafting to legally defend against AI accusations.
+### 5. Import & Publishing
 - **Omniscient Scrivener Importer**: Ingests `.scriv`, `.docx`, `.txt`, and `.md` bundles, extracting chapters, scenes, index card synopses, document notes, character sheets, and worldbuilding lore into SQLite.
-- **Audiobook Narrator Pack**: Compiles phonetic pronunciation guides from the Living Style Sheet and vocal delivery profiles for ACX voice actors.
-- **Scrivener Import Paths**: Zip a whole `.scriv` folder, paste its folder path in the Import dialog, or pick it from the discovered list (Documents, Desktop, Downloads). Scrivener 1/2 and 3 layouts are supported.
+- **Scrivener Import Paths**: Zip a whole `.scriv` folder, use Browse in the Import dialog (on Windows, open the .scriv folder and pick its .scrivx file), or pick it from the discovered list (Documents, Desktop, Downloads). Scrivener 1/2 and 3 layouts are supported.
 - **AI as a Helper, Always Labeled**: Deterministic engines (name scan, Wiktionary check, spelling match, reader-experience moments) run first and work in Lite mode. When local AI is on, it receives those findings as evidence and only explains or extends them. Every AI-capable response carries `ai_generated` and `engine` fields, and the UI says when AI took part.
 - **Publication-Grade Word Compiler**: Exports formatted `.docx` manuscripts with centered chapter headers, indented paragraphs, and decoupled epigraphs.
+- **Query Package**: Export > Query package... collects genre, logline, bio, query text and sample scenes into one Markdown file. The synopsis draft is optional and AI-labeled.
 
 ---
 
@@ -154,11 +153,6 @@ npm run dev -- --host
 
 Open `http://localhost:5173`.
 
-Mobile PWA Bridge (Write on Phone/Tablet)
-Ensure your phone and computer are on the same Wi-Fi network.
-In Thedral, click the Phone icon in the top navigation bar.
-Scan the generated QR code with your iPhone/Android camera.
-(iOS Safari): Tap Share ❯ Add to Home Screen for a completely standalone, full-screen writing cockpit.
 License & Sovereignty
 Thedral is licensed under the GNU Affero General Public License v3 (AGPLv3).
 See the LICENSE file for details.
@@ -172,4 +166,4 @@ This project was built to ensure that long-form narrative tools remain sovereign
 - `tests/route_manifest.txt` and `tests/api_manifest.txt` – feature guards. `python tests/test_suite.py` fails if a route or public function disappears.
 - `backend/routers/binder.py` (tree and node CRUD), `analytics.py` (reader analytics) and `binder_tools.py` (vault, auto-title, triage); `binder.py` re-exports the moved names.
 - Frontend: `Inspector.vue` is a tab shell over `components/Inspector/*Tab.vue` plus `useInspectorState.js`; `store.js` holds state, `storeActions.js` the actions, `toast.js` the toasts. `tests/frontend_manifest.txt` guards these.
-- Cast modal shows character relationships; the Socratic tab lists lore present or dormant in a scene (text matching, no AI); the Reader tab has optional author intent notes kept apart from text-based estimates; the Export modal offers a quick .docx and a writing-history certificate.
+- Cast fills itself in: recurring names found in your manuscript are tracked automatically (marked "Found automatically" until you Keep, retype, or remove them; removed names are not re-added). Cast modal shows character relationships; the Socratic tab lists lore present or dormant in a scene (text matching, no AI); the Reader tab has optional author intent notes kept apart from text-based estimates; the Export modal offers a quick .docx and a writing-history certificate.

@@ -6,6 +6,7 @@ import argparse
 import gzip
 import os
 import shutil
+import re
 import sqlite3
 import sys
 import tempfile
@@ -23,7 +24,7 @@ DATASET_CARD_URL = "https://huggingface.co/datasets/cstr/en-wiktionary-sqlite-fu
 LICENSE = "CC BY-SA 4.0"
 
 _WORD_COLUMNS = (
-    "word", "lemma", "form", "word_form", "form_text", "synonym",
+    "word", "lemma", "form", "word_form", "form_text", "synonym", "synonym_word",
     "synonym_text", "related_word", "related_text", "target_word", "link_text",
 )
 _FORM_TABLE_NAMES = {"forms", "word_forms", "wordforms", "inflections"}
@@ -54,11 +55,8 @@ def _english_filter(alias: str, columns: set[str]) -> str:
 
 
 def _lookup_words(words: Iterable[str]) -> list[str]:
-    return sorted({
-        variant
-        for word in words if word
-        for variant in (word.strip(), word.strip().lower())
-    })
+    # The dataset indexes lower(word); querying lowercase terms keeps lookups fast.
+    return sorted({word.strip().lower() for word in words if word and word.strip()})
 
 
 def _validate_database(path: str | Path) -> tuple[bool, str]:
@@ -226,7 +224,7 @@ def _related_terms(conn: sqlite3.Connection, words: Iterable[str]) -> set[str]:
             )
         query = (
             f"SELECT DISTINCT r.{_quote(target_column)} FROM {_quote(table)} r "
-            f"{join} {source} WHERE e.{_quote('word')} IN ({placeholders})"
+            f"{join} {source} WHERE lower(e.{_quote('word')}) IN ({placeholders})"
             + _english_filter("e", entry_columns)
             + relation_filter
             + f" AND r.{_quote(target_column)} IS NOT NULL LIMIT 500"
@@ -264,12 +262,25 @@ def _word_forms(conn: sqlite3.Connection, words: Iterable[str]) -> set[str]:
         query = (
             f"SELECT DISTINCT f.{_quote(surface_column)} FROM {_quote(table)} f "
             f"JOIN {_quote(entries)} e ON {relation} "
-            f"WHERE e.{_quote('word')} IN ({placeholders})"
+            f"WHERE lower(e.{_quote('word')}) IN ({placeholders})"
             + _english_filter("e", entry_columns)
             + f" AND f.{_quote(surface_column)} IS NOT NULL LIMIT 500"
         )
         found.update(str(row[0]).strip() for row in conn.execute(query, words) if str(row[0]).strip())
     return found
+
+
+def _plain_word(word: str) -> bool:
+    return bool(re.fullmatch(r"[a-z][a-z'-]+", word))
+
+
+def _regular_forms(word: str) -> set[str]:
+    if len(word) < 3:
+        return set()
+    stem = word[:-1] if word.endswith("e") else word
+    plural = word[:-1] + "ies" if re.search(r"[^aeiou]y$", word) else word + ("es" if word.endswith(("s", "x", "z", "ch", "sh")) else "s")
+    past = word[:-1] + "ied" if re.search(r"[^aeiou]y$", word) else stem + "ed"
+    return {plural, past, stem + "ing"}
 
 
 def is_english_word(word: str, database_path: str | Path | None = None) -> bool:
@@ -292,7 +303,7 @@ def english_words(words: Iterable[str], database_path: str | Path | None = None)
         placeholders = ",".join("?" for _ in normalized)
         query = (
             f"SELECT DISTINCT lower({_quote('word')}) FROM {_quote(entries)} "
-            f"WHERE {_quote('word')} IN ({placeholders})"
+            f"WHERE lower({_quote('word')}) IN ({placeholders})"
             + _english_filter(entries, columns)
         )
         return {row[0] for row in conn.execute(query, normalized)}
@@ -313,10 +324,16 @@ def expand_lexical_terms(
             conn.close()
         return set()
     try:
-        related = _related_terms(conn, original)
-        forms = _word_forms(conn, original | related)
-        expanded = {word for word in related | forms if 1 < len(word) <= 40}
-        return set(sorted(expanded, key=str.casefold)[:max(0, limit)])
+        related = {word for word in _related_terms(conn, original) if _plain_word(word)}
+        forms = {word for word in _word_forms(conn, original | related) if _plain_word(word)}
+        covered = {word.lower() for word in forms}
+        # The dataset omits some everyday words, so regular inflections fill the gaps.
+        fallback = set()
+        for seed in original:
+            if _plain_word(seed) and not any(form.startswith(seed.lower()[:max(3, len(seed) - 2)]) for form in covered):
+                fallback |= _regular_forms(seed.lower())
+        expanded = {word.lower() for word in related | forms | fallback if 1 < len(word) <= 40}
+        return set(sorted(expanded - {seed.lower() for seed in original})[:max(0, limit)])
     finally:
         conn.close()
 

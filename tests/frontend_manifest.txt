@@ -30,7 +30,6 @@ file:frontend/src/components/Inspector/useInspectorState.js
 file:frontend/src/store.js
 file:frontend/src/toast.js
 file:frontend/src/editorText.js
-file:frontend/src/components/Inspector/InspectorPromisesPanel.vue
 file:frontend/src/components/Modals/CastRelationships.vue
 file:frontend/src/components/Inspector/InspectorLoreLinks.vue
-file:frontend/src/components/Inspector/InspectorIntentNotes.vue
+file:frontend/src/components/Inspector/InspectorLexiconStatus.vue

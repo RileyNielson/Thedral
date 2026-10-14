@@ -40,7 +40,8 @@ def _clean_user_path(raw: str) -> str:
     value = (raw or "").strip().strip("'\"")
     if value.startswith("file://"):
         value = unquote(urlparse(value).path)
-    value = value.replace("\\ ", " ")
+    if os.name != "nt":
+        value = value.replace("\\ ", " ")
     return os.path.expanduser(value)
 
 
@@ -101,8 +102,8 @@ SUPPORTED_TEXT = {".txt", ".md", ".markdown", ".text", ".rtf"}
 
 
 def _parse_import(path: str, filename: str, uploaded: bool = False):
-    ext = os.path.splitext(filename.rstrip("/"))[1].lower()
-    title = os.path.splitext(os.path.basename(filename.rstrip("/")))[0].replace("_", " ")
+    ext = os.path.splitext(filename.rstrip("/\\"))[1].lower()
+    title = os.path.splitext(os.path.basename(filename.rstrip("/\\")))[0].replace("_", " ")
     warnings = []
 
     scriv_dir = None if uploaded else (_resolve_scrivener_dir(path) if os.path.exists(path) else None)
@@ -165,7 +166,7 @@ def _native_choose(kind: str) -> str:
         if folder:
             ps = "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; if($d.ShowDialog() -eq 'OK'){$d.SelectedPath}"
         else:
-            ps = "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; if($d.ShowDialog() -eq 'OK'){$d.FileName}"
+            ps = "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Filter='Manuscripts and Scrivener (*.scrivx;*.docx;*.rtf;*.txt;*.md;*.zip)|*.scrivx;*.docx;*.rtf;*.txt;*.md;*.zip|All files (*.*)|*.*'; if($d.ShowDialog() -eq 'OK'){$d.FileName}"
         cmd = ["powershell", "-NoProfile", "-Command", ps]
     else:
         cmd = ["zenity", "--file-selection"] + (["--directory"] if folder else [])
@@ -173,7 +174,7 @@ def _native_choose(kind: str) -> str:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         raise HTTPException(501, detail="This computer can't open a chooser from Thedral. Paste the path instead.")
-    return result.stdout.strip().rstrip("/") if result.returncode == 0 else ""
+    return result.stdout.strip().rstrip("/\\") if result.returncode == 0 else ""
 
 
 @router.post("/api/import/choose")
@@ -189,7 +190,7 @@ def import_local_path(payload: LocalPathImport):
     if not os.path.exists(p):
         raise HTTPException(400, detail=f"Path does not exist: {p}")
 
-    title = os.path.splitext(os.path.basename(p.rstrip("/")))[0].replace("_", " ")
+    title = os.path.splitext(os.path.basename(p.rstrip("/\\")))[0].replace("_", " ")
     try:
         manifest, title, report = _parse_import(p, p)
         first_sc = build_binder_from_manifest(manifest, title)

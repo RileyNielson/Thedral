@@ -292,7 +292,6 @@
       </div>
       <p v-else class="text-[10px] text-zinc-500">No prior revisions yet.</p>
     </div>
-    <InspectorPromisesPanel />
   </div>
 </template>
 
@@ -300,7 +299,6 @@
 import { inject } from 'vue'
 import { store, showToast } from '../../store.js'
 import { API_BASE } from '@/api'
-import InspectorPromisesPanel from './InspectorPromisesPanel.vue'
 
 const {
   cardData,
