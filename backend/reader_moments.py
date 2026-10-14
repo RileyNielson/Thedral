@@ -9,6 +9,8 @@ def _loss_and_care(
     insights = []
     for index, paragraph in enumerate(_paragraphs(current_text), 1):
         loss_evidence = _first_matching_sentence(paragraph, cues["loss"])
+        if not loss_evidence:
+            continue
         prior_text = "\n\n".join(
             _scene_text(scene) for scene in scenes[:selected_index]
         ) + "\n\n" + "\n\n".join(_paragraphs(current_text)[:index - 1])
@@ -60,6 +62,8 @@ def _empathy_moments(
     paragraphs = _paragraphs(current_text)
     for index, paragraph in enumerate(paragraphs, 1):
         vulnerability_evidence = _first_matching_sentence(paragraph, cues["vulnerability"])
+        if not vulnerability_evidence:
+            continue
         prior_text = "\n\n".join(
             _scene_text(scene) for scene in scenes[:selected_index]
         ) + "\n\n" + "\n\n".join(paragraphs[:index - 1])

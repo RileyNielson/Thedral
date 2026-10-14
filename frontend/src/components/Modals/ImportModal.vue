@@ -175,6 +175,7 @@ const closeModal = () => {
 
 // The system chooser can pick .scriv packages that a browser file input cannot; fall back to the browser input if it is unavailable.
 const triggerBrowse = async () => {
+  showToast('A file chooser is opening. If you don’t see it, check behind this window or in the Dock.', 'info')
   try {
     const response = await fetch(`${API_BASE}/api/import/choose?kind=file`, { method: 'POST' })
     if (response.ok) {

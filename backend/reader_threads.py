@@ -1,3 +1,4 @@
+from collections import Counter
 import re
 
 from backend.reader_cues import _AND_CUES, _CONTRAST_CUES, _key_terms, _paragraphs, _reader_cues, _sentences
@@ -83,11 +84,21 @@ def _find_reader_threads(
         {**scenes[selected_index], "content": current_text},
     ]
     candidates = _promise_candidates(reading_scenes, cues)
+    word_pattern = re.compile(r"[a-z][a-z'’-]{2,}")
+    lowered_text = current_text.lower()
+    total_counts = Counter(word_pattern.findall(lowered_text))
+    evidence_cache: dict[str, tuple[int, Counter]] = {}
     for candidate in candidates:
-        rest = current_text.replace(candidate["evidence"], " ")
-        rest_words = re.findall(r"[a-z][a-z'’-]{2,}", rest.lower())
+        evidence = candidate["evidence"]
+        if evidence not in evidence_cache:
+            evidence_cache[evidence] = (
+                lowered_text.count(evidence.lower()),
+                Counter(word_pattern.findall(evidence.lower())),
+            )
+        occurrences, evidence_counts = evidence_cache[evidence]
         candidate["recurrence"] = sum(
-            1 for term in candidate["terms"] if 1 <= rest_words.count(term) <= 8
+            1 for term in candidate["terms"]
+            if 1 <= total_counts[term] - occurrences * evidence_counts[term] <= 8
         )
         if candidate["kind"] == "commitment":
             candidate["recurrence"] += 2

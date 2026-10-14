@@ -68,6 +68,30 @@ def _find_scrivener_in_extract(extract_dir: str) -> str | None:
     return None
 
 
+def _icloud_placeholders(scriv_path: str) -> int:
+    """Count files macOS has offloaded to iCloud; they are named like '.content.rtf.icloud' and hold no text."""
+    return sum(
+        1
+        for _, _, files in os.walk(scriv_path)
+        for name in files
+        if name.startswith(".") and name.lower().endswith(".icloud")
+    )
+
+
+def _require_scrivener_text(scriv_dir: str, report: dict) -> None:
+    if report["words"] or report["outline_only"]:
+        return
+    if _icloud_placeholders(scriv_dir):
+        raise ValueError(
+            "This Scrivener project is stored in iCloud Drive and its files haven't been downloaded to this Mac. "
+            "In Finder, right-click the .scriv folder and choose Download Now, wait for it to finish, then try again."
+        )
+    raise ValueError(
+        "No manuscript text was found in this Scrivener project. Check that the Draft/Manuscript folder has "
+        "documents with text in them, or that you chose the .scriv folder itself."
+    )
+
+
 def _scrivener_import_warnings(scriv_path: str) -> list[str]:
     media_count = 0
     has_hyperlinks = False
@@ -143,6 +167,10 @@ def _parse_import(path: str, filename: str, uploaded: bool = False):
         )
 
     report = build_import_report(manifest, warnings)
+    if scriv_dir:
+        if _icloud_placeholders(scriv_dir):
+            report["warnings"].append("Some files are still in iCloud and were skipped. Use Download Now in Finder, then import again.")
+        _require_scrivener_text(scriv_dir, report)
     return manifest, title, report
 
 

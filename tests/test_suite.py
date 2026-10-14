@@ -824,6 +824,37 @@ record_test(
     and auto_after_dismiss["added"] == [] and auto_confirm.status_code == 200,
 )
 
+from backend.importing.text_cleaning import strip_rtf_native as _strip_rtf
+_mac_rtf = _strip_rtf("{\\rtf1\\ansi\\cocoartf2639 \\f0 First paragraph.\\\nSecond paragraph.\\\nThird.}")
+record_test(
+    "RTF backslash-newline (Scrivener on Mac) becomes a paragraph break",
+    [line for line in _mac_rtf.splitlines() if line.strip()] == ["First paragraph.", "Second paragraph.", "Third."],
+)
+
+with tempfile.TemporaryDirectory() as empty_scriv_temp:
+    _empty_scriv = Path(empty_scriv_temp) / "Empty.scriv"
+    _empty_scriv.mkdir()
+    (_empty_scriv / "Empty.scrivx").write_text(
+        '<?xml version="1.0"?><ScrivenerProject><Binder><BinderItem UUID="D" Type="DraftFolder"><Title>Manuscript</Title></BinderItem></Binder></ScrivenerProject>',
+        encoding="utf-8",
+    )
+    _empty_res = client.post("/api/import/preview/local-path", json={"path": str(_empty_scriv)})
+    (_empty_scriv / "Files" / "Data" / "X").mkdir(parents=True)
+    (_empty_scriv / "Files" / "Data" / "X" / ".content.rtf.icloud").write_text("", encoding="utf-8")
+    _icloud_res = client.post("/api/import/preview/local-path", json={"path": str(_empty_scriv)})
+record_test(
+    "Scrivener project with no text explains why, including iCloud placeholders",
+    _empty_res.status_code == 400 and "No manuscript text" in _empty_res.json()["detail"]
+    and _icloud_res.status_code == 400 and "iCloud" in _icloud_res.json()["detail"],
+)
+
+import time as _time
+from backend.reader_story import analyze_reader_story as _analyze_story
+_long_html = "".join("<p>Rowan asked why. She promised to return. He wondered if they would trust her.</p>" for _ in range(1500))
+_t0 = _time.time()
+_analyze_story([{"scene_id": "long", "title": "Long", "content": _long_html}], "long", _long_html)
+record_test("Reader analysis stays fast on a very long single scene", _time.time() - _t0 < 15)
+
 health_res = client.get("/api/health")
 record_test(
     "GET /api/health Reports Active AI Mode",

@@ -111,7 +111,7 @@ def strip_rtf_native(rtf_text: str, preserve_formatting: bool = False) -> str:
             continue
         if not symbol.isalpha():
             if not skip_group and not fallback_remaining:
-                emit({"~": "\u00a0", "_": "\u2011", "-": ""}.get(symbol, ""))
+                emit({"~": "\u00a0", "_": "\u2011", "-": "", "\n": "\n", "\r": "\n"}.get(symbol, ""))
             elif fallback_remaining:
                 fallback_remaining -= 1
             index += 1
