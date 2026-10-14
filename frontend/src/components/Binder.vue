@@ -27,7 +27,7 @@
         <button @click="store.createManuscript()" class="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded transition">Create Manuscript</button>
       </div>
       <template v-for="book in store.tree" :key="book.id">
-        <div class="font-bold text-zinc-200 text-xs px-2 py-1.5 flex items-center justify-between group hover:bg-zinc-800/40 rounded cursor-pointer transition-colors" @click="store.setActiveBook(book.id); toggleCollapse(book.id)">
+        <div :id="'book-node-' + book.id" class="font-bold text-zinc-200 text-xs px-2 py-1.5 flex items-center justify-between group hover:bg-zinc-800/40 rounded cursor-pointer transition-colors" @click="store.setActiveBook(book.id); toggleCollapse(book.id)">
           <div class="flex items-center gap-1.5 truncate flex-1 mr-2" @dblclick.stop="startRename(book, $event)">
             <ChevronRight v-if="isCollapsed(book.id)" class="w-3.5 h-3.5 text-zinc-500 shrink-0" />
             <ChevronDown v-else class="w-3.5 h-3.5 text-zinc-500 shrink-0" />
@@ -77,7 +77,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
 import { BookMarked, Library, Sparkles, FolderPlus, FilePlus, ChevronRight, ChevronDown, BookOpen, Pencil, Archive, Trash2, Folder, Plus, FileText } from '@lucide/vue'
 
@@ -130,8 +130,6 @@ const addSceneTo = async (chId) => {
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to create scene`)
     const data = await res.json()
     store.readerStoryCache = null
-    const result = await res.json()
-    showToast(result.ai_generated ? `AI titled ${result.updated_count} scene(s). Rename any you dislike.` : 'AI is off, so scenes were not retitled.', 'info')
     await fetchTree()
     await selectNode(data.id)
   } catch (e) { showToast(e.message, "error") }
@@ -191,9 +189,26 @@ const autoTitleScenes = async () => {
     const res = await fetch(`${API_BASE}/api/binder/auto-title-scenes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ book_id: bId }) })
     if (!res.ok) throw new Error('Auto-titling failed')
     store.readerStoryCache = null
+    const result = await res.json()
+    showToast(result.ai_generated ? `AI titled ${result.updated_count} scene(s). Rename any you dislike.` : 'AI is off, so scenes were not retitled.', 'info')
     await fetchTree()
   } catch(e) { showToast("Auto-titling failed.", "error") }
 }
 
-onMounted(() => { fetchTree(); window.addEventListener('refresh-tree', fetchTree) })
+const revealBook = async (event) => {
+  const bookId = event.detail?.bookId
+  if (!bookId) return
+  await fetchTree()
+  store.tree.forEach(book => { collapsed.value[book.id] = book.id !== bookId })
+  store.setActiveBook(bookId)
+  await nextTick()
+  document.getElementById('book-node-' + bookId)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+}
+
+onMounted(() => {
+  fetchTree()
+  window.addEventListener('refresh-tree', fetchTree)
+  window.addEventListener('reveal-book', revealBook)
+})
+onUnmounted(() => window.removeEventListener('reveal-book', revealBook))
 </script>

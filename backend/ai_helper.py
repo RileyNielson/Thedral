@@ -65,17 +65,26 @@ def deterministic_brief(text: str, conn=None) -> str:
 
 
 def find_name_candidates(text: str, known: set[str], dictionary_check=None) -> list[str]:
-    """Capitalised mid-sentence words that are not already known; made-up names rank first."""
+    """Capitalised names (multi-word names kept whole) not already known; made-up names rank first."""
     seen: dict[str, int] = {}
     for sentence in _SENTENCE_SPLIT.split(text):
-        words = list(_CAPITALIZED.finditer(sentence))
-        for match in words:
-            if match.start() < 3:
+        runs, run = [], []
+        for match in _CAPITALIZED.finditer(sentence):
+            if run and sentence[run[-1].end():match.start()].strip():
+                runs.append(run)
+                run = []
+            run.append(match)
+        if run:
+            runs.append(run)
+        for run in runs:
+            # A lone capital at the start of a sentence is just grammar, not a name.
+            if len(run) == 1 and run[0].start() < 3:
                 continue
-            word = match.group(0).strip("'’-")
-            if word.casefold() in known:
+            name = " ".join(m.group(0).strip("'’-") for m in run)
+            parts = [part.casefold() for part in name.split()]
+            if name.casefold() in known or all(part in known for part in parts):
                 continue
-            seen[word] = seen.get(word, 0) + 1
+            seen[name] = seen.get(name, 0) + 1
     names = list(seen)
     if dictionary_check is not None:
         try:

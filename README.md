@@ -163,3 +163,13 @@ License & Sovereignty
 Thedral is licensed under the GNU Affero General Public License v3 (AGPLv3).
 See the LICENSE file for details.
 This project was built to ensure that long-form narrative tools remain sovereign, open, and permanently protected from corporate paywalls.
+## Code layout
+
+- `backend/importing/` – import pipeline (text cleaning, docx, plaintext, Scrivener, discovery, binder builder); `backend/importer.py` re-exports it.
+- `backend/routers/craft.py`, `reader_simulation.py`, `reader_feedback.py` – craft and reader routes; helpers live in `backend/reader_simulation_store.py`.
+- `backend/reader_story.py` re-exports the `reader_cues`, `reader_text`, `reader_threads` and `reader_moments` modules.
+- `backend/ai_helper.py` – AI labeling and deterministic grounding shared by all AI features.
+- `tests/route_manifest.txt` and `tests/api_manifest.txt` – feature guards. `python tests/test_suite.py` fails if a route or public function disappears.
+- `backend/routers/binder.py` (tree and node CRUD), `analytics.py` (reader analytics) and `binder_tools.py` (vault, auto-title, triage); `binder.py` re-exports the moved names.
+- Frontend: `Inspector.vue` is a tab shell over `components/Inspector/*Tab.vue` plus `useInspectorState.js`; `store.js` holds state, `storeActions.js` the actions, `toast.js` the toasts. `tests/frontend_manifest.txt` guards these.
+- Cast modal shows character relationships; the Socratic tab lists lore present or dormant in a scene (text matching, no AI); the Reader tab has optional author intent notes kept apart from text-based estimates; the Export modal offers a quick .docx and a writing-history certificate.

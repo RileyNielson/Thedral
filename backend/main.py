@@ -20,9 +20,13 @@ allowed_origins = [
     if origin.strip()
 ]
 
-# Import ALL 7 modular domain routers
+# Import all modular domain routers
 from backend.routers.binder import router as binder_router
+from backend.routers.analytics import router as analytics_router
+from backend.routers.binder_tools import router as binder_tools_router
 from backend.routers.craft import router as craft_router
+from backend.routers.reader_simulation import router as reader_simulation_router
+from backend.routers.reader_feedback import router as reader_feedback_router
 from backend.routers.narrative import router as narrative_router
 from backend.routers.entities import router as entities_router
 from backend.routers.importer import router as importer_router
@@ -41,9 +45,13 @@ app.add_middleware(
 
 init_db()
 
-# Mount ALL 7 modular domain routers
+# Mount all modular domain routers
 app.include_router(binder_router)
+app.include_router(analytics_router)
+app.include_router(binder_tools_router)
 app.include_router(craft_router)
+app.include_router(reader_simulation_router)
+app.include_router(reader_feedback_router)
 app.include_router(narrative_router)
 app.include_router(entities_router)
 app.include_router(importer_router)

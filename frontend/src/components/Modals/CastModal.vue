@@ -236,6 +236,8 @@
         </div>
       </div>
 
+      <CastRelationships />
+
       <!-- Footer -->
       <div class="border-t border-zinc-800 pt-3 flex justify-between items-center shrink-0">
         <span class="text-[10px] text-zinc-500 font-mono">
@@ -259,6 +261,7 @@ import { store, showToast } from '../../store.js'
 import { Users, X, Trash2, Plus } from '@lucide/vue'
 
 import { API_BASE } from '@/api'
+import CastRelationships from './CastRelationships.vue'
 
 const scopeFilter = ref('BOOK')   // 'BOOK' | 'SERIES'
 const typeFilter = ref('ALL')

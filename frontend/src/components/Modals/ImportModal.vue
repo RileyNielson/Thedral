@@ -74,7 +74,7 @@
             macOS is blocking access to {{ blockedFolders.join(', ') }}. Open System Settings, then Privacy &amp; Security, then Files and Folders (or Full Disk Access), allow Terminal, and restart Thedral. You can also paste a path below.
           </template>
           <template v-else>
-            No .scriv projects or .docx/.rtf manuscripts found in Documents, Desktop, or Downloads. Paste a path below.
+            No .scriv projects or .docx manuscripts found in Documents, Desktop, or Downloads. Paste a path below.
           </template>
         </div>
       </div>
@@ -113,23 +113,10 @@
 
       <!-- Path or file import -->
       <div class="border-t border-zinc-800 pt-4 space-y-3 shrink-0">
-        <div class="space-y-1.5">
-          <label class="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider font-mono">Scrivener project or file path</label>
-          <form class="flex gap-2" @submit.prevent="previewTypedPath">
-            <input
-              v-model="typedPath"
-              type="text"
-              placeholder="~/Desktop/My Novel.scriv"
-              class="flex-1 min-w-0 rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-200 font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-500/60"
-            />
-            <button type="submit" :disabled="!typedPath.trim() || isImporting || isPreviewing" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 font-bold rounded-lg text-xs transition">Preview</button>
-          </form>
-          <p class="text-[10px] text-zinc-500">A .scriv project is a folder, so the file picker can't select it. Use "Choose Scrivener project..." below, paste its path, or upload a ZIP of it.</p>
-        </div>
         <div class="flex items-center justify-between">
           <div class="text-xs text-zinc-400">
             <div>Have a file elsewhere on your Mac?</div>
-            <div class="text-[10px] text-zinc-500 font-mono">.docx, .txt, .md, .rtf, or a zipped .scriv</div>
+            <div class="text-[10px] text-zinc-500 font-mono">.docx, .txt, .md, .rtf, a .scriv project, or a zipped .scriv</div>
             <div class="text-[10px] text-zinc-500 mt-1">Scrivener synopsis, notes, outline cards, and Binder metadata are retained.</div>
           </div>
           <button
@@ -138,16 +125,6 @@
             class="px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition border border-zinc-700/50"
           >
             <Upload class="w-3.5 h-3.5" /> Browse File...
-          </button>
-        </div>
-        <div class="flex items-center justify-between gap-3">
-          <div class="text-[10px] text-zinc-500">Scrivener projects are folders. Use this chooser to pick the .scriv project directly.</div>
-          <button
-            @click="chooseScrivener"
-            :disabled="isImporting || isPreviewing"
-            class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 text-xs font-bold rounded-lg shrink-0 transition"
-          >
-            Choose Scrivener project...
           </button>
         </div>
       </div>
@@ -164,7 +141,6 @@ import { FolderDown, X, RefreshCw, Loader, BookOpen, FileText, Upload } from '@l
 import { API_BASE } from '@/api'
 
 const fileInput = ref(null)
-const typedPath = ref('')
 const localManuscripts = ref([])
 const blockedFolders = ref([])
 const isDiscovering = ref(false)
@@ -197,7 +173,18 @@ const closeModal = () => {
   store.toggleModal('import', false)
 }
 
-const triggerBrowse = () => {
+// The system chooser can pick .scriv packages that a browser file input cannot; fall back to the browser input if it is unavailable.
+const triggerBrowse = async () => {
+  try {
+    const response = await fetch(`${API_BASE}/api/import/choose?kind=file`, { method: 'POST' })
+    if (response.ok) {
+      const data = await response.json()
+      if (data.path) await previewLocalFile(data.path)
+      return
+    }
+  } catch {
+    // fall through to the browser chooser
+  }
   if (fileInput.value) fileInput.value.click()
 }
 
@@ -228,20 +215,6 @@ const friendlyError = (e) =>
     : e instanceof TypeError
     ? 'Could not reach the Thedral server. Make sure the launcher window is still open, then reload this page.'
     : e.message
-
-const chooseScrivener = async () => {
-  try {
-    const response = await fetch(`${API_BASE}/api/import/choose?kind=folder`, { method: 'POST' })
-    const data = await readResponse(response, 'Could not open the chooser')
-    if (!data.path) return
-    typedPath.value = data.path
-    await previewLocalFile(data.path)
-  } catch (e) {
-    showToast(friendlyError(e), 'error')
-  }
-}
-
-const previewTypedPath = () => previewLocalFile(typedPath.value.trim())
 
 const previewLocalFile = async (path) => {
   clearPreview()
@@ -308,8 +281,9 @@ const confirmImport = async () => {
         await store.loadScene(data.first_scene_id)
       }
       store.viewMode = 'editor'
-      showToast('Manuscript imported into Binder!', 'success')
       const book = data.first_scene_id ? store.findBookForNode(data.first_scene_id) : null
+      if (book) window.dispatchEvent(new CustomEvent('reveal-book', { detail: { bookId: book.id } }))
+      showToast(book ? `Imported "${book.title}". It is now the working manuscript in the Binder.` : 'Manuscript imported into Binder!', 'success')
       if (book) {
         isAnalyzing.value = true
         analysisError.value = ''

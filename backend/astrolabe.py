@@ -511,7 +511,7 @@ def build_astrolabe_manifest(
     c.execute("""
         SELECT promise_desc, target_tick, target_location, status 
         FROM promises_ledger 
-        WHERE book_id = ? OR series_id = 'default'
+        WHERE book_id = ? AND status != 'DROPPED'
     """, (book_id,))
     promises = c.fetchall()
 
@@ -526,7 +526,7 @@ def build_astrolabe_manifest(
             "x": [px], "y": [py], "z": [0.92],
             "text": [f"<b>Chekhov Gravity Well</b><br>Promise: {p['promise_desc']}<br>Target Day: {px}<br>Status: {p['status']}"],
             "hoverinfo": "text",
-            "marker": {"size": 13, "symbol": "diamond-open", "color": "#ec4899", "line": {"width": 3, "color": "#f43f5e"}, "opacity": opacity}
+            "marker": {"size": 13, "symbol": "diamond-open", "color": "#34d399" if p["status"] == "PAID_OFF" else "#ec4899", "line": {"width": 3, "color": "#10b981" if p["status"] == "PAID_OFF" else "#f43f5e"}, "opacity": opacity}
         })
 
     # Layer 5: Dynamic Event Horizon Deadlines

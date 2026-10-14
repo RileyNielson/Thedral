@@ -394,8 +394,8 @@ try:
     from backend.models import init_db
     init_db(import_db_path)
 
-    import backend.importer
-    backend.importer.get_db = lambda: sqlite3.connect(import_db_path)
+    import backend.importing.binder_builder
+    backend.importing.binder_builder.get_db = lambda: sqlite3.connect(import_db_path)
 
     first_scene_id = build_binder_from_manifest(mock_manifest, "Test Import Project")
 
@@ -885,6 +885,7 @@ if api_books:
         prior_scene_text = f"Earlier scene context marker {uuid.uuid4().hex}."
         context_conn = get_db()
         with context_conn:
+            context_conn.execute("DELETE FROM binder_nodes WHERE id LIKE 'reader_context_%'")
             context_conn.execute("""
                 INSERT INTO binder_nodes (id, parent_id, node_type, title, sort_order)
                 VALUES (?, ?, 'CHAPTER', 'Reader context test chapter', -1000000000000)
@@ -1000,7 +1001,7 @@ if api_books:
                 or {"message": {"content": json.dumps(next(response_items))}}
             )
         )
-        with patch("backend.routers.craft.ENABLE_AI", True), patch.dict(sys.modules, {"ollama": mock_ollama}):
+        with patch("backend.routers.reader_simulation.ENABLE_AI", True), patch.dict(sys.modules, {"ollama": mock_ollama}):
             invalid_root = client.post("/api/disclosures/scan", json={
                 "scene_id": feedback_scene["id"],
                 "text": "A sufficiently long passage for validating the scanner response.",
@@ -1241,8 +1242,106 @@ with patch("backend.routers.lore.ENABLE_AI", True), patch.dict(sys.modules, {"ol
 record_test("AI failure falls back to text scan, not fake findings",
             _fail["ai_generated"] is False and _fail["ai_error"] and _fail["proposed_lore"])
 
+print("\n11. Feature inventory guard")
+from backend.main import app as _guard_app
+_live_routes = {f"{m.upper()} {p}" for p, ops in _guard_app.openapi()["paths"].items() for m in ops}
+_expected_routes = [line for line in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "route_manifest.txt")).read().splitlines() if line]
+_missing_routes = [r for r in _expected_routes if r not in _live_routes]
+record_test("Every recorded API route is still served", not _missing_routes, str(_missing_routes[:10]))
+
+import importlib as _importlib
+_missing_names = []
+for _line in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_manifest.txt")).read().splitlines():
+    _mod, _, _name = _line.partition(":")
+    if not hasattr(_importlib.import_module(_mod), _name):
+        _missing_names.append(_line)
+record_test("Every recorded module function is still importable from its original path", not _missing_names, str(_missing_names[:10]))
+
 # =============================================================================
 # SUMMARY REPORT
+_promise_book = client.get("/api/tree").json()[0]["id"]
+_promise_post = client.post("/api/narrative/promise", json={
+    "book_id": _promise_book, "scene_id": "scene_1", "promise_desc": "Locked drawer", "target_tick": 7.0,
+})
+_promise_rows = client.get(f"/api/narrative/promises?book_id={_promise_book}").json()
+_promise_row = next((p for p in _promise_rows if p["promise_desc"] == "Locked drawer"), {})
+_promise_paid = client.put(f"/api/narrative/promises/{_promise_row.get('id', 0)}", json={"status": "PAID_OFF"})
+_promise_bad = client.put(f"/api/narrative/promises/{_promise_row.get('id', 0)}", json={"status": "NOPE"})
+_promise_after = next((p for p in client.get(f"/api/narrative/promises?book_id={_promise_book}").json() if p["id"] == _promise_row.get("id")), {})
+_promise_del = client.delete(f"/api/narrative/promises/{_promise_row.get('id', 0)}")
+_promise_gone = client.delete(f"/api/narrative/promises/{_promise_row.get('id', 0)}")
+record_test(
+    "Promise ledger: plant, list, resolve, reject bad status, delete",
+    _promise_post.status_code == 200 and _promise_row.get("planted_scene_id") == "scene_1"
+    and _promise_paid.status_code == 200 and _promise_bad.status_code == 400
+    and _promise_after.get("status") == "PAID_OFF"
+    and _promise_del.status_code == 200 and _promise_gone.status_code == 404,
+)
+
+_rel_a = client.post("/api/entities/quick-register", json={"name": "Rel Alpha", "entity_type": "CHARACTER"})
+_rel_b = client.post("/api/entities/quick-register", json={"name": "Rel Beta", "entity_type": "CHARACTER"})
+_rel_ents = {e["name"]: e["entity_id"] for e in client.get("/api/entities").json()}
+_rel_ok = client.post("/api/narrative/connect", json={"source_id": _rel_ents["Rel Alpha"], "target_id": _rel_ents["Rel Beta"], "rel_type": "allied", "description": "Old friends"})
+_rel_dup = client.post("/api/narrative/connect", json={"source_id": _rel_ents["Rel Alpha"], "target_id": _rel_ents["Rel Beta"], "rel_type": "ALLIED"})
+_rel_self = client.post("/api/narrative/connect", json={"source_id": _rel_ents["Rel Alpha"], "target_id": _rel_ents["Rel Alpha"], "rel_type": "ALLIED"})
+_rel_missing = client.post("/api/narrative/connect", json={"source_id": "nope", "target_id": _rel_ents["Rel Beta"], "rel_type": "ALLIED"})
+_rel_list = [r for r in client.get("/api/narrative/connections").json() if r["source_name"] == "Rel Alpha"]
+_rel_del = client.delete(f"/api/narrative/connections/{_rel_ok.json().get('rel_id')}")
+_rel_del2 = client.delete(f"/api/narrative/connections/{_rel_ok.json().get('rel_id')}")
+record_test(
+    "Relationships: create, dedupe, validate, list with names, delete",
+    _rel_ok.status_code == 200 and _rel_dup.json().get("rel_id") == _rel_ok.json().get("rel_id")
+    and _rel_self.status_code == 400 and _rel_missing.status_code == 404
+    and len(_rel_list) == 1 and _rel_list[0]["rel_type"] == "ALLIED" and _rel_list[0]["target_name"] == "Rel Beta"
+    and _rel_del.status_code == 200 and _rel_del2.status_code == 404,
+)
+for _n in ("Rel Alpha", "Rel Beta"):
+    client.delete(f"/api/entities/{_rel_ents[_n]}")
+
+_ser_book = client.post("/api/node", json={"node_type": "BOOK", "title": "Serendipity Book"}).json()
+_ser_ch = client.post("/api/node", json={"node_type": "CHAPTER", "title": "C", "parent_id": _ser_book["id"]}).json()
+_ser_s1 = client.post("/api/node", json={"node_type": "SCENE", "title": "S1", "parent_id": _ser_ch["id"]}).json()
+_ser_s2 = client.post("/api/node", json={"node_type": "SCENE", "title": "S2", "parent_id": _ser_ch["id"]}).json()
+client.post("/api/lore", json={"term": "Glimmerstone", "category": "ITEM", "rule_definition": "Glows near lies"})
+client.put(f"/api/node/{_ser_s1['id']}", json={"content": "<p>The Glimmerstone flared on the table.</p>"})
+client.put(f"/api/node/{_ser_s2['id']}", json={"content": "<p>Rain fell on an empty street.</p>"})
+with patch("backend.routers.narrative.ENABLE_AI", False):
+    _ser_dormant = client.get(f"/api/narrative/serendipity/{_ser_s2['id']}").json()
+    _ser_present = client.get(f"/api/narrative/serendipity/{_ser_s1['id']}").json()
+    _ser_404 = client.get("/api/narrative/serendipity/missing")
+record_test(
+    "Serendipity: finds present and dormant lore without AI",
+    any(i["label"] == "Glimmerstone" for i in _ser_dormant["dormant"])
+    and any(i["label"] == "Glimmerstone" for i in _ser_present["present"])
+    and _ser_dormant["ai_generated"] is False and _ser_404.status_code == 404,
+)
+client.delete(f"/api/node/{_ser_book['id']}")
+client.delete("/api/lore/Glimmerstone")
+
+_note_book = client.post("/api/node", json={"node_type": "BOOK", "title": "Note Book"}).json()
+_note_ch = client.post("/api/node", json={"node_type": "CHAPTER", "title": "C", "parent_id": _note_book["id"]}).json()
+_note_sc = client.post("/api/node", json={"node_type": "SCENE", "title": "S", "parent_id": _note_ch["id"]}).json()
+_note_made = client.post("/api/disclosures/author-note", json={"scene_id": _note_sc["id"], "disclosure_type": "INTENDED", "narrative_claim": "She is afraid."})
+_note_rows = client.get(f"/api/disclosures/scene/{_note_sc['id']}").json()
+_note_del = client.delete(f"/api/disclosures/{_note_rows[0]['id']}") if _note_rows else None
+_note_gone = client.delete("/api/disclosures/99999999")
+record_test(
+    "Author notes: create, list as AUTHOR, delete, 404 when missing",
+    _note_made.status_code == 200 and len(_note_rows) == 1 and _note_rows[0]["source"] == "AUTHOR"
+    and _note_del is not None and _note_del.status_code == 200 and _note_gone.status_code == 404,
+)
+client.delete(f"/api/node/{_note_book['id']}")
+
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_fe_missing = []
+for _line in open(os.path.join(_root, "tests", "frontend_manifest.txt")).read().splitlines():
+    _kind, _, _val = _line.partition(":")
+    if _kind == "file" and not os.path.exists(os.path.join(_root, _val)):
+        _fe_missing.append(_line)
+    elif _kind == "action" and f" {_val}(" not in open(os.path.join(_root, "frontend/src/storeActions.js")).read():
+        _fe_missing.append(_line)
+record_test("Every recorded frontend store action and component file still exists", not _fe_missing, str(_fe_missing[:10]))
+
 # =============================================================================
 print(f"\n{BOLD}{HEADER}==============================================================================={RESET}")
 if tests_passed == tests_run:
