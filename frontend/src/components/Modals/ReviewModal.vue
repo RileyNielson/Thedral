@@ -85,7 +85,7 @@ import { computed, ref, watch } from 'vue'
 import { store, showToast } from '../../store.js'
 import { X } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/api'
 const report = ref(null)
 const proposals = ref([])
 const readerFeedback = ref([])

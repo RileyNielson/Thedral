@@ -9,7 +9,7 @@
         </button>
       </div>
       <div class="flex items-center space-x-1">
-        <button @click="autoTitleScenes" title="Auto-Title Generic Scenes via Local Llama" class="p-1 hover:bg-zinc-800 rounded text-amber-400 hover:text-amber-300 transition"><Sparkles class="w-4 h-4" /></button>
+        <button @click="autoTitleScenes" title="Auto-title generic scenes (uses local AI)" class="p-1 hover:bg-zinc-800 rounded text-amber-400 hover:text-amber-300 transition"><Sparkles class="w-4 h-4" /></button>
         <button @click="addChapter" title="Add Chapter" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"><FolderPlus class="w-4 h-4" /></button>
         <button @click="addScene" title="Add Scene" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"><FilePlus class="w-4 h-4" /></button>
       </div>
@@ -81,7 +81,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
 import { BookMarked, Library, Sparkles, FolderPlus, FilePlus, ChevronRight, ChevronDown, BookOpen, Pencil, Archive, Trash2, Folder, Plus, FileText } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
+import { API_BASE } from '@/api'
 
 const collapsed = ref({})
 const isCollapsed = (id) => !!collapsed.value[id]
@@ -130,6 +130,8 @@ const addSceneTo = async (chId) => {
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to create scene`)
     const data = await res.json()
     store.readerStoryCache = null
+    const result = await res.json()
+    showToast(result.ai_generated ? `AI titled ${result.updated_count} scene(s). Rename any you dislike.` : 'AI is off, so scenes were not retitled.', 'info')
     await fetchTree()
     await selectNode(data.id)
   } catch (e) { showToast(e.message, "error") }

@@ -432,12 +432,12 @@ def toggle_book_archive(book_id: str):
 @router.post("/api/binder/auto-title-scenes")
 async def auto_title_scenes(payload: AutoTitleRequest):
     if not ENABLE_AI:
-        return {"status": "offline_mode", "updated_count": 0}
+        return {"status": "offline_mode", "updated_count": 0, "ai_generated": False}
 
     try:
         import ollama
     except ImportError:
-        return {"status": "offline_mode", "updated_count": 0}
+        return {"status": "offline_mode", "updated_count": 0, "ai_generated": False}
 
     conn = get_db()
     c = conn.cursor()
@@ -481,7 +481,7 @@ async def auto_title_scenes(payload: AutoTitleRequest):
             continue
 
     conn.close()
-    return {"status": "success", "updated_count": updated}
+    return {"status": "success", "updated_count": updated, "ai_generated": True}
 
 @router.post("/api/binder/triage-scene/{scene_id}")
 async def master_triage_scene(scene_id: str):

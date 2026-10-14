@@ -12,6 +12,8 @@ from backend.text_utils import html_to_text
 from backend.astrolabe import build_astrolabe_manifest
 from backend.guardrails import sanitize_entity_type
 from backend.socratic import extract_ghost_proposals, discover_synaptic_resonance
+from backend.config import ENABLE_AI
+from backend.ai_helper import ai_meta, known_cast_lines, deterministic_brief
 
 router = APIRouter(tags=["Narrative 3D"])
 
@@ -175,6 +177,11 @@ async def stream_survey(book_id: str | None = None):
 
         total = len(scenes)
         extracted_total = 0
+        cast_conn = get_db()
+        try:
+            known_cast = "\n".join(f"- {line}" for line in known_cast_lines(cast_conn))
+        finally:
+            cast_conn.close()
         now = time.strftime("%Y-%m-%d %H:%M:%S")
 
         for idx, sc in enumerate(scenes, 1):
@@ -187,7 +194,7 @@ async def stream_survey(book_id: str | None = None):
 
             text = html_to_text(sc["content"] or "")
             if len(text.strip()) >= 40:
-                proposals = await asyncio.to_thread(extract_ghost_proposals, text)
+                proposals = await asyncio.to_thread(extract_ghost_proposals, text, known_cast)
                 db_conn = get_db()
                 with db_conn:
                     for p in proposals:
@@ -265,7 +272,7 @@ def get_scene_serendipity(scene_id: str):
     conn.close()
 
     suggestion = discover_synaptic_resonance(html_to_text(row["content"]), lore_summary)
-    return {"suggestion": suggestion}
+    return {"suggestion": suggestion, **ai_meta(ENABLE_AI)}
 
 @router.post("/api/narrative/promise")
 def seed_promise(payload: PromiseCreate):

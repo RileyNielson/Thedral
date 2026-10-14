@@ -426,6 +426,9 @@
       <!-- TAB 3: SOCRATIC MIRROR & TUTOR -->
       <div v-if="store.activeInspectorTab === 'socratic'" class="space-y-4 flex flex-col h-full">
         <div v-if="store.socraticCritique" class="space-y-2">
+          <div class="text-[9px] font-mono uppercase tracking-wider" :class="store.socraticAi ? 'text-amber-400' : 'text-zinc-500'">
+            {{ store.socraticAi ? 'AI-generated mirror, grounded in text observations computed without AI' : 'No AI involved' }}
+          </div>
           <div class="p-3.5 bg-zinc-950 rounded-xl border border-amber-500/30 text-zinc-200 leading-relaxed whitespace-pre-line text-xs font-serif shadow-lg">
             {{ store.socraticCritique }}
           </div>
@@ -801,7 +804,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } 
 import { store, showToast } from '../store.js'
 import { Microscope, Sparkles, Loader, Send, Maximize, X } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
+import { API_BASE } from '@/api'
 
 const manuscriptAnalytics = ref(null)
 const analyticsLoading = ref(false)
@@ -1476,6 +1479,7 @@ const elevateMacroScene = async () => {
     if (!res.ok) throw new Error('Macro diagnosis failed')
     const data = await res.json()
     store.socraticCritique = data.critique
+    store.socraticAi = !!data.ai_generated
     store.activeCritiqueId = data.critique_id
     fetchCritiques()
   } catch(e) { 

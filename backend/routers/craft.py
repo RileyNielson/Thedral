@@ -11,12 +11,13 @@ from pydantic import BaseModel, Field
 
 from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
 from backend.database import get_db
-from backend.socratic import elevate_prose_diagnosis, get_socratic_lesson
+from backend.socratic import elevate_prose_diagnosis, get_socratic_lesson, SOCRATIC_OFFLINE_NOTICE
+from backend.ai_helper import ai_meta, deterministic_brief
 from backend.telemetry import classify_sentence_energetics, classify_paragraph_energetics
 from backend.text_utils import html_to_text
 
 router = APIRouter(tags=["Craft"])
-READER_SIMULATION_PROMPT_VERSION = "first-read-v4"
+READER_SIMULATION_PROMPT_VERSION = "first-read-v5"
 READER_CONTEXT_CHAR_LIMIT = 3500
 READER_SIMULATION_SYSTEM_PROMPT = """Simulate a careful first-time reader encountering only the supplied manuscript text, without author notes, goals, summaries, character sheets, or intended takeaways. When earlier text is provided, it is a limited excerpt of what the reader encountered before the current scene; do not assume it represents the entire manuscript. This is an AI hypothesis to help the author revise before recruiting readers; it is not actual reader feedback and must not be presented as representative or certain. Consider what a reader can understand from the text alone, what they may infer, wonder about, or misunderstand, and where they might lose the thread. Do not guess what the author intended.
 Estimate the likely experience as the scene unfolds: emotional state and shifts, interest/engagement, tension, mystery/curiosity, suspense/anticipation, character connection, confusion, and attention or pacing changes. Explain what textual beat appears to cause each estimate. These are qualitative AI estimates, not measurements. Use integer levels 1–5 only as an ordinal shorthand: 1 very low, 2 low, 3 moderate, 4 high, 5 very high. Do not imply clinical emotion detection or certainty about actual readers. A score without a specific textual cause and evidence is not useful.
@@ -48,14 +49,25 @@ class XRayRequest(BaseModel):
 
 @router.post("/api/craft/elevate")
 def elevate_prose(payload: ElevateRequest):
+    observations = ""
+    if payload.scene_id and ENABLE_AI:
+        conn = get_db()
+        try:
+            row = conn.execute("SELECT content FROM binder_nodes WHERE id = ?", (payload.scene_id,)).fetchone()
+            if row and row["content"]:
+                observations = deterministic_brief(html_to_text(row["content"]), conn)
+        finally:
+            conn.close()
     critique = elevate_prose_diagnosis(
         passage=html_to_text(payload.passage),
         surrounding=html_to_text(payload.surrounding),
-        scene_id=payload.scene_id
+        scene_id=payload.scene_id,
+        observations=observations
     )
-    
+    used_ai = ENABLE_AI and critique != SOCRATIC_OFFLINE_NOTICE and bool(payload.passage.strip())
+
     critique_id = f"crit_{uuid.uuid4().hex[:8]}"
-    if payload.scene_id:
+    if payload.scene_id and used_ai:
         conn = get_db()
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         with conn:
@@ -66,7 +78,7 @@ def elevate_prose(payload: ElevateRequest):
             """, (critique_id, payload.scene_id, payload.passage[:300], critique, now))
         conn.close()
 
-    return {"critique": critique, "critique_id": critique_id}
+    return {"critique": critique, "critique_id": critique_id, **ai_meta(used_ai)}
 
 @router.post("/api/craft/xray")
 def get_craft_xray(payload: XRayRequest):
@@ -394,6 +406,11 @@ async def scan_scene_disclosures(payload: ScanDisclosureRequest):
     elif not ENABLE_AI:
         return {"status": "error", "message": "Reader simulation unavailable (local AI is disabled)."}
     else:
+        grounding = ""
+        try:
+            grounding = deterministic_brief(analyzed_text)
+        except Exception:
+            grounding = ""
         if reading_context:
             prompt_content = (
                 "Recent preceding manuscript text (a limited context window; no author notes):\n"
@@ -408,6 +425,8 @@ async def scan_scene_disclosures(payload: ScanDisclosureRequest):
             )
         else:
             prompt_content = "Current scene excerpt (the only manuscript text supplied):\n" + analyzed_text
+        if grounding:
+            prompt_content += "\n\n" + grounding
         def find_evidence(quote: str) -> tuple[str, str]:
             excerpt = _quoted_excerpt(analyzed_text, quote)
             if excerpt:

@@ -11,7 +11,7 @@
         type="file" 
         ref="fileInput" 
         @change="handleFileUpload" 
-        accept=".docx,.doc,.txt,.md,.zip" 
+        accept=".docx,.doc,.txt,.md,.rtf,.zip" 
         class="hidden" 
       />
 
@@ -29,7 +29,7 @@
       <div class="space-y-2">
         <div class="flex items-center justify-between">
           <label class="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider font-mono">
-            Discovered in ~/Documents:
+            Found in Documents, Desktop, and Downloads:
           </label>
           <button 
             @click="discoverLocal" 
@@ -70,7 +70,7 @@
         </div>
 
         <div v-else class="text-xs text-zinc-500 italic p-4 bg-zinc-950 rounded border border-zinc-800/80 text-center font-serif">
-          No .scriv projects or .docx manuscripts found in ~/Documents.
+          No .scriv projects or .docx manuscripts found in Documents, Desktop, or Downloads. Paste a path below.
         </div>
       </div>
 
@@ -106,21 +106,35 @@
         </button>
       </div>
 
-      <!-- File Browser Upload Trigger -->
-      <div class="border-t border-zinc-800 pt-4 flex items-center justify-between shrink-0">
-        <div class="text-xs text-zinc-400">
-          <div>Have a file elsewhere on your Mac?</div>
-          <div class="text-[10px] text-zinc-500 font-mono">Supports .docx, .txt, .md, or zipped .scriv</div>
-          <div class="text-[10px] text-zinc-500 mt-1">Scrivener synopsis, notes, outline cards, and Binder metadata are retained.</div>
+      <!-- Path or file import -->
+      <div class="border-t border-zinc-800 pt-4 space-y-3 shrink-0">
+        <div class="space-y-1.5">
+          <label class="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider font-mono">Scrivener project or file path</label>
+          <form class="flex gap-2" @submit.prevent="previewTypedPath">
+            <input
+              v-model="typedPath"
+              type="text"
+              placeholder="~/Desktop/My Novel.scriv"
+              class="flex-1 min-w-0 rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-200 font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-500/60"
+            />
+            <button type="submit" :disabled="!typedPath.trim() || isImporting || isPreviewing" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 font-bold rounded-lg text-xs transition">Preview</button>
+          </form>
+          <p class="text-[10px] text-zinc-500">A .scriv project is a folder, so the Browse button can't pick it. Paste its path (drag the folder into this box, or in Finder choose Option-Cmd-C), or upload a ZIP of it.</p>
         </div>
-
-        <button 
-          @click="triggerBrowse" 
-          :disabled="isImporting || isPreviewing"
-          class="px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition border border-zinc-700/50"
-        >
-          <Upload class="w-3.5 h-3.5" /> Browse File...
-        </button>
+        <div class="flex items-center justify-between">
+          <div class="text-xs text-zinc-400">
+            <div>Have a file elsewhere on your Mac?</div>
+            <div class="text-[10px] text-zinc-500 font-mono">.docx, .txt, .md, .rtf, or a zipped .scriv</div>
+            <div class="text-[10px] text-zinc-500 mt-1">Scrivener synopsis, notes, outline cards, and Binder metadata are retained.</div>
+          </div>
+          <button
+            @click="triggerBrowse"
+            :disabled="isImporting || isPreviewing"
+            class="px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition border border-zinc-700/50"
+          >
+            <Upload class="w-3.5 h-3.5" /> Browse File...
+          </button>
+        </div>
       </div>
 
     </div>
@@ -132,9 +146,10 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { store, showToast } from '../../store.js'
 import { FolderDown, X, RefreshCw, Loader, BookOpen, FileText, Upload } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/api'
 
 const fileInput = ref(null)
+const typedPath = ref('')
 const localManuscripts = ref([])
 const isDiscovering = ref(false)
 const isImporting = ref(false)
@@ -181,10 +196,22 @@ const clearPreview = () => {
 }
 
 const readResponse = async (response, fallback) => {
-  const data = await response.json()
+  let data = {}
+  try {
+    data = await response.json()
+  } catch {
+    if (!response.ok) throw new Error(`${fallback} (server error ${response.status})`)
+  }
   if (!response.ok) throw new Error(data.detail || data.message || fallback)
   return data
 }
+
+const friendlyError = (e) =>
+  e instanceof TypeError
+    ? 'Could not reach the Thedral server. Make sure the launcher window is still open, then reload this page.'
+    : e.message
+
+const previewTypedPath = () => previewLocalFile(typedPath.value.trim())
 
 const previewLocalFile = async (path) => {
   clearPreview()
@@ -201,7 +228,7 @@ const previewLocalFile = async (path) => {
     importReport.value = data.report
   } catch (e) {
     pendingPath.value = ''
-    showToast(`Preview Error: ${e.message}`, 'error')
+    showToast(`Preview Error: ${friendlyError(e)}`, 'error')
   } finally {
     isPreviewing.value = false
   }
@@ -272,7 +299,7 @@ const confirmImport = async () => {
       }
     }
   } catch (e) {
-    showToast(`Import Error: ${e.message}`, 'error')
+    showToast(`Import Error: ${friendlyError(e)}`, 'error')
   } finally {
     isImporting.value = false
     store.saveStatus = 'Ready'
@@ -300,7 +327,7 @@ const handleFileUpload = async (event) => {
     importReport.value = data.report
   } catch (e) {
     pendingFile.value = null
-    showToast(`Preview Error: ${e.message}`, 'error')
+    showToast(`Preview Error: ${friendlyError(e)}`, 'error')
   } finally {
     isPreviewing.value = false
     store.saveStatus = 'Ready'

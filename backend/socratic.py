@@ -48,7 +48,8 @@ def elevate_prose_diagnosis(
     passage: str, 
     surrounding: str = "", 
     telemetry: dict | None = None, 
-    scene_id: str | None = None
+    scene_id: str | None = None,
+    observations: str = ""
 ) -> str:
     """
     Evaluates what the text DOES and DOES NOT do to the reader without prescriptive AI bias.
@@ -94,6 +95,7 @@ def elevate_prose_diagnosis(
         f"{SOCRATIC_MIRROR_RUBRIC}\n\n"
         f"{context_block}"
         f"{telemetry_note}\n"
+        f"{observations + chr(10) + chr(10) if observations else ''}"
         f"=== TARGET PASSAGE TO MIRROR ===\n\"{passage}\"\n\n"
         f"Hold up the mirror. Dissect what the prose DOES, what it DOES NOT DO, and present the Sovereign Intent Inquiry."
     )
@@ -142,7 +144,7 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 ]
 """
 
-def extract_ghost_proposals(scene_text: str) -> list[dict]:
+def extract_ghost_proposals(scene_text: str, known_cast: str = "") -> list[dict]:
     """Extracts candidate state deltas without modifying canonical database truth."""
     if not ENABLE_AI or not scene_text or len(scene_text.strip()) < 40:
         return []
@@ -151,7 +153,7 @@ def extract_ghost_proposals(scene_text: str) -> list[dict]:
         resp = ollama.chat(
             model=STUDIO_MODEL,
             messages=[
-                {"role": "system", "content": GHOST_SURVEYOR_PROMPT},
+                {"role": "system", "content": GHOST_SURVEYOR_PROMPT + (f"\nKNOWN CAST (use these exact names; aliases are the same person):\n{known_cast}\n" if known_cast else "")},
                 {"role": "user", "content": f"Scene Prose:\n{scene_text[:3500]}"}
             ],
             format="json",

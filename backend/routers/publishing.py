@@ -302,8 +302,10 @@ def get_authorship_proof(book_id: str | None = None):
 @router.post("/api/publishing/synopsis")
 def get_synopsis(payload: SynopsisRequest):
     if not ENABLE_AI:
-        return {"synopsis": "Query Synopsis requires local AI (Pure Math Mode active)."}
-    return {"synopsis": generate_query_synopsis(payload.book_id)}
+        return {"synopsis": "Query Synopsis requires local AI (Lite mode: AI is off).", "ai_generated": False, "engine": "deterministic"}
+    text = generate_query_synopsis(payload.book_id)
+    ok = not text.startswith(("Could not generate", "Not enough scenes"))
+    return {"synopsis": text, "ai_generated": ok, "engine": "local-ai" if ok else "deterministic"}
 
 @router.get("/api/publishing/prose-signals")
 def get_prose_signals(book_id: str | None = None):

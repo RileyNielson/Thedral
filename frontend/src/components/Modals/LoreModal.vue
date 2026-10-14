@@ -16,10 +16,10 @@
             @click="auditSceneLore" 
             :disabled="isAuditingLore || !store.activeNode?.content" 
             class="px-3 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-[10px] font-bold uppercase transition disabled:opacity-50 flex items-center gap-1.5"
-            title="Scan active scene for lore contradictions"
+            title="Spelling of lore terms is checked by text matching; contradictions are judged by local AI when it is on"
           >
             <ShieldAlert class="w-3.5 h-3.5" />
-            <span>{{ isAuditingLore ? 'Auditing...' : 'Audit Scene' }}</span>
+            <span>{{ isAuditingLore ? 'Auditing...' : 'Audit Scene (text + AI)' }}</span>
           </button>
         </div>
         <button @click="closeModal" class="text-zinc-500 hover:text-white transition">
@@ -40,7 +40,7 @@
           :key="i" 
           class="p-2.5 bg-zinc-950 rounded border border-rose-900/40 text-xs space-y-1"
         >
-          <div class="font-bold text-rose-300 font-mono text-[11px]">Rule Broken: {{ disc.rule_broken }}</div>
+          <div class="font-bold text-rose-300 font-mono text-[11px]">Rule Broken: {{ disc.rule_broken }} <span class="text-[9px] text-zinc-500 uppercase">{{ disc.source === 'ai' ? 'AI' : 'text match' }}</span></div>
           <div class="text-zinc-400 italic line-clamp-2 font-serif">"{{ disc.violation }}"</div>
           <div class="text-zinc-300 leading-snug">{{ disc.explanation }}</div>
         </div>
@@ -57,10 +57,10 @@
               @click="extractLoreFromScene" 
               :disabled="isExtractingLore || !store.activeNode?.content" 
               class="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded border border-amber-500/30 text-[9px] font-bold uppercase transition disabled:opacity-50 flex items-center gap-1"
-              title="Extract terms from active scene draft"
+              title="Invented names come from a text scan; definitions come from local AI when it is on"
             >
               <Sparkles class="w-3 h-3" />
-              <span>{{ isExtractingLore ? 'Scanning...' : 'Extract' }}</span>
+              <span>{{ isExtractingLore ? 'Scanning...' : 'Extract (text + AI)' }}</span>
             </button>
           </div>
 
@@ -145,7 +145,7 @@ import { ref, watch } from 'vue'
 import { store, showToast } from '../../store.js'
 import { BookOpenCheck, X, Trash2, ShieldAlert, AlertCircle, Sparkles } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/api'
 
 const newLore = ref({
   term: '',
@@ -219,7 +219,8 @@ const extractLoreFromScene = async () => {
         rule_definition: suggestion.rule_definition,
         pronunciation: suggestion.pronunciation || ''
       }
-      showToast(`Suggested: "${suggestion.term}"`, 'info')
+      const by = suggestion.source === 'ai' ? 'AI' : 'text scan'
+      showToast(`Suggested by ${by}: "${suggestion.term}". Review before saving.`, 'info')
     } else {
       showToast('No new entities or laws detected in this scene.', 'info')
     }
@@ -244,7 +245,7 @@ const auditSceneLore = async () => {
     const data = await res.json()
     loreDiscrepancies.value = data.discrepancies || []
     if (loreDiscrepancies.value.length === 0) {
-      showToast('Lore audit clean! No contradictions found.', 'info')
+      showToast(data.ai_generated ? 'Lore audit clean (text match + AI).' : 'No misspellings found (text match only; AI is off or unavailable).', 'info')
     }
   } catch(e) {
     showToast(e.message, 'error')

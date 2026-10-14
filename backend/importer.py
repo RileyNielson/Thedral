@@ -422,15 +422,27 @@ def parse_plaintext(fpath: str) -> list[tuple[str, bool, str, str, str]]:
 
 def parse_scrivener_project(scriv_path: str) -> dict:
     files_map = {}
+    legacy_doc = re.compile(
+        r"^(\d+)(?:_(synopsis|notes?|annotations?|comments?|references))?\.(?:rtf|txt)$", re.IGNORECASE
+    )
+    role_names = {
+        "synopsis": "synopsis", "note": "notes", "notes": "notes",
+        "annotation": "annotations", "annotations": "annotations",
+        "comment": "comments", "comments": "comments", "references": "references",
+    }
     for root, _, files in os.walk(scriv_path):
-        low_root = root.lower()
-        if any(x in low_root for x in ['settings', 'quicklook', 'snapshots']):
+        relative_root = os.path.relpath(root, scriv_path).lower()
+        if any(x in relative_root for x in ['settings', 'quicklook', 'snapshots']):
             continue
         data_id = os.path.basename(root)
         for f in files:
             full_p = os.path.join(root, f)
             fl = f.lower()
-            if fl in ('content.rtf', 'content.txt'):
+            legacy = legacy_doc.match(f) if data_id.lower() == "docs" else None
+            if legacy:
+                role = role_names.get((legacy.group(2) or "").lower(), "content")
+                files_map.setdefault(legacy.group(1), {})[role] = full_p
+            elif fl in ('content.rtf', 'content.txt'):
                 files_map.setdefault(data_id, {})['content'] = full_p
             elif fl in ('synopsis.rtf', 'synopsis.txt'):
                 files_map.setdefault(data_id, {})['synopsis'] = full_p
@@ -522,7 +534,10 @@ def parse_scrivener_project(scriv_path: str) -> dict:
                 raw_title = title_node.text.strip() if title_node is not None and title_node.text else ""
                 title_lower = raw_title.lower()
                 itype = item_node.attrib.get('Type', '')
-                uuid_val = str(item_node.attrib.get('UUID') or item_node.attrib.get('Id') or "")
+                uuid_val = str(
+                    item_node.attrib.get('UUID') or item_node.attrib.get('ID')
+                    or item_node.attrib.get('Id') or ""
+                )
                 item_path = (*path, raw_title) if raw_title else path
                 source_metadata = item_metadata(item_node, raw_title, uuid_val, itype, list(item_path))
 
@@ -868,12 +883,18 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
     return first_created_scene_id or book_id
 
 def scan_local_manuscripts() -> list[dict]:
-    docs_dir = os.path.expanduser("~/Documents")
     found = []
-    if not os.path.exists(docs_dir):
-        return []
-        
     ignored = {'venv', '.venv', 'site-packages', 'library', 'temp', 'node_modules', '.git'}
+    home = os.path.expanduser("~")
+    for docs_dir in (os.path.join(home, name) for name in ("Documents", "Desktop", "Downloads")):
+        if os.path.isdir(docs_dir):
+            found.extend(_scan_manuscript_folder(docs_dir, home, ignored))
+    found.sort(key=lambda x: x["title"].lower())
+    return found[:40]
+
+
+def _scan_manuscript_folder(docs_dir: str, home: str, ignored: set[str]) -> list[dict]:
+    found = []
     for root, dirs, files in os.walk(docs_dir):
         dirs[:] = [d for d in dirs if not d.startswith('.') and d.lower() not in ignored]
         
@@ -884,7 +905,7 @@ def scan_local_manuscripts() -> list[dict]:
                     "type": "SCRIVENER",
                     "title": os.path.splitext(d)[0],
                     "path": abs_p,
-                    "rel_path": os.path.relpath(abs_p, docs_dir)
+                    "rel_path": os.path.relpath(abs_p, home)
                 })
                 dirs.remove(d)
 
@@ -895,8 +916,7 @@ def scan_local_manuscripts() -> list[dict]:
                     "type": "DOCX",
                     "title": os.path.splitext(f)[0].replace("_", " "),
                     "path": abs_p,
-                    "rel_path": os.path.relpath(abs_p, docs_dir)
+                    "rel_path": os.path.relpath(abs_p, home)
                 })
 
-    found.sort(key=lambda x: x["title"].lower())
-    return found[:25]
+    return found

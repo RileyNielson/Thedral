@@ -193,7 +193,7 @@ import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { store, showToast } from '../store.js'
 import { Clock, Satellite, AlertTriangle, ExternalLink, Loader, X, Crosshair } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/api'
 
 const isLoading = ref(false)
 let evtSource = null

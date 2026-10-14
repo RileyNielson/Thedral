@@ -77,7 +77,7 @@
             :disabled="isLoading"
             class="w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 font-medium rounded text-xs text-white transition border border-zinc-700/50"
           >
-            {{ isLoading && outputTitle.includes('Synopsis') ? 'Compiling...' : 'Generate' }}
+            {{ isLoading && outputTitle.includes('Synopsis') ? 'Compiling...' : 'Generate (AI)' }}
           </button>
         </div>
 
@@ -128,7 +128,7 @@ import { ref, computed } from 'vue'
 import { store, showToast } from '../../store.js'
 import { Award, X, Mic, ShieldCheck, FileText, Copy, Activity } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`
+import { API_BASE } from '@/api'
 
 const output = ref('')
 const outputTitle = ref('')
@@ -223,7 +223,7 @@ const generateSynopsis = async () => {
     })
     if (!res.ok) throw new Error('Synopsis compilation failed')
     const data = await res.json()
-    output.value = data.synopsis
+    output.value = (data.ai_generated ? '[AI-generated from your scene summaries]\n\n' : '') + data.synopsis
   } catch(e) { 
     output.value = 'Error generating industry query synopsis.'
     showToast(e.message, 'error') 

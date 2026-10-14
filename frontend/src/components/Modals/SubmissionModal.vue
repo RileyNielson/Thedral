@@ -100,7 +100,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { store, showToast } from '../../store.js'
 import { X } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/api'
 const statuses = ['PREPARING', 'SENT', 'REQUESTED', 'REJECTED', 'ACCEPTED', 'WITHDRAWN']
 const activeBook = computed(() => store.getBook())
 const profile = reactive({ author_name: '', genre: '', logline: '', author_bio: '', query_text: '', sample_scene_ids: [] })

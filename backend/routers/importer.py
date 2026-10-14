@@ -3,6 +3,7 @@ import uuid
 import zipfile
 import shutil
 import tempfile
+from urllib.parse import unquote, urlparse
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from backend.config import EXPORTS_DIR
@@ -30,6 +31,38 @@ def _safe_extract_zip(zip_path: str, extract_dir: str) -> None:
             os.makedirs(os.path.dirname(member_path), exist_ok=True)
             with zip_ref.open(member, "r") as src, open(member_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+
+
+def _clean_user_path(raw: str) -> str:
+    """Accept paths as pasted from Finder or dragged into Terminal."""
+    value = (raw or "").strip().strip("'\"")
+    if value.startswith("file://"):
+        value = unquote(urlparse(value).path)
+    value = value.replace("\\ ", " ")
+    return os.path.expanduser(value)
+
+
+def _resolve_scrivener_dir(path: str) -> str | None:
+    """Return the .scriv folder for a project folder, a .scrivx file, or its parent."""
+    if os.path.isfile(path) and path.lower().endswith(".scrivx"):
+        return os.path.dirname(path)
+    if not os.path.isdir(path):
+        return None
+    if any(name.lower().endswith(".scrivx") for name in os.listdir(path)):
+        return path
+    children = [
+        os.path.join(path, name) for name in os.listdir(path)
+        if name.lower().endswith(".scriv") and os.path.isdir(os.path.join(path, name))
+    ]
+    return children[0] if len(children) == 1 else None
+
+
+def _find_scrivener_in_extract(extract_dir: str) -> str | None:
+    for root_dir, dirs, files in os.walk(extract_dir):
+        dirs[:] = [d for d in dirs if d != "__MACOSX"]
+        if any(name.lower().endswith(".scrivx") and not name.startswith("._") for name in files):
+            return root_dir
+    return None
 
 
 def _scrivener_import_warnings(scriv_path: str) -> list[str]:
@@ -62,36 +95,58 @@ class LocalPathImport(BaseModel):
     path: str
 
 
-def _parse_import(path: str, filename: str):
-    ext = os.path.splitext(filename)[1].lower()
+SUPPORTED_TEXT = {".txt", ".md", ".markdown", ".text", ".rtf"}
+
+
+def _parse_import(path: str, filename: str, uploaded: bool = False):
+    ext = os.path.splitext(filename.rstrip("/"))[1].lower()
     title = os.path.splitext(os.path.basename(filename.rstrip("/")))[0].replace("_", " ")
     warnings = []
 
-    if ext == ".scriv" or os.path.isdir(path):
-        manifest = parse_scrivener_project(path)
-        warnings.extend(_scrivener_import_warnings(path))
+    scriv_dir = None if uploaded else (_resolve_scrivener_dir(path) if os.path.exists(path) else None)
+    if scriv_dir:
+        title = os.path.splitext(os.path.basename(scriv_dir))[0].replace("_", " ") or title
+        manifest = parse_scrivener_project(scriv_dir)
+        warnings.extend(_scrivener_import_warnings(scriv_dir))
+    elif os.path.isdir(path) and not uploaded:
+        raise ValueError(
+            "That folder is not a Scrivener project (no .scrivx file inside). "
+            "Choose the .scriv folder itself."
+        )
+    elif ext == ".scrivx":
+        raise ValueError(
+            "A Scrivener project is a folder, so its .scrivx file can't be uploaded alone. "
+            "Zip the whole .scriv folder and upload the ZIP, or paste the folder path."
+        )
     elif ext in {".docx", ".doc"}:
         manifest = {"manuscript": parse_docx(path)}
         if ext == ".docx":
             warnings.extend(inspect_docx_import(path))
-    elif ext == ".zip":
+    elif ext == ".zip" or (ext == ".scriv" and zipfile.is_zipfile(path)):
         with tempfile.TemporaryDirectory(prefix="import_extract_", dir=str(EXPORTS_DIR)) as extract_dir:
             _safe_extract_zip(path, extract_dir)
-            scriv_dir = None
-            for root_dir, _, files in os.walk(extract_dir):
-                if any(name.lower().endswith(".scrivx") for name in files):
-                    scriv_dir = root_dir
-                    break
+            scriv_dir = _find_scrivener_in_extract(extract_dir)
             if not scriv_dir:
-                raise ValueError("No .scrivx project file found inside the ZIP. Ensure you zipped a valid Scrivener project.")
+                raise ValueError("No .scrivx project file found inside the ZIP. Zip the whole .scriv folder, not just its contents.")
             title = os.path.basename(scriv_dir).replace(".scriv", "").replace("_", " ") or title
             manifest = parse_scrivener_project(scriv_dir)
             warnings.extend(_scrivener_import_warnings(scriv_dir))
+    elif ext in SUPPORTED_TEXT or not ext:
+        manifest = {"manuscript": parse_plaintext(path) if ext != ".rtf" else _parse_rtf(path)}
     else:
-        manifest = {"manuscript": parse_plaintext(path)}
+        raise ValueError(
+            f"{ext or 'This file type'} isn't supported. Import a .docx, .txt, .md, .rtf, "
+            "a Scrivener project folder (.scriv), or a ZIP of one."
+        )
 
     report = build_import_report(manifest, warnings)
     return manifest, title, report
+
+
+def _parse_rtf(path: str):
+    from backend.importer import read_file_content, normalize_paragraphs
+    return [(paragraph, False, "", "", "") for paragraph in normalize_paragraphs(read_file_content(path))]
+
 
 @router.get("/api/import/discover")
 def discover_local_files():
@@ -99,10 +154,10 @@ def discover_local_files():
 
 @router.post("/api/import/local-path")
 def import_local_path(payload: LocalPathImport):
-    p = os.path.expanduser(payload.path)
+    p = _clean_user_path(payload.path)
     if not os.path.exists(p):
         raise HTTPException(400, detail=f"Path does not exist: {p}")
-        
+
     title = os.path.splitext(os.path.basename(p.rstrip("/")))[0].replace("_", " ")
     try:
         manifest, title, report = _parse_import(p, p)
@@ -120,7 +175,7 @@ def import_local_path(payload: LocalPathImport):
 
 @router.post("/api/import/preview/local-path")
 def preview_local_path(payload: LocalPathImport):
-    p = os.path.expanduser(payload.path)
+    p = _clean_user_path(payload.path)
     if not os.path.exists(p):
         raise HTTPException(400, detail=f"Path does not exist: {p}")
     try:
@@ -135,11 +190,10 @@ async def import_uploaded_file(file: UploadFile = File(...)):
     temp_dir = str(EXPORTS_DIR)
     temp_path = os.path.join(temp_dir, f"temp_{uuid.uuid4().hex[:6]}_{os.path.basename(filename)}")
     
-    with open(temp_path, "wb") as f:
-        f.write(await file.read())
-
     try:
-        manifest, title, report = _parse_import(temp_path, filename)
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        manifest, title, report = _parse_import(temp_path, filename, uploaded=True)
         first_scene_id = build_binder_from_manifest(manifest, title)
         return {"status": "success", "first_scene_id": first_scene_id, "report": report}
         
@@ -160,7 +214,7 @@ async def preview_uploaded_file(file: UploadFile = File(...)):
     try:
         with open(temp_path, "wb") as target:
             shutil.copyfileobj(file.file, target)
-        _, title, report = _parse_import(temp_path, filename)
+        _, title, report = _parse_import(temp_path, filename, uploaded=True)
         return {"title": title, "report": report}
     except Exception as e:
         raise HTTPException(400, detail=f"Import Preview Failed: {str(e)}")

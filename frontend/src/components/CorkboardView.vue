@@ -128,7 +128,7 @@ import { ref, computed, watch } from 'vue'
 import { store, showToast } from '../store.js'
 import { LayoutGrid, PenTool, ArrowRight, Plus } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/api'
 
 const selectedChapterId = ref('ALL')
 watch(() => store.activeBookId, () => { selectedChapterId.value = 'ALL' })

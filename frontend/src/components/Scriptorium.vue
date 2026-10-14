@@ -210,7 +210,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 
-const API_BASE = import.meta.env.VITE_API_BASE || ''
+import { API_BASE } from '@/api'
 
 const isXRayLoading = ref(false)
 const activeXRayLens = ref('energetics') // 'energetics' | 'signals' | 'clutter' | 'cadence'
@@ -613,6 +613,7 @@ const elevateSelection = async () => {
     if (!res.ok) throw new Error('Elevation failed')
     const data = await res.json()
     store.socraticCritique = data.critique
+    store.socraticAi = !!data.ai_generated
     store.activeCritiqueId = data.critique_id
     window.dispatchEvent(new Event('refresh-critiques'))
   } catch(e) { 

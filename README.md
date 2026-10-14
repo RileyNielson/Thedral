@@ -83,6 +83,8 @@ Powered by a local, air-gapped **Llama 3.2:3b** model via Ollama:
 - **Cryptographic Proof of Authorship**: Generates a tamper-evident SHA-256 audit certificate derived from the append-only SQLite WAL revision history, proving multi-session organic human drafting to legally defend against AI accusations.
 - **Omniscient Scrivener Importer**: Ingests `.scriv`, `.docx`, `.txt`, and `.md` bundles, extracting chapters, scenes, index card synopses, document notes, character sheets, and worldbuilding lore into SQLite.
 - **Audiobook Narrator Pack**: Compiles phonetic pronunciation guides from the Living Style Sheet and vocal delivery profiles for ACX voice actors.
+- **Scrivener Import Paths**: Zip a whole `.scriv` folder, paste its folder path in the Import dialog, or pick it from the discovered list (Documents, Desktop, Downloads). Scrivener 1/2 and 3 layouts are supported.
+- **AI as a Helper, Always Labeled**: Deterministic engines (name scan, Wiktionary check, spelling match, reader-experience moments) run first and work in Lite mode. When local AI is on, it receives those findings as evidence and only explains or extends them. Every AI-capable response carries `ai_generated` and `engine` fields, and the UI says when AI took part.
 - **Publication-Grade Word Compiler**: Exports formatted `.docx` manuscripts with centered chapter headers, indented paragraphs, and decoupled epigraphs.
 
 ---

@@ -636,6 +636,51 @@ record_test(
     not analyze_reader_feel("<p>CHAPTER I.</p><p>[Illustration: a house]</p>" * 6),
 )
 
+import zipfile as _zipfile
+from backend.routers.importer import _parse_import as _route_parse_import, _clean_user_path
+
+with tempfile.TemporaryDirectory(prefix="settings_") as scriv_base_dir:
+    scriv_base = Path(scriv_base_dir)
+    modern = scriv_base / "Modern Novel.scriv"
+    (modern / "Files" / "Data" / "B").mkdir(parents=True)
+    (modern / "Novel.scrivx").write_text(
+        '<ScrivenerProject><Binder><BinderItem UUID="A" Type="DraftFolder"><Title>Manuscript</Title><Children>'
+        '<BinderItem UUID="B" Type="Text"><Title>Opening</Title></BinderItem></Children></BinderItem></Binder></ScrivenerProject>'
+    )
+    (modern / "Files" / "Data" / "B" / "content.rtf").write_text(r"{\rtf1\ansi Modern scene text here.\par}")
+    legacy = scriv_base / "Legacy Novel.scriv"
+    (legacy / "Files" / "Docs").mkdir(parents=True)
+    (legacy / "Novel.scrivx").write_text(
+        '<ScrivenerProject><Binder><BinderItem ID="1" Type="DraftFolder"><Title>Manuscript</Title><Children>'
+        '<BinderItem ID="2" Type="Text"><Title>Opening</Title></BinderItem></Children></BinderItem></Binder></ScrivenerProject>'
+    )
+    (legacy / "Files" / "Docs" / "2.rtf").write_text(r"{\rtf1\ansi Legacy scene text here.\par}")
+    mac_zip = scriv_base / "export.zip"
+    with _zipfile.ZipFile(mac_zip, "w") as archive:
+        archive.writestr("__MACOSX/Modern Novel.scriv/._Novel.scrivx", "stub")
+        for item in modern.rglob("*"):
+            archive.write(item, os.path.relpath(item, scriv_base))
+    results = {}
+    for label, target, uploaded in (
+        ("folder", modern, False), ("scrivx", modern / "Novel.scrivx", False),
+        ("legacy", legacy, False), ("zip", mac_zip, True),
+    ):
+        try:
+            results[label] = _route_parse_import(str(target), str(target), uploaded)[2]["words"]
+        except Exception as error:
+            results[label] = str(error)
+    try:
+        _route_parse_import("/tmp/book.pdf", "book.pdf", True)
+        pdf_rejected = False
+    except ValueError:
+        pdf_rejected = True
+record_test(
+    "Importer reads Scrivener folders, .scrivx paths, legacy projects, and macOS ZIPs, and rejects unsupported files",
+    results == {"folder": 4, "scrivx": 4, "legacy": 4, "zip": 4} and pdf_rejected
+    and _clean_user_path("'/Users/x/My\\ Novel.scriv' ") == "/Users/x/My Novel.scriv",
+    detail=str(results),
+)
+
 import backend.wiktionary_lexicon as wiktionary
 from backend.wiktionary_lexicon import expand_lexical_terms, get_lexicon_status, is_english_word
 
@@ -1024,7 +1069,7 @@ if api_books:
             ),
             "new result": first_simulation.json().get("reused") is False,
             "fresh reader contract": (
-                first_saved_sim.get("prompt_version") == "first-read-v4"
+                first_saved_sim.get("prompt_version") == "first-read-v5"
                 and first_saved_sim.get("intended_takeaway") == ""
                 and "author's intended reader takeaway" not in first_saved_sim.get("system_prompt", "").lower()
                 and "The reader sees that a passage is being validated."
@@ -1160,6 +1205,41 @@ record_test("Counts selected relational cues", signals["signals"]["relational_cu
 record_test("Counts selected mystery cues", signals["signals"]["mystery_cues_per_1000_words"]["count"] > 0)
 record_test("Counts selected sensory cues", signals["signals"]["sensory_cues_per_1000_words"]["count"] > 0)
 record_test("Signal report disclaims reader-response measurement", "do not measure reader emotions" in signals["limitations"])
+
+
+print("\n10. AI helper integration")
+import types as _types
+from backend.ai_helper import spelling_findings, find_name_candidates, ai_meta, deterministic_brief
+from backend.routers import lore as lore_router
+
+record_test("Misspelled lore term is caught without AI",
+            spelling_findings([{"term": "Aethermoor"}], "They rode toward Aethermor at dawn.")[0]["violation"] == "Aethermor")
+record_test("Correct lore spelling is not flagged", spelling_findings([{"term": "Aethermoor"}], "Aethermoor stood.") == [])
+record_test("Invented names are found by text scan",
+            "Zhivrek" in find_name_candidates("The old guard feared Zhivrek and Zhivrek knew it.", set()))
+record_test("ai_meta labels engine", ai_meta(True)["engine"] == "local-ai" and ai_meta(False)["engine"] == "deterministic")
+
+_lore_text = "The council met at dusk. " * 6 + "Guards saw Zhivrek watching from the tower."
+with patch("backend.routers.lore.ENABLE_AI", False):
+    _lite = lore_router.auto_extract_lore(lore_router.ExtractLoreRequest(scene_text=_lore_text))
+record_test("Lore extraction works in Lite mode and says no AI",
+            _lite["ai_generated"] is False and any(p["term"] == "Zhivrek" for p in _lite["proposed_lore"]))
+
+_prompts = []
+def _fake_chat(**kwargs):
+    _prompts.append(kwargs["messages"][0]["content"])
+    return {"message": {"content": '[{"term": "Zhivrek", "category": "LORE", "rule_definition": "A watcher."}]'}}
+with patch("backend.routers.lore.ENABLE_AI", True), patch.dict(sys.modules, {"ollama": _types.SimpleNamespace(chat=_fake_chat)}):
+    _ai = lore_router.auto_extract_lore(lore_router.ExtractLoreRequest(scene_text=_lore_text))
+record_test("AI extraction is labeled and receives text-scan candidates",
+            _ai["ai_generated"] is True and "Zhivrek" in _prompts[0] and _ai["proposed_lore"][0]["source"] == "ai")
+
+def _broken_chat(**kwargs):
+    raise RuntimeError("down")
+with patch("backend.routers.lore.ENABLE_AI", True), patch.dict(sys.modules, {"ollama": _types.SimpleNamespace(chat=_broken_chat)}):
+    _fail = lore_router.auto_extract_lore(lore_router.ExtractLoreRequest(scene_text=_lore_text))
+record_test("AI failure falls back to text scan, not fake findings",
+            _fail["ai_generated"] is False and _fail["ai_error"] and _fail["proposed_lore"])
 
 # =============================================================================
 # SUMMARY REPORT

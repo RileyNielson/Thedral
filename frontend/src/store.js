@@ -1,11 +1,6 @@
 import { reactive } from 'vue'
 
-// Resolves dynamically to your Mac's IP when viewing from a phone
-const API_BASE = import.meta.env.VITE_API_BASE || (
-  window.location.port === '5173'
-    ? `http://${window.location.hostname}:8000`
-    : window.location.origin
-)
+import { API_BASE } from './api'
 
 // --- Toast System ---
 export const toasts = reactive([])
@@ -64,6 +59,8 @@ export const store = reactive({
   saveStatus: '',
   selectedText: '',
   socraticCritique: '',
+  socraticAi: false,
+  socraticAi: false,
   activeCritiqueId: null,
   tkMarkers: [],
   editorState: {

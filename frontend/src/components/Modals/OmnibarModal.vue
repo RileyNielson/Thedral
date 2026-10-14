@@ -86,7 +86,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import { store, showToast } from '../../store.js'
 import { Search, BrainCircuit, User, BookOpenCheck, FileText, Key } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/api'
 
 const query = ref('')
 const results = ref([])
@@ -145,7 +145,7 @@ const runSearch = async () => {
       if (!res.ok) throw new Error('Librarian endpoint failed')
       const data = await res.json()
       if (requestId !== searchRequestId) return
-      answer.value = data.answer
+      answer.value = (data.ai_generated ? 'AI answer, based only on your manuscript excerpts:\n\n' : '') + data.answer
     } catch(e) { 
       if (requestId !== searchRequestId) return
       answer.value = 'The Librarian is unreachable at this moment.' 

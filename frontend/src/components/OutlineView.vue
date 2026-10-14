@@ -119,7 +119,7 @@ import { ref, computed } from 'vue'
 import { store, showToast } from '../store.js'
 import { ListTree, PenTool, BookOpen, Folder, Plus, FileText, ExternalLink } from '@lucide/vue'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { API_BASE } from '@/api'
 
 const saveNote = ref('')
 let saveTimer = null
