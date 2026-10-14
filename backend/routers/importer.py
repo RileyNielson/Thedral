@@ -150,7 +150,7 @@ def _parse_rtf(path: str):
 
 @router.get("/api/import/discover")
 def discover_local_files():
-    return scan_local_manuscripts()
+    return scan_local_manuscripts(with_status=True)
 
 @router.post("/api/import/local-path")
 def import_local_path(payload: LocalPathImport):

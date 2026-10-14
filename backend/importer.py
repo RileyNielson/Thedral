@@ -882,20 +882,31 @@ def build_binder_from_manifest(manifest: dict, book_title: str) -> str:
     conn.close()
     return first_created_scene_id or book_id
 
-def scan_local_manuscripts() -> list[dict]:
+def scan_local_manuscripts(with_status: bool = False):
     found = []
-    ignored = {'venv', '.venv', 'site-packages', 'library', 'temp', 'node_modules', '.git'}
+    folders = []
+    ignored = {'venv', '.venv', 'site-packages', 'temp', 'node_modules', '.git'}
     home = os.path.expanduser("~")
-    for docs_dir in (os.path.join(home, name) for name in ("Documents", "Desktop", "Downloads")):
-        if os.path.isdir(docs_dir):
-            found.extend(_scan_manuscript_folder(docs_dir, home, ignored))
+    for name in ("Documents", "Desktop", "Downloads"):
+        folder = os.path.join(home, name)
+        status = {"folder": folder, "exists": os.path.isdir(folder), "readable": False}
+        if status["exists"]:
+            try:
+                os.listdir(folder)
+                status["readable"] = True
+            except OSError:
+                pass
+        folders.append(status)
+        if status["readable"]:
+            found.extend(_scan_manuscript_folder(folder, home, ignored))
     found.sort(key=lambda x: x["title"].lower())
-    return found[:40]
+    found = found[:40]
+    return {"items": found, "folders": folders} if with_status else found
 
 
 def _scan_manuscript_folder(docs_dir: str, home: str, ignored: set[str]) -> list[dict]:
     found = []
-    for root, dirs, files in os.walk(docs_dir):
+    for root, dirs, files in os.walk(docs_dir, onerror=lambda e: None):
         dirs[:] = [d for d in dirs if not d.startswith('.') and d.lower() not in ignored]
         
         for d in list(dirs):
@@ -910,10 +921,10 @@ def _scan_manuscript_folder(docs_dir: str, home: str, ignored: set[str]) -> list
                 dirs.remove(d)
 
         for f in files:
-            if f.lower().endswith('.docx') and not f.startswith(('~$', '.')):
+            if f.lower().endswith(('.docx', '.rtf')) and not f.startswith(('~$', '.')):
                 abs_p = os.path.join(root, f)
                 found.append({
-                    "type": "DOCX",
+                    "type": "RTF" if f.lower().endswith(".rtf") else "DOCX",
                     "title": os.path.splitext(f)[0].replace("_", " "),
                     "path": abs_p,
                     "rel_path": os.path.relpath(abs_p, home)

@@ -70,7 +70,12 @@
         </div>
 
         <div v-else class="text-xs text-zinc-500 italic p-4 bg-zinc-950 rounded border border-zinc-800/80 text-center font-serif">
-          No .scriv projects or .docx manuscripts found in Documents, Desktop, or Downloads. Paste a path below.
+          <template v-if="blockedFolders.length">
+            macOS is blocking access to {{ blockedFolders.join(', ') }}. Open System Settings, then Privacy &amp; Security, then Files and Folders (or Full Disk Access), allow Terminal, and restart Thedral. You can also paste a path below.
+          </template>
+          <template v-else>
+            No .scriv projects or .docx/.rtf manuscripts found in Documents, Desktop, or Downloads. Paste a path below.
+          </template>
         </div>
       </div>
 
@@ -151,6 +156,7 @@ import { API_BASE } from '@/api'
 const fileInput = ref(null)
 const typedPath = ref('')
 const localManuscripts = ref([])
+const blockedFolders = ref([])
 const isDiscovering = ref(false)
 const isImporting = ref(false)
 const isAnalyzing = ref(false)
@@ -239,10 +245,12 @@ const discoverLocal = async () => {
   try {
     const res = await fetch(`${API_BASE}/api/import/discover`)
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to discover files`)
-    localManuscripts.value = await res.json()
+    const data = await res.json()
+    localManuscripts.value = Array.isArray(data) ? data : (data.items || [])
+    blockedFolders.value = Array.isArray(data) ? [] : (data.folders || []).filter(f => f.exists && !f.readable).map(f => f.folder)
   } catch (e) {
     localManuscripts.value = []
-    showToast(e.message, 'error')
+    showToast(friendlyError(e), 'error')
   } finally {
     isDiscovering.value = false
   }
