@@ -70,7 +70,7 @@
     <div v-else class="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-[10px] text-zinc-500">
       Select a scene within a manuscript to compare its patterns.
     </div>
-    <p class="text-[9px] leading-relaxed text-zinc-600">The selected scene uses current editor text; comparison scenes use their saved drafts. Actual reader responses and the AI first-read rehearsal are in the Reader tab. Sentence and dialogue patterns cannot tell us what a reader felt or understood.</p>
+    <p class="text-[9px] leading-relaxed text-zinc-600">The selected scene uses current editor text; comparison scenes use their saved drafts. {{ store.aiEnabled ? 'Actual reader responses and the AI first-read rehearsal are in the Reader tab.' : 'Actual reader responses are in the Reader tab.' }} Sentence and dialogue patterns cannot tell us what a reader felt or understood.</p>
   </div>
 </template>
 

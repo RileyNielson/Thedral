@@ -23,7 +23,7 @@
           <label class="block text-[11px] text-zinc-400">
             <span class="flex items-center justify-between">
               <span>Query letter / synopsis</span>
-              <button type="button" @click.prevent="draftSynopsis" :disabled="isDrafting" class="text-[10px] text-amber-400 hover:underline disabled:opacity-50">{{ isDrafting ? 'Drafting…' : 'Draft from scene summaries (AI, optional)' }}</button>
+              <button v-if="store.aiEnabled" type="button" @click.prevent="draftSynopsis" :disabled="isDrafting" class="text-[10px] text-amber-400 hover:underline disabled:opacity-50">{{ isDrafting ? 'Drafting…' : 'Draft from scene summaries (AI, optional)' }}</button>
             </span>
             <textarea v-model="profile.query_text" rows="6" class="form-input" placeholder="Paste or draft your query letter and synopsis here" />
           </label>

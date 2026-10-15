@@ -193,7 +193,7 @@
     <!-- Floating Socratic & Entity Toolbar -->
     <div v-if="store.selectedText && !store.isVoidMode" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-zinc-900/95 border border-amber-500/40 rounded-full px-4 py-2 shadow-2xl flex items-center space-x-2 z-30 backdrop-blur-md animate-fade-in">
       <span class="text-xs text-zinc-300 font-mono truncate max-w-[140px] sm:max-w-[180px] mr-1">"{{ store.selectedText }}"</span>
-      <button @click="elevateSelection" title="Consult Socratic Mirror" class="bg-amber-600 hover:bg-amber-500 text-zinc-950 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 transition shadow"><Sparkles class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Elevate</span></button>
+      <button v-if="store.aiEnabled" @click="elevateSelection" title="Consult Socratic Mirror" class="bg-amber-600 hover:bg-amber-500 text-zinc-950 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 transition shadow"><Sparkles class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Elevate</span></button>
       <button @click="registerSelection('CHARACTER')" title="Track as Character" class="bg-zinc-800 hover:bg-zinc-700 text-amber-300 text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1 transition"><UserPlus class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Character</span></button>
       <button @click="registerSelection('ITEM')" title="Track as Artifact" class="bg-zinc-800 hover:bg-zinc-700 text-cyan-300 text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1 transition"><Key class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Artifact</span></button>
     </div>
@@ -554,7 +554,7 @@ const getSentenceTooltip = (s) => {
 
 const handleXRaySentenceClick = (text) => { 
   store.selectedText = text
-  elevateSelection() 
+  if (store.aiEnabled) elevateSelection() 
 }
 
 const elevateSelection = async () => {

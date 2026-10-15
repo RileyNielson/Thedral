@@ -45,7 +45,7 @@
               </div>
             </button>
           </section>
-          <section v-if="proposals.length" class="space-y-2">
+          <section v-if="store.aiEnabled && proposals.length" class="space-y-2">
             <h3 class="text-xs font-bold uppercase tracking-wider text-zinc-300">Survey proposals awaiting approval ({{ proposals.length }})</h3>
             <p class="text-[10px] text-zinc-500">AI-extracted details remain suggestions until you approve them. Approval adds them to mapped Cosmograph data.</p>
             <article v-for="proposal in proposals" :key="proposal.proposal_id" class="rounded-lg border border-cyan-900/50 bg-cyan-950/20 p-3 space-y-2">

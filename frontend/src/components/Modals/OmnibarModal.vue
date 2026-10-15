@@ -17,7 +17,7 @@
           @keydown.enter.prevent="selectCurrentResult"
           @keydown.esc="closeOmnibar"
           class="flex-1 bg-transparent text-lg text-white focus:outline-none placeholder-zinc-500 font-serif" 
-          placeholder="Search, end with '?' to ask, or type '>' for actions..."
+          :placeholder="store.aiEnabled ? 'Search, end with \'?\' to ask, or type \'>\' for actions...' : 'Search, or type \'>\' for actions...'"
         />
         <span v-if="isLoading" class="text-xs font-mono text-amber-400 animate-pulse ml-2">Searching...</span>
       </div>
@@ -133,7 +133,7 @@ const runSearch = async () => {
   }
 
   // Ask Librarian Q&A mode
-  if (q.endsWith('?')) {
+  if (store.aiEnabled && q.endsWith('?')) {
     answer.value = 'Consulting manuscript archives and causal lore...'
     isLoading.value = true
     try {

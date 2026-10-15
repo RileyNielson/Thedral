@@ -94,13 +94,13 @@
           </div>
         </div>
         <p v-if="isAnalyzing" class="text-[10px] text-violet-300">
-          Preparing the no-AI reader lens for {{ importReport.scenes || 0 }} scenes…
+          Preparing the reader lens for {{ importReport.scenes || 0 }} scenes…
         </p>
         <p v-else-if="analysisError" class="text-[10px] text-rose-300">
           Manuscript imported, but the reader lens could not be prepared: {{ analysisError }}
         </p>
         <p v-else-if="analyzedSceneCount" class="text-[10px] text-emerald-300">
-          No-AI reader lens ready for {{ analyzedSceneCount }} scenes. Open the Reader tab to explore it.
+          Reader lens ready for {{ analyzedSceneCount }} scenes. Open the Reader tab to explore it.
         </p>
         <ul v-if="importReport.warnings?.length" class="space-y-1.5 text-[10px] text-amber-200/90">
           <li v-for="warning in importReport.warnings" :key="warning" class="flex gap-2"><span class="text-amber-400">!</span><span>{{ warning }}</span></li>
@@ -288,7 +288,7 @@ const confirmImport = async () => {
       if (book) {
         isAnalyzing.value = true
         analysisError.value = ''
-        store.saveStatus = 'Preparing no-AI reader lens...'
+        store.saveStatus = 'Preparing reader lens...'
         try {
           const analysisResponse = await fetch(
             `${API_BASE}/api/analytics/reader-story/${encodeURIComponent(book.id)}/all`

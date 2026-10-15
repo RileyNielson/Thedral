@@ -29,7 +29,7 @@
         @click="store.activeInspectorTab = 'socratic'" 
         :class="['flex-1 py-2.5 font-medium border-b-2 text-center transition', store.activeInspectorTab === 'socratic' ? 'border-amber-500 text-amber-400' : 'border-transparent text-zinc-500 hover:text-zinc-300']"
       >
-        Socratic
+        {{ store.aiEnabled ? 'Socratic' : 'Lore' }}
       </button>
       <button 
         @click="store.activeInspectorTab = 'reader'" 

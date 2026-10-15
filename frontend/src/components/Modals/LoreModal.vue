@@ -16,10 +16,10 @@
             @click="auditSceneLore" 
             :disabled="isAuditingLore || !store.activeNode?.content" 
             class="px-3 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-[10px] font-bold uppercase transition disabled:opacity-50 flex items-center gap-1.5"
-            title="Spelling of lore terms is checked by text matching; contradictions are judged by local AI when it is on"
+            :title="store.aiEnabled ? 'Spelling of lore terms is checked by text matching; contradictions are judged by local AI' : 'Checks the scene for misspelled lore terms'"
           >
             <ShieldAlert class="w-3.5 h-3.5" />
-            <span>{{ isAuditingLore ? 'Auditing...' : 'Audit Scene (text + AI)' }}</span>
+            <span>{{ isAuditingLore ? 'Auditing...' : store.aiEnabled ? 'Audit Scene (text + AI)' : 'Audit Scene' }}</span>
           </button>
         </div>
         <button @click="closeModal" class="text-zinc-500 hover:text-white transition">
@@ -57,10 +57,10 @@
               @click="extractLoreFromScene" 
               :disabled="isExtractingLore || !store.activeNode?.content" 
               class="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded border border-amber-500/30 text-[9px] font-bold uppercase transition disabled:opacity-50 flex items-center gap-1"
-              title="Invented names come from a text scan; definitions come from local AI when it is on"
+              :title="store.aiEnabled ? 'Invented names come from a text scan; definitions come from local AI' : 'Finds invented names in the scene'"
             >
               <Sparkles class="w-3 h-3" />
-              <span>{{ isExtractingLore ? 'Scanning...' : 'Extract (text + AI)' }}</span>
+              <span>{{ isExtractingLore ? 'Scanning...' : store.aiEnabled ? 'Extract (text + AI)' : 'Extract' }}</span>
             </button>
           </div>
 
@@ -220,7 +220,7 @@ const extractLoreFromScene = async () => {
         pronunciation: suggestion.pronunciation || ''
       }
       const by = suggestion.source === 'ai' ? 'AI' : 'text scan'
-      showToast(`Suggested by ${by}: "${suggestion.term}". Review before saving.`, 'info')
+      showToast(store.aiEnabled ? `Suggested by ${by}: "${suggestion.term}". Review before saving.` : `Found "${suggestion.term}". Review before saving.`, 'info')
     } else {
       showToast('No new entities or laws detected in this scene.', 'info')
     }
@@ -245,7 +245,7 @@ const auditSceneLore = async () => {
     const data = await res.json()
     loreDiscrepancies.value = data.discrepancies || []
     if (loreDiscrepancies.value.length === 0) {
-      showToast(data.ai_generated ? 'Lore audit clean (text match + AI).' : 'No misspellings found (text match only; AI is off or unavailable).', 'info')
+      showToast(data.ai_generated ? 'Lore audit clean (text match + AI).' : store.aiEnabled ? 'No misspellings found (text match only; AI was unavailable).' : 'No misspellings found.', 'info')
     }
   } catch(e) {
     showToast(e.message, 'error')

@@ -1,5 +1,6 @@
 <template>
   <div v-if="store.activeInspectorTab === 'socratic'" class="space-y-4 flex flex-col h-full">
+    <template v-if="store.aiEnabled">
     <div v-if="store.socraticCritique" class="space-y-2">
       <div class="text-[9px] font-mono uppercase tracking-wider" :class="store.socraticAi ? 'text-amber-400' : 'text-zinc-500'">
         {{ store.socraticAi ? 'AI-generated mirror, grounded in text observations computed without AI' : 'No AI involved' }}
@@ -58,9 +59,11 @@
       </div>
     </div>
     
+    </template>
+
     <InspectorLoreLinks />
 
-    <div class="pt-3 border-t border-zinc-800 space-y-2 flex-1 overflow-y-auto">
+    <div v-if="store.aiEnabled" class="pt-3 border-t border-zinc-800 space-y-2 flex-1 overflow-y-auto">
       <div class="flex items-center justify-between">
         <span class="text-[10px] font-bold uppercase tracking-wider text-zinc-400 font-mono">Editorial Log</span>
         <span class="text-[10px] text-zinc-600 font-mono">{{ store.sceneCritiques?.length || 0 }} total</span>

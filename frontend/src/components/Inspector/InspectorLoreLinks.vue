@@ -7,7 +7,7 @@
       </button>
     </div>
     <template v-if="result">
-      <p class="text-[9px] text-zinc-500">Found by matching your Lore and Cast names in the text. No AI.</p>
+      <p class="text-[9px] text-zinc-500">Found by matching your Lore and Cast names in the text.{{ store.aiEnabled ? ' No AI.' : '' }}</p>
       <div>
         <p class="text-[9px] uppercase tracking-wider text-zinc-600">Present here</p>
         <p v-if="!result.present.length" class="text-[10px] text-zinc-600">Nothing from your Lore or Cast is named in this scene.</p>

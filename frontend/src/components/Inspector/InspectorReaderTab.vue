@@ -3,7 +3,7 @@
     <section class="rounded-xl border border-violet-900/50 bg-violet-950/10 p-3 space-y-2.5">
       <header class="space-y-1">
         <div class="flex items-center justify-between gap-2">
-          <h2 class="text-[10px] font-bold uppercase tracking-wider text-violet-300">Story underneath · no AI</h2>
+          <h2 class="text-[10px] font-bold uppercase tracking-wider text-violet-300">Story underneath</h2>
           <span v-if="readerStoryLoading" class="text-[9px] text-zinc-500">Following the threads…</span>
         </div>
         <p class="text-[9px] leading-relaxed text-zinc-500">
@@ -40,7 +40,7 @@
     </section>
 
     <details class="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 space-y-3">
-      <summary class="cursor-pointer text-[10px] font-bold uppercase tracking-wider text-zinc-400">More: beta-reader responses and optional AI rehearsal</summary>
+      <summary class="cursor-pointer text-[10px] font-bold uppercase tracking-wider text-zinc-400">{{ store.aiEnabled ? 'More: beta-reader responses and optional AI rehearsal' : 'More: beta-reader responses' }}</summary>
     <section class="rounded-xl border border-emerald-900/50 bg-emerald-950/10 p-3 space-y-2">
       <header class="flex items-baseline justify-between gap-2">
         <h2 class="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Actual reader evidence</h2>
@@ -58,9 +58,10 @@
         <p v-if="readerFeedbackSummary.moreGroups" class="text-[9px] text-zinc-600">More reviewed versions are listed below. Ratings are never averaged across different drafts.</p>
         <p class="text-[9px] text-zinc-600">Small, self-selected responses are useful signals—not representative audience research.</p>
       </template>
-      <p v-else class="text-[9px] text-zinc-500">No beta-reader responses recorded for this scene yet. Recorded responses appear here before the AI rehearsal.</p>
+      <p v-else class="text-[9px] text-zinc-500">No beta-reader responses recorded for this scene yet. Recorded responses appear here.{{ store.aiEnabled ? ' They are shown before the AI rehearsal.' : '' }}</p>
     </section>
 
+    <template v-if="store.aiEnabled">
     <div class="flex items-center justify-between">
       <div>
         <span class="text-[11px] text-zinc-400 font-medium">Simulated reader pass</span>
@@ -209,6 +210,7 @@
         <p v-if="!simulationItems(category.type).length" class="text-[9px] text-zinc-600">No grounded observations surfaced in this category.</p>
       </section>
     </details>
+    </template>
 
       <section class="p-3 bg-zinc-950 rounded-xl border border-emerald-900/50 space-y-3">
         <header>

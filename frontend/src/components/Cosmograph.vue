@@ -77,6 +77,7 @@
         </button>
 
         <button 
+          v-if="store.aiEnabled"
           @click="surveyStory" 
           :disabled="store.surveyProgress.active" 
           class="px-3 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 font-bold rounded-md flex items-center gap-1.5 transition text-xs shadow"

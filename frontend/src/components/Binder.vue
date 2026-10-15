@@ -9,7 +9,7 @@
         </button>
       </div>
       <div class="flex items-center space-x-1">
-        <button @click="autoTitleScenes" title="Auto-title generic scenes (uses local AI)" class="p-1 hover:bg-zinc-800 rounded text-amber-400 hover:text-amber-300 transition"><Sparkles class="w-4 h-4" /></button>
+        <button v-if="store.aiEnabled" @click="autoTitleScenes" title="Auto-title generic scenes (uses local AI)" class="p-1 hover:bg-zinc-800 rounded text-amber-400 hover:text-amber-300 transition"><Sparkles class="w-4 h-4" /></button>
         <button @click="addChapter" title="Add Chapter" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"><FolderPlus class="w-4 h-4" /></button>
         <button @click="addScene" title="Add Scene" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"><FilePlus class="w-4 h-4" /></button>
       </div>

@@ -18,6 +18,8 @@ export const store = reactive({
   tree: [],
   activeNode: null,
   runtimeStatus: null,
+  // Stays false until the server reports Full mode, so Lite never flashes AI controls.
+  get aiEnabled() { return this.runtimeStatus?.ai_enabled === true },
   activeBookId: typeof window !== 'undefined' ? (window.localStorage.getItem('thedral-active-book') || '') : '',
   recentSceneIds: Array.isArray(savedRecentScenes) ? savedRecentScenes.filter(id => typeof id === 'string').slice(0, 8) : [],
   flushPendingSave: null,

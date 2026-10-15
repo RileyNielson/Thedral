@@ -6,12 +6,9 @@ cd /d "%~dp0"
 echo ============================================================
 echo   THEDRAL STUDIO
 echo ============================================================
-echo   Lite: writing tools and deterministic analysis, no AI
-echo   Full: Lite features plus local Ollama AI assistance
+echo   Everything runs on this computer. No AI is used.
 echo.
 if /i "%THEDRAL_MODE%"=="FULL" goto FULL_MODE
-choice /c LF /n /m "Choose a mode: [L]ite or [F]ull: "
-if errorlevel 2 goto FULL_MODE
 set "MODE=LITE"
 set "ENABLE_AI=false"
 set "REQUIREMENTS=requirements.txt"

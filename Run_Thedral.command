@@ -7,16 +7,14 @@ cd "$DIR"
 
 echo "============================================================"
 echo "  THEDRAL STUDIO"
-echo "  Lite: writing tools and deterministic analysis, no AI"
-echo "  Full: Lite features plus local Ollama AI assistance"
+if [ "${THEDRAL_MODE:-}" = "FULL" ]; then
+    echo "  AI helper is on (local Ollama). Use Run_Thedral.command for no AI."
+    MODE="FULL"; AI_ENABLED="true"; REQUIREMENTS="requirements-ai.txt"
+else
+    echo "  Everything runs on this computer. No AI is used."
+    MODE="LITE"; AI_ENABLED="false"; REQUIREMENTS="requirements.txt"
+fi
 echo "============================================================"
-printf "Choose a mode: [L]ite or [F]ull: "
-read -r MODE_CHOICE
-case "${MODE_CHOICE:-L}" in
-    [Ff]) MODE="FULL"; AI_ENABLED="true"; REQUIREMENTS="requirements-ai.txt" ;;
-    [Ll]) MODE="LITE"; AI_ENABLED="false"; REQUIREMENTS="requirements.txt" ;;
-    *) echo "Please enter L for Lite or F for Full."; read -r -p "Press Return to close."; exit 1 ;;
-esac
 
 if [ ! -x "$DIR/venv/bin/python" ]; then
     if ! command -v python3 >/dev/null 2>&1; then

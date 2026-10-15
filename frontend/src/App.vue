@@ -21,19 +21,11 @@
     <TopNav v-if="!store.isVoidMode" />
 
     <div
-      v-if="store.runtimeStatus && !store.isVoidMode"
-      class="flex-shrink-0 border-b px-4 py-1.5 text-center text-[10px]"
-      :class="store.runtimeStatus.mode === 'LITE'
-        ? 'border-amber-900/40 bg-amber-950/30 text-amber-200/80'
-        : 'border-emerald-900/40 bg-emerald-950/20 text-emerald-200/70'"
+      v-if="store.aiEnabled && !store.isVoidMode"
+      class="flex-shrink-0 border-b border-emerald-900/40 bg-emerald-950/20 px-4 py-1.5 text-center text-[10px] text-emerald-200/70"
       role="status"
     >
-      <template v-if="store.runtimeStatus.mode === 'LITE'">
-        Lite mode is active. Writing, organization, and text analysis work locally; AI-assisted features are unavailable.
-      </template>
-      <template v-else>
-        Full mode is active. Local AI features use {{ store.runtimeStatus.model }} and require Ollama to be running.
-      </template>
+      AI helper is on. It uses {{ store.runtimeStatus.model }} through Ollama on this computer and requires Ollama to be running.
     </div>
 
     <!-- Main Workspace Container -->

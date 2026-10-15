@@ -106,14 +106,14 @@ Powered by a local, air-gapped **Llama 3.2:3b** model via Ollama:
 ### Prerequisites
 1. **Python 3.11+**
 2. **Node.js 20.19+ or 22.12+ and npm** (the launchers rebuild the interface at startup)
-3. **[Ollama](https://ollama.com/download)** (Full mode only)
+3. **[Ollama](https://ollama.com/download)** (AI launcher only)
 
-### Choose Lite or Full
+### Choose Standard or AI
 
-Run `Run_Thedral.bat` on Windows or `Run_Thedral.command` on macOS and select a mode. On Windows, `Run_Thedral_AI.bat` is a shortcut that starts directly in Full mode. If the optional local Wiktionary database is missing, the launchers offer to download it once; declining or a failed download does not prevent Thedral from starting. The downloader reports progress while it streams the compressed dataset.
+- **`Run_Thedral.bat` (Windows) / `Run_Thedral.command` (macOS)** start Thedral with no AI. There is no mode prompt, and the app shows no AI buttons, labels or notices. It does not require Ollama and never contacts a model. Writing, organization, Cast, Lore, Cosmograph and the no-AI reader lens all work.
+- **`Run_Thedral_AI.bat` (Windows) / `Run_Thedral_AI.command` (macOS)** start the same app with the optional AI helper turned on. Install and start [Ollama](https://ollama.com/download), then download the configured model (default `llama3.2:3b`) with `ollama pull llama3.2:3b` before launching. The launcher verifies that Ollama is responding and the model is present. AI output is always labeled and never replaces the no-AI analysis.
 
-- **Lite** installs core dependencies only. It does not require Ollama or an AI model. Writing, organization, and deterministic text analysis remain available; AI-assisted actions are disabled and the app displays a Lite-mode notice.
-- **Full** enables local AI-assisted features through Ollama. Install and start Ollama, then download the configured model (default `llama3.2:3b`) with `ollama pull llama3.2:3b` before launching. The launchers verify that Ollama is responding and the configured model is present.
+If the optional local Wiktionary database is missing, the launchers offer to download it once; declining or a failed download does not prevent Thedral from starting.
 
 On first launch, the launcher creates the Python environment and installs the selected dependencies. Each new start rebuilds the frontend from current sources and checks that the backend is ready before opening the browser. Startup output is shown in the backend console on Windows and recorded at `exports/thedral-backend.log` on macOS. Close the backend console on Windows or press **Control-C** in the macOS launcher to stop Thedral; neither launcher terminates unrelated Python processes.
 
