@@ -498,19 +498,46 @@ const fetchXRayAnalysis = async () => {
   }
 }
 
+const paragraphEls = (xray) => Array.from(scrollContainer.value?.querySelectorAll(
+  xray ? '.xray-paragraph' : '.ProseMirror > *'
+) || [])
+
+// Index of the first paragraph still visible at the top of the scroll area
+const topVisibleParagraph = (xray) => {
+  const box = scrollContainer.value?.getBoundingClientRect()
+  if (!box) return 0
+  const els = paragraphEls(xray).filter(el => el.offsetParent !== null)
+  const idx = els.findIndex(el => el.getBoundingClientRect().bottom > box.top + 4)
+  return idx < 0 ? 0 : idx
+}
+
+const scrollToParagraph = (xray, idx) => {
+  const container = scrollContainer.value
+  const el = paragraphEls(xray).filter(e => e.offsetParent !== null)[idx]
+  if (!container || !el) return
+  container.scrollTop += el.getBoundingClientRect().top - container.getBoundingClientRect().top
+}
+
 const refreshXRay = async () => {
   if (store.isXRayActive) {
+    const idx = topVisibleParagraph(true)
     await fetchXRayAnalysis()
+    await nextTick()
+    scrollToParagraph(true, idx)
   }
 }
 
 const toggleXRay = async () => {
-  store.isXRayActive = !store.isXRayActive
+  const wasActive = store.isXRayActive
+  const idx = topVisibleParagraph(wasActive)
+  store.isXRayActive = !wasActive
   if (store.isXRayActive) {
     await fetchXRayAnalysis()
   } else {
     store.xraySentences = []
   }
+  await nextTick()
+  scrollToParagraph(store.isXRayActive, idx)
 }
 
 const getSentenceLensClass = (s) => {
