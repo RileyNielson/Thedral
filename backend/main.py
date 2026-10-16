@@ -32,6 +32,7 @@ from backend.routers.entities import router as entities_router
 from backend.routers.importer import router as importer_router
 from backend.routers.publishing import router as publishing_router
 from backend.routers.lore import router as lore_router
+from backend.routers.story_shape import router as story_shape_router
 
 app = FastAPI(title="Thedral Studio Core", version="1.1.0")
 
@@ -48,6 +49,7 @@ init_db()
 # Mount all modular domain routers
 app.include_router(binder_router)
 app.include_router(analytics_router)
+app.include_router(story_shape_router)
 app.include_router(binder_tools_router)
 app.include_router(craft_router)
 app.include_router(reader_simulation_router)

@@ -1441,6 +1441,70 @@ record_test(
     and "i-495" not in _lex_terms and "kill" not in _lex_terms,
 )
 
+from backend.story_shape import build_story_shape as _shape
+_fight = 'He swung the sword and she dodged. Blood spilled as the blade slashed again. "Die!" he shouted, and she kicked him back. The fight raged on. ' * 8
+_love = 'She kissed him softly, and he held her hand. "I love you," she whispered, blushing. Her heart raced with desire and tender longing. ' * 8
+_mys = 'Who left the letter? The clue was hidden, a secret nobody knew. Why would he vanish? What if the code was a riddle? ' * 8
+_units = [dict(scene_id=f"s{i}", title=t, chapter_id=f"c{i // 2}", chapter_title=f"Ch{i // 2}", content=c)
+          for i, (t, c) in enumerate([("a", _fight), ("b", _love), ("c", _mys), ("d", _fight), ("e", _love), ("f", _fight)])]
+_sh = _shape(_units, ["Zhivrek"])
+_sc = {s["title"]: s["scores"] for s in _sh["scenes"]}
+record_test(
+    "Story shape: scenes score highest on their own strand, chapters roll up, no AI",
+    _sc["a"]["action"] > 60 and _sc["a"]["romance"] < 20
+    and _sc["b"]["romance"] > 60 and _sc["b"]["action"] < 20
+    and _sc["c"]["mystery"] > 60 and len(_sh["chapters"]) == 3
+    and all(0 <= v <= 100 for sc in _sc.values() for v in sc.values())
+    and "No AI" in _sh["method"],
+    str(_sc),
+)
+_empty = _shape([dict(scene_id="x", title="x", chapter_id="c", chapter_title="c", content="")])
+record_test("Story shape handles empty scenes and an empty book",
+            _empty["scenes"][0]["scores"]["action"] == 0 and _shape([])["book"]["words"] == 0)
+
+from backend.routers import story_shape as _ss_router
+import backend.routers.story_shape as _ssr
+_ss_db = Path(tempfile.mkdtemp()) / "shape.sqlite"
+_orig_ss_db = _ssr.get_db
+def _ss_conn():
+    c = sqlite3.connect(_ss_db); c.row_factory = sqlite3.Row; c.execute("PRAGMA foreign_keys=ON"); return c
+try:
+    import backend.models as _ssm
+    _orig_models_db = getattr(_ssm, "DB_PATH", None)
+    _c = _ss_conn()
+    _c.executescript("""
+    CREATE TABLE binder_nodes (id TEXT PRIMARY KEY, parent_id TEXT, node_type TEXT, title TEXT, sort_order REAL, content TEXT, is_archived INTEGER DEFAULT 0);
+    CREATE TABLE canonical_entities (entity_id TEXT, name TEXT);
+    CREATE TABLE style_sheet (term TEXT);
+    CREATE TABLE story_shape_targets (node_id TEXT PRIMARY KEY, book_id TEXT NOT NULL, targets TEXT NOT NULL DEFAULT '{}', updated_at TEXT);
+    INSERT INTO binder_nodes VALUES ('B', NULL, 'BOOK', 'Book', 1, '', 0), ('C1', 'B', 'CHAPTER', 'One', 1, '', 0), ('C2', 'B', 'CHAPTER', 'Two', 2, '', 0);
+    """)
+    _c.execute("INSERT INTO binder_nodes VALUES ('S1','C1','SCENE','Fight',1,?,0)", (_fight,))
+    _c.execute("INSERT INTO binder_nodes VALUES ('S2','C2','SCENE','Kiss',1,?,0)", (_love,))
+    _c.execute("INSERT INTO canonical_entities VALUES ('e','Zhivrek')")
+    _c.commit(); _c.close()
+    _ssr.get_db = _ss_conn
+    _api = _ssr.get_story_shape("B")
+    _ev = _ssr.get_story_shape_evidence("B", "S1", "action")
+    _ssr.set_story_shape_target("C1", _ssr.TargetPayload(book_id="B", targets={"action": 80, "bogus": 5, "romance": 400}))
+    _after = _ssr.get_story_shape("B")
+    _ssr.set_story_shape_target("C1", _ssr.TargetPayload(book_id="B", targets={}))
+    _cleared = _ssr.get_story_shape("B")
+    try:
+        _ssr.get_story_shape("missing"); _missing = False
+    except Exception as _e:
+        _missing = getattr(_e, "status_code", 0) == 404
+    record_test(
+        "Story shape API groups scenes by chapter, returns evidence, and stores clamped author targets",
+        [c["title"] for c in _api["chapters"]] == ["One", "Two"]
+        and any("sword" in e["sentence"] or "blade" in e["sentence"] for e in _ev["evidence"])
+        and _after["targets"].get("C1") == {"action": 80.0, "romance": 100.0}
+        and _cleared["targets"] == {} and _missing,
+        str(_after["targets"]),
+    )
+finally:
+    _ssr.get_db = _orig_ss_db
+
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _fe_missing = []
 for _line in open(os.path.join(_root, "tests", "frontend_manifest.txt")).read().splitlines():

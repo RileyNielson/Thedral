@@ -93,3 +93,5 @@ backend.routers.binder:update_node
 backend.models:init_db
 backend.routers.entities:auto_detect_entities
 backend.routers.entities:confirm_entity
+backend.story_shape:analyze_text
+backend.story_shape:build_story_shape

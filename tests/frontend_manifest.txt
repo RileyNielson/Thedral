@@ -33,3 +33,4 @@ file:frontend/src/editorText.js
 file:frontend/src/components/Modals/CastRelationships.vue
 file:frontend/src/components/Inspector/InspectorLoreLinks.vue
 file:frontend/src/components/Inspector/InspectorLexiconStatus.vue
+file:frontend/src/components/StoryShape.vue

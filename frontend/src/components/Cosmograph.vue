@@ -6,8 +6,13 @@
       class="h-12 border-b px-4 flex items-center justify-between text-xs z-10 backdrop-blur shrink-0"
       :class="store.isCandlelight ? 'border-amber-900/40 bg-[#120f0c]/90' : 'border-zinc-800/80 bg-zinc-900/50'"
     >
+      <div class="flex items-center mr-3 rounded-md border border-zinc-800 overflow-hidden shrink-0">
+        <button @click="showShape = false" :class="['px-2.5 py-1 text-xs', !showShape ? 'bg-amber-500/20 text-amber-300' : 'text-zinc-400 hover:text-white']">Map</button>
+        <button @click="showShape = true" :class="['px-2.5 py-1 text-xs', showShape ? 'bg-amber-500/20 text-amber-300' : 'text-zinc-400 hover:text-white']">Story shape</button>
+      </div>
+
       <!-- Spacetime Projections -->
-      <div class="flex items-center space-x-1.5 overflow-x-auto py-1 custom-scrollbar">
+      <div v-show="!showShape" class="flex items-center space-x-1.5 overflow-x-auto py-1 custom-scrollbar">
         <span class="text-zinc-500 font-mono uppercase text-[10px] mr-1 hidden sm:inline">Projections:</span>
         <button 
           @click="setProjection('ALL')" 
@@ -67,7 +72,7 @@
       </div>
 
       <!-- Chronology & Survey Actions -->
-      <div class="flex items-center space-x-2 shrink-0">
+      <div v-show="!showShape" class="flex items-center space-x-2 shrink-0">
         <button 
           @click="toggleTimeMode" 
           class="text-amber-400 hover:text-amber-300 font-mono text-xs flex items-center gap-1.5 border border-zinc-800 bg-zinc-900/60 px-2.5 py-1 rounded transition"
@@ -87,6 +92,8 @@
         </button>
       </div>
     </div>
+
+    <StoryShape v-if="showShape" />
 
     <!-- 3D Plotly WebGL Canvas -->
     <div id="astrolabe-plot" class="flex-1 w-full h-full relative">
@@ -196,7 +203,10 @@ import { Clock, Satellite, AlertTriangle, ExternalLink, Loader, X, Crosshair } f
 
 import { API_BASE } from '@/api'
 
+import StoryShape from './StoryShape.vue'
+
 const isLoading = ref(false)
+const showShape = ref(false)
 let evtSource = null
 let resizeObserver = null
 
@@ -279,6 +289,14 @@ const setProjection = (proj) => {
   store.projectionMode = proj
   renderAstrolabe()
 }
+
+watch(showShape, async (on) => {
+  if (on) return
+  await nextTick()
+  const Plotly = await getPlotly()
+  const el = document.getElementById('astrolabe-plot')
+  if (Plotly && el && el.data) Plotly.Plots.resize(el)
+})
 
 const toggleTimeMode = () => {
   store.timeMode = store.timeMode === 'chronological' ? 'narrative' : 'chronological'

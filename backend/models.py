@@ -463,6 +463,15 @@ def init_db(custom_path: str | Path | None = None) -> None:
             FOREIGN KEY(scene_id) REFERENCES binder_nodes(id) ON DELETE CASCADE
         )""")
 
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS story_shape_targets (
+            node_id TEXT PRIMARY KEY,
+            book_id TEXT NOT NULL,
+            targets TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT,
+            FOREIGN KEY(node_id) REFERENCES binder_nodes(id) ON DELETE CASCADE
+        )""")
+
         # =====================================================================
         # PERFORMANCE INDEXES
         # =====================================================================
