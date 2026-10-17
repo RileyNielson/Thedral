@@ -115,7 +115,7 @@
       <div class="border-t border-zinc-800 pt-4 space-y-3 shrink-0">
         <div class="flex items-center justify-between">
           <div class="text-xs text-zinc-400">
-            <div>Have a file elsewhere on your Mac?</div>
+            <div>Have a file elsewhere on your computer?</div>
             <div class="text-[10px] text-zinc-500 font-mono">.docx, .txt, .md, .rtf, a .scriv project, or a zipped .scriv</div>
             <div class="text-[10px] text-zinc-500 mt-1">Scrivener synopsis, notes, outline cards, and Binder metadata are retained.</div>
           </div>
@@ -173,20 +173,13 @@ const closeModal = () => {
   store.toggleModal('import', false)
 }
 
-// The system chooser can pick .scriv packages that a browser file input cannot; fall back to the browser input if it is unavailable.
-const triggerBrowse = async () => {
-  showToast('A file chooser is opening. If you don’t see it, check behind this window or in the Dock.', 'info')
-  try {
-    const response = await fetch(`${API_BASE}/api/import/choose?kind=file`, { method: 'POST' })
-    if (response.ok) {
-      const data = await response.json()
-      if (data.path) await previewLocalFile(data.path)
-      return
-    }
-  } catch {
-    // fall through to the browser chooser
+// Directly trigger the hidden file input to avoid async window-handling hangs on Windows / Linux
+const triggerBrowse = () => {
+  if (fileInput.value) {
+    fileInput.value.click()
+  } else {
+    showToast('File input element not found.', 'error')
   }
-  if (fileInput.value) fileInput.value.click()
 }
 
 const clearPreview = () => {
@@ -212,7 +205,7 @@ const readResponse = async (response, fallback) => {
 
 const friendlyError = (e) =>
   e?.name === 'TimeoutError'
-    ? 'The preview took too long. Large Scrivener zips with many images are slow; try "Choose Scrivener project..." instead.'
+    ? 'The preview took too long. Large Scrivener zips with many images are slow; try another format or smaller file.'
     : e instanceof TypeError
     ? 'Could not reach the Thedral server. Make sure the launcher window is still open, then reload this page.'
     : e.message
