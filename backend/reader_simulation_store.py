@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from backend.text_utils import html_to_text
 
 
-READER_SIMULATION_PROMPT_VERSION = "first-read-v5"
+READER_SIMULATION_PROMPT_VERSION = "first-read-v5"SIMULATION_VERSION = "3.0-cognitive"
 READER_CONTEXT_CHAR_LIMIT = 3500
 READER_SIMULATION_SYSTEM_PROMPT = """Simulate a careful first-time reader encountering only the supplied manuscript text, without author notes, goals, summaries, character sheets, or intended takeaways. When earlier text is provided, it is a limited excerpt of what the reader encountered before the current scene; do not assume it represents the entire manuscript. This is an AI hypothesis to help the author revise before recruiting readers; it is not actual reader feedback and must not be presented as representative or certain. Consider what a reader can understand from the text alone, what they may infer, wonder about, or misunderstand, and where they might lose the thread. Do not guess what the author intended.
 Estimate the likely experience as the scene unfolds: emotional state and shifts, interest/engagement, tension, mystery/curiosity, suspense/anticipation, character connection, confusion, and attention or pacing changes. Explain what textual beat appears to cause each estimate. These are qualitative AI estimates, not measurements. Use integer levels 1–5 only as an ordinal shorthand: 1 very low, 2 low, 3 moderate, 4 high, 5 very high. Do not imply clinical emotion detection or certainty about actual readers. A score without a specific textual cause and evidence is not useful.

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cognitive-reader"
+version = "0.3.0"
+description = "Deterministic, zero-LLM biomimetic reading comprehension and narrative context engine."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0-or-later"}
+authors = [
+    {name = "Riley A. Nielson"}
+]
+dependencies = []
+
+[project.optional-dependencies]
+nlp = ["spacy>=3.7.0", "nltk>=3.8.1"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+cognitive-reader = "cognitive_reader.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cognitive_reader*"]

@@ -85,3 +85,20 @@ def analyze_reader_story(
         },
     }
 
+# Inside backend/reader_story.py, at the end of analyze_promises(text: str):
+    from backend.reader_moments import get_thedral_cognitive_engine
+    cog_engine = get_thedral_cognitive_engine()
+    cog_report = cog_engine.analyze_document(text or "")
+
+    for prom in cog_report.promises:
+        promises.append({
+            "type": "chekhov_causal_span",
+            "severity": "medium" if prom.tension_tautness >= 0.4 else "low",
+            "title": f"Unresolved Setup (P{prom.setup_paragraph + 1})",
+            "setup_paragraph": prom.setup_paragraph,
+            "excerpt": prom.cue_phrase,
+            "suggestion": (
+                f"Planted {prom.current_word_distance:,} words ago (`{prom.cue_phrase}`). "
+                f"Make sure this thread is reminded or cashed in before it decays."
+            ),
+        })
