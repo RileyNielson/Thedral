@@ -21,7 +21,15 @@ for _candidate_path in (
         break
 
 from cognitive_reader import CognitiveEngine, build_cognitive_database
-from backend.reader_text import clip_excerpt
+try:
+    from backend.reader_text import clip_excerpt
+except ImportError:
+    try:
+        from backend.reader_text import excerpt as clip_excerpt
+    except ImportError:
+        def clip_excerpt(text: str, max_chars: int = 140) -> str:
+            clean = " ".join((text or "").split())
+            return clean if len(clean) <= max_chars else clean[:max_chars - 3].rstrip() + "..."
 
 _ENGINE_INSTANCE: Optional[CognitiveEngine] = None
 
