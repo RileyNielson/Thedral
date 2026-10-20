@@ -3,11 +3,24 @@ Thedral Studio - Cognitive Reader Moments & Plain-English Comprehension Adapter
 Wires `cognitive_reader.CognitiveEngine` directly into Thedral's Reader Simulation payload.
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import os
-from pathlib import Path
+import sys
 
-from cognitive_reader import CognitiveEngine, VirtualBrainState, build_cognitive_database
+# Ensure the project root ('Thedral-main 2') and 'cognitive_reader_pkg' (if sibling) are on sys.path
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+for _candidate_path in (
+    _PROJECT_ROOT,
+    _PROJECT_ROOT / "cognitive_reader_pkg",
+    _PROJECT_ROOT.parent / "cognitive_reader_pkg",
+):
+    if (_candidate_path / "cognitive_reader" / "__init__.py").exists():
+        if str(_candidate_path) not in sys.path:
+            sys.path.insert(0, str(_candidate_path))
+        break
+
+from cognitive_reader import CognitiveEngine, build_cognitive_database
 from backend.reader_text import clip_excerpt
 
 _ENGINE_INSTANCE: Optional[CognitiveEngine] = None
@@ -25,16 +38,61 @@ def get_thedral_cognitive_engine() -> CognitiveEngine:
     return _ENGINE_INSTANCE
 
 
+# -----------------------------------------------------------------------------
+# Compatibility Shims required by `backend/reader_story.py` (Line 10)
+# -----------------------------------------------------------------------------
+def _subtext_moments(paragraphs: List[str], paragraph_metrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    engine = get_thedral_cognitive_engine()
+    report = engine.analyze_document("\n\n".join(paragraphs))
+    results: List[Dict[str, Any]] = []
+    for sub in report.subtext_hits:
+        p_idx = next((i for i, p in enumerate(paragraphs) if sub.utterance in p), 0)
+        results.append({
+            "type": "subtext",
+            "label": f"Subtext ({sub.subtext_category})",
+            "paragraph_index": p_idx,
+            "excerpt": f'"{sub.utterance}"',
+            "body": sub.comprehension_note,
+        })
+    return results
+
+
+def _irony_moments(paragraphs: List[str], paragraph_metrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    engine = get_thedral_cognitive_engine()
+    report = engine.analyze_document("\n\n".join(paragraphs))
+    return [
+        {
+            "type": "irony",
+            "label": f"Dramatic irony for {ep.character}",
+            "paragraph_index": ep.paragraph_index,
+            "excerpt": clip_excerpt(paragraphs[ep.paragraph_index]) if 0 <= ep.paragraph_index < len(paragraphs) else "",
+            "body": ep.explanation,
+        }
+        for ep in report.epistemic_alerts
+    ]
+
+
+def _empathy_moments(paragraphs: List[str], paragraph_metrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return []
+
+
+def _loss_and_care(paragraphs: List[str], paragraph_metrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return []
+
+
+def _trust_shifts(paragraphs: List[str], paragraph_metrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return []
+
+
+# -----------------------------------------------------------------------------
+# Main Comprehension & Beta-Reader Moments Builder
+# -----------------------------------------------------------------------------
 def build_comprehension_payload(
     paragraphs: List[str],
     paragraph_metrics: List[Dict[str, Any]],
     thread_report: Dict[str, Any],
     feel_report: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Executes the deterministic CognitiveEngine and formats the output to match
-    the exact schema expected by `InspectorReaderTab.vue` and `reader_story.py`.
-    """
     if not paragraphs:
         return {
             "moments": [],
@@ -56,7 +114,6 @@ def build_comprehension_payload(
     full_text = "\n\n".join(paragraphs)
     report = engine.analyze_document(full_text)
 
-    # Inject cognitive metrics back into paragraph_metrics so the UI heatmap & pacing bars use them
     for idx, tick in enumerate(report.ticks):
         if idx < len(paragraph_metrics):
             pm = paragraph_metrics[idx]
@@ -79,7 +136,6 @@ def build_comprehension_payload(
     payoff_moments: List[Dict[str, Any]] = []
     missed_connections: List[Dict[str, Any]] = []
 
-    # 1. Continuity, Lighting, Memory Decay, & Typo Collisions
     for alert in report.continuity_alerts:
         p_idx = alert.paragraph_index
         excerpt = clip_excerpt(paragraphs[p_idx]) if 0 <= p_idx < len(paragraphs) else alert.trigger_span
@@ -106,13 +162,8 @@ def build_comprehension_payload(
             "body": alert.explanation,
         })
 
-    # 2. Subtext, Sarcasm, Somatic Masking, & Topic Evasion
     for sub in report.subtext_hits:
-        # Find paragraph index matching utterance
-        p_idx = next(
-            (i for i, p in enumerate(paragraphs) if sub.utterance in p),
-            0,
-        )
+        p_idx = next((i for i, p in enumerate(paragraphs) if sub.utterance in p), 0)
         label_map = {
             "GRICEAN_EVASION": f"{sub.speaker or 'Character'} dodges the question",
             "QUANTITY_ASYMMETRY": f"{sub.speaker or 'Character'} stonewalls",
@@ -130,7 +181,6 @@ def build_comprehension_payload(
         moments.append(item)
         subtext_signals.append(item)
 
-    # 3. Epistemic Dramatic Irony (Reader knows something the character doesn't)
     for ep in report.epistemic_alerts:
         p_idx = ep.paragraph_index
         excerpt = clip_excerpt(paragraphs[p_idx]) if 0 <= p_idx < len(paragraphs) else ""
@@ -148,15 +198,11 @@ def build_comprehension_payload(
         moments.append(item)
         irony_moments.append(item)
 
-    # 4. Vivid Metaphors, Similes, & Denominal Verbs
     for met in report.metaphors:
-        p_idx = next(
-            (i for i, p in enumerate(paragraphs) if met.span in p),
-            0,
-        )
+        p_idx = next((i for i, p in enumerate(paragraphs) if met.span in p), 0)
         item = {
             "type": "payoff",
-            "label": f"Vivid image: '{ clip_excerpt(met.span, 45) }'",
+            "label": f"Vivid image: '{clip_excerpt(met.span, 45)}'",
             "paragraph_index": p_idx,
             "excerpt": met.span,
             "body": met.comprehension_note,
@@ -164,7 +210,6 @@ def build_comprehension_payload(
         moments.append(item)
         payoff_moments.append(item)
 
-    # 5. Reader Habituation / Action Numbness Warnings
     for h_idx in report.habituation_warnings[:2]:
         if 0 <= h_idx < len(paragraphs):
             excerpt = clip_excerpt(paragraphs[h_idx])
@@ -180,10 +225,8 @@ def build_comprehension_payload(
                 "body": body,
             })
 
-    # Sort moments in reading order
     moments.sort(key=lambda m: m.get("paragraph_index", 0))
 
-    # Build top-level plain-English summary for InspectorReaderTab.vue
     last_tick = report.ticks[-1] if report.ticks else None
     active_cast = last_tick.present_cast if last_tick else []
     wm_slots = last_tick.working_memory_slots if last_tick else []
