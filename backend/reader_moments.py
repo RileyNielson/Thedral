@@ -196,4 +196,44 @@ def build_comprehension_payload(
     if report.resolved_aliases:
         alias_pairs = [f"'{k}' = {v}" for k, v in list(report.resolved_aliases.items())[:3]]
         knows_now.append(f"Connected character titles: {', '.join(alias_pairs)}.")
-    if last_tick and last_tick.
+    if last_tick and last_tick.lighting_state == "DARK":
+        knows_now.append("The scene lighting is currently pitch dark.")
+
+    worries_now: List[str] = [a.explanation for a in report.continuity_alerts[:3]]
+    if not worries_now and report.epistemic_alerts:
+        worries_now.append(irony_moments[0]["body"])
+    if not worries_now and subtext_signals:
+        worries_now.append(subtext_signals[0]["body"])
+
+    questions_now: List[str] = [
+        f"Waiting to see how `{p.cue_phrase}` pays off (open for {p.current_word_distance:,} words)."
+        for p in report.promises if not p.resolved
+    ][:4]
+    if not questions_now:
+        questions_now = (feel_report.get("open_loops") or [])[:3]
+
+    headline = (
+        f"Tracking {len(active_cast)} character(s) across {report.total_paragraphs} paragraphs "
+        f"({len(subtext_signals)} subtext catch(es), {len(report.metaphors)} vivid image(s))."
+    )
+    summary = (
+        knows_now[0] + (" " + worries_now[0] if worries_now else " Scene continuity looks solid.")
+        if knows_now
+        else "The reader is settling into the opening atmosphere."
+    )
+
+    return {
+        "moments": moments[:18],
+        "comprehension": {
+            "headline": headline,
+            "summary": summary,
+            "knows_now": knows_now,
+            "worries_now": worries_now,
+            "questions_now": questions_now,
+            "subtext_signals": subtext_signals[:5],
+            "payoff_moments": payoff_moments[:5],
+            "irony_moments": irony_moments[:5],
+            "humor_moments": [s for s in subtext_signals if "snark" in s["label"].lower() or "sarcasm" in s["label"].lower()][:4],
+            "missed_connections": missed_connections[:5],
+        },
+    }
