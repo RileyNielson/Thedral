@@ -147,9 +147,6 @@ class CognitiveEngine:
             primed.add(row["target_lemma"])
         return primed
 
-    # -------------------------------------------------------------------------
-    # Metaphor, Simile, Denominal Verb, & Idiom Scanner
-    # -------------------------------------------------------------------------
     def scan_paragraph_metaphors(
         self, paragraph: str, context_lemmas: Optional[Set[str]] = None
     ) -> List[MetaphorHit]:
@@ -181,7 +178,7 @@ class CognitiveEngine:
                 )
             )
 
-        # B. Denominal / Zero-Shot Noun-to-Verb Metaphors ("He 'steeled' himself")
+        # B. Denominal / Reflexive Verb Metaphors
         for d_match in DENOMINAL_VERB_RE.finditer(clean):
             subj_w, verb_w, refl_target = d_match.group(1), d_match.group(2), d_match.group(3)
             noun_stem = normalize_lemma(verb_w)
@@ -207,27 +204,29 @@ class CognitiveEngine:
                         )
                     )
 
-        # C. Copula & Simile Mapping ("Grief is a rusted anchor", "looked like an upside-down sunset")
+        # C. Copula & Simile Mapping
         for match in COPULA_AND_SIMILE_RE.finditer(clean):
             full_span = match.group(0).strip()
             target_word = match.group(1).lower()
             rhs_phrase = match.group(2).strip().lower()
+            
+            clean_rhs = re.sub(r"^(?:an?\s+|the\s+)", "", rhs_phrase).strip()
             rhs_tokens = [
-                t for t in re.findall(r"[a-z\-]+", rhs_phrase)
-                if t not in ("a", "an", "the", "of", "like", "as", "though", "if", "made")
+                t for t in re.findall(r"[a-z\-]+", clean_rhs)
+                if t not in ("of", "like", "as", "though", "if", "made")
             ]
             if not rhs_tokens:
                 continue
 
             source_head = rhs_tokens[-1]
             modifiers = rhs_tokens[:-1]
+            source_str = " ".join(rhs_tokens)
 
             target_vec = self.get_vector(target_word, context_lemmas)
             source_vec = self.get_vector(source_head, context_lemmas)
             if not source_vec:
                 continue
 
-            # Allow pronouns ('he', 'she', 'his') as simile targets ("He looked like an upside-down sunset")
             if target_word in ("he", "she", "they", "it"):
                 target_domain = "ANIMATE_BEING"
                 target_conc = 0.50
@@ -253,7 +252,6 @@ class CognitiveEngine:
                 salient = {k: round(v, 2) for k, v in blended.items() if abs(v) >= 0.45}
                 if salient:
                     m_type = "simile_metaphor" if is_simile else "copula_metaphor"
-                    source_str = " ".join(rhs_tokens)
                     hits.append(
                         MetaphorHit(
                             metaphor_type=m_type,
@@ -271,7 +269,7 @@ class CognitiveEngine:
                         )
                     )
 
-        # D. Verb Selectional Preference Violations ("The silence strangled the room")
+        # D. Verb Selectional Preference Violations
         for triple in extract_svo_triples(clean, phrasal_replacements=phrasal_map):
             if any(idm_p in triple.raw_span.lower() for idm_p in idiom_spans):
                 continue
@@ -317,9 +315,6 @@ class CognitiveEngine:
 
         return hits
 
-    # -------------------------------------------------------------------------
-    # Subtext, Sarcasm, & Gricean Turn-Pair Evasion Engine
-    # -------------------------------------------------------------------------
     def analyze_paragraph_subtext(
         self,
         paragraph: str,
@@ -374,7 +369,13 @@ class CognitiveEngine:
                 if prev.is_question and content_lemmas:
                     overlap = content_lemmas & prev.primed_neighborhood
                     direct_answer_words = {"yes", "no", "maybe", "never", "of", "course", "sure", "did", "didn't"}
-                    if not overlap and not any(w in direct_answer_words for w in words):
+
+                    # Direct answers to naming/identifying questions ("What is this called?" -> "The Lower Bailey")
+                    is_naming_question = bool(re.search(r"\b(called|name|who|where|what is|what are)\b", prev.utterance.lower()))
+                    has_proper_noun_answer = bool(re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", quote))
+                    is_valid_identification = is_naming_question and has_proper_noun_answer
+
+                    if not overlap and not any(w in direct_answer_words for w in words) and not is_valid_identification:
                         hits.append(
                             SubtextHit(
                                 utterance=quote,
@@ -497,9 +498,6 @@ class CognitiveEngine:
                 )
         return hits
 
-    # -------------------------------------------------------------------------
-    # Single-Pass Sequential Simulation + Post-Pass Static Analysis
-    # -------------------------------------------------------------------------
     def analyze_document(
         self, text: str, brain: Optional[VirtualBrainState] = None
     ) -> DocumentReport:
@@ -525,7 +523,6 @@ class CognitiveEngine:
             if tick.habituation_dampening >= 0.45:
                 habituation_warnings.append(p_idx)
 
-        # Post-Pass 1: Levenshtein / Phonetic Entity Collision Detection ('Sir Grimm' vs 'Sir Grinn')
         collisions = detect_entity_collisions(
             brain.entity_first_paragraph, brain.entity_mention_counts
         )
@@ -542,7 +539,6 @@ class CognitiveEngine:
             if 0 <= p_idx < len(ticks):
                 ticks[p_idx].continuity_alerts.append(alert)
 
-        # Post-Pass 2: Compound N-Gram Split / Typo Detection ('knight kings' vs 'knightlings')
         ngram_anomalies = detect_compound_ngram_anomalies(paragraphs)
         for p_idx, odd_bigram, expected_word in ngram_anomalies:
             explanation = describe_ngram_anomaly_naturally(odd_bigram, expected_word)
@@ -557,7 +553,6 @@ class CognitiveEngine:
             if 0 <= p_idx < len(ticks):
                 ticks[p_idx].continuity_alerts.append(alert)
 
-        # Compile Plain-English Reader Notes
         for tick in ticks:
             excerpt = paragraphs[tick.paragraph_index][:120]
             for c_alert in tick.continuity_alerts:
@@ -637,11 +632,9 @@ class CognitiveEngine:
         context_lemma_set = set(lemmas)
         continuity_alerts: List[ContinuityAlert] = []
 
-        # 1. Learn Bidirectional Appositive Aliases ("Dame Verona, the short knight in purple armor,")
         new_aliases = extract_appositive_aliases(norm)
         brain.alias_map.update(new_aliases)
 
-        # 2. Extract Proper Entities & Update Working Memory
         proper_entities = extract_proper_entities(norm, alias_map=brain.alias_map)
         for ent in proper_entities:
             brain.present_cast.add(ent)
@@ -649,11 +642,9 @@ class CognitiveEngine:
             if decay_alert:
                 continuity_alerts.append(decay_alert)
 
-        # 3. Scan Multi-Word Expressions
         idioms, phrasal_map = self.scan_mwes(norm)
         idiom_phrases = {idm["phrase"] for idm in idioms}
 
-        # 4. Lexical Valence, Arousal, 6-Sense Profile, & Surprisal
         valences: List[float] = []
         arousals: List[float] = []
         sensory_totals = {
@@ -708,7 +699,6 @@ class CognitiveEngine:
         )
         brain.primed_concepts = self.spread_activation(lemmas)
 
-        # 5. Syntactic Velocity & Dialogue Ratio
         quote_spans = DIALOGUE_QUOTE_RE.findall(norm)
         quote_words = sum(len(extract_words(q)) for q in quote_spans)
         dialogue_ratio = round(quote_words / max(1, word_count), 2)
@@ -716,7 +706,6 @@ class CognitiveEngine:
             ((verb_count + 1) / (adj_count + 1)) * (12.0 / max(4.0, avg_sent_len)), 3
         )
 
-        # 6. Event Segmentation Theory (5D Situation Boundary)
         shifted_dims: List[str] = []
         if detected_location and detected_location != brain.current_location:
             if brain.current_location != "UNSPECIFIED":
@@ -736,7 +725,6 @@ class CognitiveEngine:
 
         event_boundary = len(shifted_dims) >= 2
 
-        # 7. Physical Situation Model & Modality-Gated SVO State Machine
         clause_modalities = [classify_sentence_modality(s) for s in sentences]
         for triple in extract_svo_triples(
             norm, pronoun_resolver=brain.pronoun_stack, phrasal_replacements=phrasal_map
@@ -788,7 +776,6 @@ class CognitiveEngine:
                     )
                 )
 
-        # 8. Relational Affinity Ledger
         if len(proper_entities) >= 2 and abs(raw_valence) >= 0.20:
             for i in range(len(proper_entities)):
                 for j in range(i + 1, len(proper_entities)):
@@ -798,7 +785,6 @@ class CognitiveEngine:
                 if concept in lemmas and abs(raw_valence) >= 0.20:
                     brain.update_affinity(ent, concept, raw_valence)
 
-        # 9. Chekhov Promise Setup
         for p_match in PROMISE_CUE_RE.finditer(norm):
             cue_span = p_match.group(0).strip()
             if classify_sentence_modality(cue_span) != "FACTUAL":
@@ -823,11 +809,9 @@ class CognitiveEngine:
                 prom.current_word_distance = brain.cumulative_words - prom.setup_word_offset
                 prom.tension_tautness = round(min(1.0, prom.current_word_distance / 2500.0), 3)
 
-        # 10. Homeostatic Arousal & Dramatic Irony
         felt_arousal, pool, habituation = brain.step_autonomic_arousal(raw_arousal, raw_valence)
         irony_score, epistemic_alerts = brain.evaluate_dramatic_irony(paragraph_index)
 
-        # 11. Metaphor & Subtext Scans
         metaphors = self.scan_paragraph_metaphors(norm, context_lemma_set)
 
         speaker = proper_entities[0] if proper_entities else brain.dominant_protagonist
