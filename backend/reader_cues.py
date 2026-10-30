@@ -13,61 +13,75 @@ _STOP_WORDS = {
     "such", "than", "that", "their", "them", "then", "there", "these", "they",
     "this", "those", "through", "under", "until", "very", "were", "what", "when",
     "where", "which", "while", "whom", "with", "would", "your", "also", "been",
-    "will", "shall", "must", "need", "needs", "want", "wants", "make", "made",
+    "will", "shall", "make", "made",
     "someone", "somebody", "anyone", "anybody", "thing", "things", "someone's",
 }
+
+# Distinguish character promises from epistemic deductions ("must be")
 _PROMISE_CUES = re.compile(
-    r"\b(?:promise[sd]?|swore|sworn|vowed|owe[sd]?|have to|has to|"
-    r"must|won['’]t stop|won['’]t rest|one day|"
-    r"was going to|set out to|need to|needs to)\b",
+    r"\b(?:promise[sd]?|swore|sworn|vowed|owe[sd]?|"
+    r"(?:must|have to|has to|need to|needs to)\s+(?:find|stop|reach|protect|save|kill|carry|learn|return|win|free)|"
+    r"won['’]t stop|won['’]t rest|one day|was going to|set out to)\b",
     re.IGNORECASE,
 )
+
 _POSITIVE_CUES = re.compile(
     r"\b(?:found|saved|won|escaped|survived|succeeded|success|worked|"
     r"agreed|accepted|opened|arrived|managed|rescued|reached|kept|"
     r"answered|returned|remembered|learned|discovered|revealed|admitted)\b",
     re.IGNORECASE,
 )
+
 _NEGATIVE_CUES = re.compile(
     r"\b(?:failed|lost|refused|denied|rejected|broke|missed|couldn['’]t|"
     r"wouldn['’]t|cannot|can['’]t|dead|died|death|killed|stopped|"
     r"betrayed|lied|wounded|injured|wrong)\b",
     re.IGNORECASE,
 )
+
 _RESOLUTION_CUES = re.compile(
     r"\b(?:finally|at last|found|saved|opened|answered|returned|"
     r"remembered|learned|discovered|revealed|admitted|chose|decided|"
     r"understood|kept the promise|fulfilled)\b",
     re.IGNORECASE,
 )
+
+# Loss cues exclude atmospheric words like 'sunset' and 'dusk'
 _LOSS_CUES = re.compile(
     r"\b(?:died|dies|funeral|grief|mourn(?:ed|ing)?|goodbye|killed|murdered|"
     r"butchered|passed away|death of|never came back|(?:was|is) gone forever)\b",
     re.IGNORECASE,
 )
+
 _CARE_CUES = re.compile(
     r"\b(?:loved(?! to\b)|trusted|protected|comforted|waited for|slept beside|"
     r"loyal|best friend|cared for|raised me|taught me|tucked me|"
     r"held (?:(?:the )?\w+['’]s|his|her|their|my|our) (?:hand|paw|face|head|body)s?)\b",
     re.IGNORECASE,
 )
+
 _VULNERABILITY_CUES = re.compile(
-    r"\b(?:afraid|alone|ashamed|terrified|cried|wept|sobbed|"
-    r"begged|confessed|admitted|couldn['’]t stop crying)\b",
+    r"\b(?:afraid|ashamed|terrified|cried|wept|sobbed|"
+    r"begged|confessed|admitted|couldn['’]t stop crying|"
+    r"(?:felt|was all|stood|left)\s+alone)\b",
     re.IGNORECASE,
 )
+
 _REVERSAL_CUES = re.compile(
     r"\b(?:instead|turned out|all along|suddenly|actually|after all|"
     r"until|not .{1,50} but|yet)\b",
     re.IGNORECASE,
 )
+
 _REASSURANCE_CUES = re.compile(
     r"\b(?:perfectly safe|nothing could go wrong|exactly as planned|"
     r"completely harmless|trust me|all under control|couldn['’]t fail)\b",
     re.IGNORECASE,
 )
+
 _CONTRAST_CUES = re.compile(r"\b(?:but|yet|however|although|though|instead)\b", re.IGNORECASE)
 _AND_CUES = re.compile(r"\b(?:and then|and|then)\b", re.IGNORECASE)
+
 _LEXICAL_SEEDS = {
     "promise": {"promise", "vow", "pledge"},
     "positive": {"success", "win", "rescue", "discovery", "answer"},
@@ -96,6 +110,8 @@ def _cached_reader_cues(
     cues = {}
     for category, seeds in _LEXICAL_SEEDS.items():
         terms = expand_lexical_terms(seeds, lexicon_path)
+        # Exclude common false positives from lexicon expansion
+        terms = {t for t in terms if t not in {"sunset", "dusk", "down", "horse", "droppings", "alone"}}
         lexical_pattern = (
             r"\b(?:" + "|".join(re.escape(term) for term in sorted(terms)) + r")\b"
             if terms else r"(?!)"
@@ -139,5 +155,3 @@ def _named_terms(text: str) -> set[str]:
         for token in re.findall(r"\b[A-Z][a-z]{2,}\b", text)
         if token.lower() not in {"the", "then", "this", "that", "when", "what"}
     }
-
-
