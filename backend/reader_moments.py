@@ -1,9 +1,3 @@
-"""
-Thedral Studio — Cognitive Reader Moments & Dynamic Emotion Detectors
-Provides deterministic implementations for Loss/Grief, Empathy, and Trust shifts,
-fully formatted for the Inspector Reader Tab.
-"""
-
 import os
 import re
 import sys
@@ -26,9 +20,6 @@ from backend.reader_text import (
     _search,
     _first_matching_sentence,
     _last_matching_sentence,
-    _windows,
-    _anchors,
-    _KIN,
 )
 
 _ENGINE_INSTANCE: Optional[CognitiveEngine] = None
@@ -51,43 +42,64 @@ def clip_excerpt(text: str, max_chars: int = 140) -> str:
 
 
 def _loss_and_care(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List[Dict[str, Any]]:
-    """Detects where loss occurs after an established bond of care."""
+    """Detects where loss occurs after an established bond of care on the SAME entity."""
     moments = []
-    text = " ".join(paragraphs)
-    has_loss = bool(_search(cues["loss"], text))
-    has_care = bool(_search(cues["care"], text))
+    
+    # 1. Harvest paragraphs with care bonds and extract target nouns
+    care_bonds = []
+    for idx, p in enumerate(paragraphs, 1):
+        if _search(cues["care"], p):
+            sent = _first_matching_sentence(p, cues["care"])
+            cared_nouns = (
+                set(re.findall(r"\b[A-Z][a-z]+\b", p))
+                | set(re.findall(r"\b(?:dog|hound|horse|brother|sister|father|mother|friend|child)\b", p.lower()))
+            )
+            if cared_nouns:
+                care_bonds.append((idx, sent, cared_nouns))
 
-    if not (has_loss and has_care):
+    if not care_bonds:
         return moments
 
-    care_para_idx = next((i + 1 for i, p in enumerate(paragraphs) if _search(cues["care"], p)), 1)
-    loss_para_idx = next((i + 1 for i, p in enumerate(paragraphs) if _search(cues["loss"], p)), len(paragraphs))
-
-    care_sentence = _first_matching_sentence(text, cues["care"])
-    loss_sentence = _last_matching_sentence(text, cues["loss"])
-
-    if care_sentence and loss_sentence:
-        moments.append({
-            "kind": "loss",
-            "headline": "A bond broken by loss",
-            "reaction": (
-                "Because the prose established genuine care and attachment first, "
-                "this separation will land as grief rather than mere event plot."
-            ),
-            "confidence": "Bond followed by loss cue",
-            "paragraph": loss_para_idx,
-            "evidence": loss_sentence[:700],
-            "payoff_evidence": loss_sentence[:700],
-            "setup_evidence": care_sentence[:400],
-            "setup_title": f"Paragraph {care_para_idx}",
-        })
+    # 2. Check subsequent paragraphs for loss referencing the same entities
+    for idx, p in enumerate(paragraphs, 1):
+        if "sunset" in p.lower() or "dusk" in p.lower():
+            continue
+        if _search(cues["loss"], p):
+            loss_sent = _last_matching_sentence(p, cues["loss"])
+            loss_nouns = (
+                set(re.findall(r"\b[A-Z][a-z]+\b", p))
+                | set(re.findall(r"\b(?:dog|hound|horse|brother|sister|father|mother|friend|child)\b", p.lower()))
+            )
+            for care_idx, care_sent, care_nouns in care_bonds:
+                shared_nouns = care_nouns & loss_nouns
+                if care_idx < idx and shared_nouns:
+                    shared_label = ", ".join(shared_nouns)
+                    moments.append({
+                        "kind": "loss",
+                        "headline": f"A bond broken by loss ({shared_label})",
+                        "reaction": (
+                            f"Because the prose established genuine care for {shared_label} first, "
+                            "this loss will land as grief rather than mere event plot."
+                        ),
+                        "confidence": "Bond followed by loss cue",
+                        "paragraph": idx,
+                        "evidence": loss_sent[:700],
+                        "payoff_evidence": loss_sent[:700],
+                        "setup_evidence": care_sent[:400],
+                        "setup_title": f"Paragraph {care_idx}",
+                    })
+                    return moments
     return moments
 
 
 def _empathy_moments(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List[Dict[str, Any]]:
-    """Detects raw vulnerability or unshielded admission that invites reader empathy."""
+    """Detects raw vulnerability or emotional shame, ignoring requests for solitude."""
     moments = []
     for idx, p in enumerate(paragraphs, 1):
+        # Ignore requests for solitude / privacy ("talk alone", "leave alone", "be alone")
+        if re.search(r"\b(?:talk|speak|meet|leave|let|be)\s+(?:\w+\s+)?alone\b", p, re.IGNORECASE):
+            continue
+
         if _search(cues["vulnerability"], p):
             sentence = _first_matching_sentence(p, cues["vulnerability"])
             if sentence:
@@ -95,7 +107,7 @@ def _empathy_moments(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List
                     "kind": "empathy",
                     "headline": "An unshielded moment of vulnerability",
                     "reaction": (
-                        "The character drops their defenses and lets the reader see their raw fear or shame. "
+                        "The character drops their defenses and lets the reader see their raw fear or doubt. "
                         "Readers step closer when the facade cracks."
                     ),
                     "confidence": "Vulnerability marker",
