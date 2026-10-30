@@ -36,29 +36,27 @@ PROMISE_CUE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Fixed regex: strictly separates articles with word boundaries so 'an' does not strip down to 'n'
 COPULA_AND_SIMILE_RE = re.compile(
     r"\b(?:the\s+|a\s+|an\s+|his\s+|her\s+|their\s+|my\s+|our\s+)?([a-z]+)\s+"
     r"(?:is|was|were|are|became|becomes|remained|felt|seemed|looked|sounded)\s+"
     r"(?:like\s+|as\s+though\s+|as\s+if\s+|made\s+of\s+)?"
-    r"(?:a|an|the)?\s*([a-z\-\s]{2,40}?)(?:[\.,;!\?]|$|\s+(?:that|which|who|in|on|under|with)\b)",
+    r"(?:\b(?:an|a|the)\s+)?\s*([a-z\-\s]{2,40}?)(?:[\.,;!\?]|$|\s+(?:that|which|who|in|on|under|with)\b)",
     re.IGNORECASE,
 )
 
-# Catches Denominal / Reflexive Verb Metaphors: "He 'steeled' himself", "She anchored herself", "He armored his heart"
 DENOMINAL_VERB_RE = re.compile(
     r"\b([A-Z][a-z]+|he|she|they|He|She|They)\s+['\"]?([a-z]+ed)['\"]?\s+"
     r"(himself|herself|themselves|(?:his|her|their)\s+[a-z]+)\b"
 )
 
-# Bidirectional Appositive & Copula Alias Patterns:
-# Pattern A: "Dame Verona, the short knight in purple armor," or "Sir Balk, the banneret,"
 APPOSITIVE_ALIAS_RE = re.compile(
-    r"\b((?:Sir|Dame|Lord|Lady|King|Queen)\s+[A-Z][a-z]+|[A-Z][a-z]+)\s*,\s+"
+    r"\b((?:Sir|Dame|Lord|Lady|King|Queen|Weapons\s+Master)\s+[A-Z][a-z]+|[A-Z][a-z]+)\s*,\s+"
     r"(the\s+[a-z\s]{3,35}?)\s*,"
 )
-# Pattern B: '"I\'m Sir Balk."' or '"This is my twin, Selica."'
+
 SELF_INTRO_ALIAS_RE = re.compile(
-    r'["\']I\'m\s+((?:Sir|Dame|Lord|Lady)?\s*[A-Z][a-z]+)\b[^"\']*["\']\s*(?:,\s*)?(the\s+[a-z]+)'
+    r'["\']I\'m\s+((?:Sir|Dame|Lord|Lady|Weapons\s+Master)?\s*[A-Z][a-z]+)\b[^"\']*["\']\s*(?:,\s*)?(the\s+[a-z]+)'
 )
 
 PASSIVE_BY_RE = re.compile(
@@ -85,7 +83,7 @@ SVO_ACTIVE_RE = re.compile(
 
 DIALOGUE_QUOTE_RE = re.compile(r'["“]([^"”]{1,350})["”]')
 
-HONORIFICS = {"Sir", "Dame", "Lord", "Lady", "King", "Queen", "Captain", "Master", "Dane"}
+HONORIFICS = {"Sir", "Dame", "Lord", "Lady", "King", "Queen", "Captain", "Master", "Dane", "Weapons"}
 
 IRREGULAR_LEMMAS = {
     "extinguished": "extinguish", "strangled": "strangle", "choked": "choke",
@@ -111,6 +109,11 @@ MORPH_SUFFIXES: List[Tuple[str, str, float]] = [
     ("ness", "ABSTRACT", 1.0), ("ity", "ABSTRACT", 1.0),
     ("able", "CAPABLE", 0.85), ("ible", "CAPABLE", 0.85), ("ly", "ADVERB", 0.95),
 ]
+
+STOPWORD_GRAMMAR = {
+    "was", "is", "had", "has", "are", "were", "the", "a", "an", "in", "on", 
+    "to", "of", "and", "but", "or", "for", "with", "at", "by", "from", "up", "out"
+}
 
 
 @dataclass
@@ -156,11 +159,7 @@ def normalize_lemma(word: str) -> str:
     return w
 
 
-# -----------------------------------------------------------------------------
-# Algorithmic Static Analysis Helpers (Levenshtein, Soundex, Alias, N-Grams)
-# -----------------------------------------------------------------------------
 def levenshtein_distance(s1: str, s2: str) -> int:
-    """Computes exact character edit distance between two strings."""
     if len(s1) < len(s2):
         return levenshtein_distance(s2, s1)
     if len(s2) == 0:
@@ -178,7 +177,6 @@ def levenshtein_distance(s1: str, s2: str) -> int:
 
 
 def soundex_hash(word: str) -> str:
-    """Computes phonetic Soundex hash (so 'Grinn' and 'Grimm' or 'Sayd' and 'Sade' cluster)."""
     clean = re.sub(r"[^a-zA-Z]", "", word).upper()
     if not clean:
         return "0000"
@@ -201,11 +199,6 @@ def soundex_hash(word: str) -> str:
 
 
 def extract_appositive_aliases(paragraph: str) -> Dict[str, str]:
-    """
-    Automatically learns role-to-name aliases from appositives & self-introductions:
-    - "Dame Verona, the short knight in purple armor," -> {"the short knight": "Dame Verona", "purple knight": "Dame Verona"}
-    - '"I\'m Sir Balk," the banneret grunted' -> {"the banneret": "Sir Balk", "banneret": "Sir Balk"}
-    """
     norm = normalize_text(paragraph)
     aliases: Dict[str, str] = {}
 
@@ -213,7 +206,6 @@ def extract_appositive_aliases(paragraph: str) -> Dict[str, str]:
         proper_name = match.group(1).strip()
         desc_phrase = match.group(2).strip().lower()
         aliases[desc_phrase] = proper_name
-        # Also extract color/weapon shorthand ("the knight in green" -> "green knight")
         for color in ("red", "blue", "purple", "green", "yellow"):
             if color in desc_phrase and "knight" in desc_phrase:
                 aliases[f"the {color} knight"] = proper_name
@@ -232,15 +224,9 @@ def extract_appositive_aliases(paragraph: str) -> Dict[str, str]:
 
 
 def detect_entity_collisions(
-    entity_First_seen_para: Dict[str, int],
+    entity_first_seen_para: Dict[str, int],
     entity_counts: Counter,
 ) -> List[Tuple[str, str, int, int, int]]:
-    """
-    Finds low-frequency proper nouns/titled names (<= 2 mentions) that are within
-    Levenshtein edit distance 1-2 of a high-frequency canonical entity (>= 3 mentions).
-    Catches 'Sir Grimm' vs 'Sir Grinn' and 'Dane Verona' vs 'Dame Verona'.
-    Returns list of (rare_name, canonical_name, rare_count, canonical_count, first_para).
-    """
     collisions: List[Tuple[str, str, int, int, int]] = []
     rare_entities = [e for e, c in entity_counts.items() if c <= 2 and len(e) >= 4]
     frequent_entities = [e for e, c in entity_counts.items() if c >= 3 and len(e) >= 4]
@@ -257,7 +243,7 @@ def detect_entity_collisions(
                     freq,
                     entity_counts[rare],
                     entity_counts[freq],
-                    entity_First_seen_para.get(rare, 0),
+                    entity_first_seen_para.get(rare, 0),
                 ))
                 break
     return collisions
@@ -266,17 +252,10 @@ def detect_entity_collisions(
 def detect_compound_ngram_anomalies(
     paragraphs: List[str],
 ) -> List[Tuple[int, str, str]]:
-    """
-    Self-correcting N-Gram Anomaly Detector:
-    Learns the manuscript's frequent domain vocabulary (words appearing >= 4 times, e.g., 'knightlings', 'banneret')
-    and scans for rare 2-word bigrams ('knight kings') whose concatenated form is within
-    Levenshtein distance <= 2 of a frequent domain word!
-    Returns list of (paragraph_index, anomalous_bigram, expected_domain_word).
-    """
     unigram_counts: Counter = Counter()
     for p in paragraphs:
         for w in re.findall(r"[a-z]+", p.lower()):
-            if len(w) >= 7:
+            if len(w) >= 7 and w not in STOPWORD_GRAMMAR:
                 unigram_counts[w] += 1
 
     frequent_compounds = [w for w, c in unigram_counts.items() if c >= 3]
@@ -288,6 +267,8 @@ def detect_compound_ngram_anomalies(
         tokens = re.findall(r"[a-z]+", p.lower())
         for i in range(len(tokens) - 1):
             w1, w2 = tokens[i], tokens[i + 1]
+            if w1 in STOPWORD_GRAMMAR or w2 in STOPWORD_GRAMMAR:
+                continue
             if len(w1) < 3 or len(w2) < 3:
                 continue
             joined = w1 + w2
@@ -375,32 +356,27 @@ def extract_words(text: str) -> List[str]:
 def extract_proper_entities(
     paragraph: str, alias_map: Optional[Dict[str, str]] = None
 ) -> List[str]:
-    """
-    Extracts proper nouns AND compound titled entities ('Sir Grinn', 'Sir Grimm', 'Dame Verona', 'Dane Verona'),
-    while resolving known role aliases ('the banneret' -> 'Sir Balk').
-    """
     norm = normalize_text(paragraph)
     entities: List[str] = []
 
-    # 1. Extract Honorific + Name pairs first ('Sir Grinn', 'Sir Grimm', 'Dane Verona')
+    # Match compound titles like 'Weapons Master', 'Sir Grinn'
     titled_matches = re.findall(
-        r"\b(Sir|Dame|Dane|Lord|Lady|King|Queen)\s+([A-Z][a-z]+)\b", norm
+        r"\b((?:Sir|Dame|Dane|Lord|Lady|King|Queen|Weapons\s+Master|Master|Captain)\s+[A-Z][a-z]+)\b", norm
     )
     titled_head_words: Set[str] = set()
-    for title, name in titled_matches:
-        full_titled = f"{title} {name}"
-        titled_head_words.add(title)
-        titled_head_words.add(name)
-        if full_titled not in entities:
-            entities.append(full_titled)
+    for full_title in titled_matches:
+        for part in full_title.split():
+            titled_head_words.add(part)
+        if full_title not in entities:
+            entities.append(full_title)
 
-    # 2. Extract standalone Proper Nouns
     common_starters = {
         "The", "A", "An", "He", "She", "They", "It", "We", "I", "You", "His", "Her",
         "In", "On", "At", "When", "While", "After", "Before", "Although", "Had", "If",
         "Because", "Oh", "Well", "Yeah", "Yes", "No", "Fine", "But", "And", "Perhaps",
         "Grief", "Melancholy", "Silence", "Time", "Hope", "Fear", "Anger", "Bureaucracy",
         "Holding", "Clutching", "Drawing", "Once", "Still", "Soon", "Every", "Two",
+        "Weapons",
     }
     for sent in split_sentences(norm):
         clean_sent = re.sub(r'^["\'\s]+', "", sent)
@@ -414,7 +390,6 @@ def extract_proper_entities(
                 if w not in common_starters and w not in entities:
                     entities.append(w)
 
-    # 3. Check learned Role Aliases ('the banneret' -> 'Sir Balk')
     if alias_map:
         low_para = norm.lower()
         for role_phrase, canon_name in alias_map.items():
