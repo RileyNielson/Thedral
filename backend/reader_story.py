@@ -5,6 +5,7 @@ trajectory tracking into plain-English beta reader commentary without LLM depend
 """
 
 import re
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -162,8 +163,9 @@ def analyze_reader_story(
                 "setup_title": "",
             })
 
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ Cognitive Engine diagnostic notice: {e}")
+        traceback.print_exc()
 
     # 5. Pacing and Atmosphere Moments
     experience_moments = analyze_reader_feel(current_content)
