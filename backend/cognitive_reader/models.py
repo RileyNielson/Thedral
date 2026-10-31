@@ -89,7 +89,7 @@ class ReaderNote:
 class ParagraphDiagnosis:
     paragraph_index: int
     headline: str
-    cognitive_function: str  # 'KINETIC_ACTION' | 'VISCERAL_GROUNDING' | 'SOCIAL_HIERARCHY' | 'SPATIAL_BLUEPRINT' | 'INTERIOR_STAKES' | 'DIALOGUE_SUBTEXT' | 'WHITE_ROOM_ALERT' | 'SEMANTIC_SLACK_ALERT'
+    cognitive_function: str
     reader_experience: str
     salient_words: List[str]
     primary_senses: List[str]
