@@ -57,6 +57,7 @@ def analyze_reader_story(
             "irony_moments": [],
             "trust_shifts": [],
             "experience_moments": [],
+            "paragraph_diagnoses": [],
             "summary": "This scene is not in the manuscript’s active reading order.",
         }
 
@@ -76,15 +77,19 @@ def analyze_reader_story(
     empathy_moments = _empathy_moments(paragraphs, cues)
     trust_shifts = _trust_shifts(paragraphs, cues)
 
-    # 4. Cognitive Reading Simulation (Subtext, Dramatic Irony, Sensory Fatigue, Continuity)
+    # 4. Cognitive Reading Simulation & Paragraph Diagnoses
     subtext_moments = []
     irony_moments = []
     cognitive_payoffs = []
     continuity_alerts = []
+    paragraph_diagnoses = []
 
     try:
         engine = get_thedral_cognitive_engine()
         report = engine.analyze_document(text)
+
+        # Paragraph-by-Paragraph Semantic Diagnoses
+        paragraph_diagnoses = [d.to_dict() for d in report.paragraph_diagnoses]
 
         # Map Subtext & Gricean Evasions to Beta-Reader voice
         for sub in report.subtext_hits:
@@ -94,7 +99,7 @@ def analyze_reader_story(
                 "QUANTITY_ASYMMETRY": f"{sub.speaker or 'The character'} stonewalls the exchange",
                 "TEMPORAL_HYPERBOLE_SARCASM": f"Dry sarcasm from {sub.speaker or 'the speaker'}",
                 "POLARITY_INVERSION_SARCASM": f"Insincere tone from {sub.speaker or 'the speaker'}",
-                "SOMATIC_MASKING": f"Polite mask hiding inner tension",
+                "SOMATIC_MASKING": "Polite mask hiding inner tension",
             }
             subtext_moments.append({
                 "kind": "subtext",
@@ -142,14 +147,14 @@ def analyze_reader_story(
                 "setup_title": "",
             })
 
-        # Map Continuity / Physical Glitches
+        # Map Continuity / Physical Contradictions
         for alert in report.continuity_alerts:
             p_idx = alert.paragraph_index + 1
             continuity_alerts.append({
                 "kind": "continuity",
                 "headline": f"Continuity check ({alert.entity})",
                 "reaction": alert.explanation,
-                "confidence": "Sensory contradiction",
+                "confidence": "Contradiction flag",
                 "paragraph": p_idx,
                 "evidence": alert.trigger_span,
                 "payoff_evidence": alert.trigger_span,
@@ -198,6 +203,7 @@ def analyze_reader_story(
         "irony_moments": irony_moments,
         "trust_shifts": trust_shifts,
         "experience_moments": experience_moments,
+        "paragraph_diagnoses": paragraph_diagnoses,
         "disclaimer": "Confident predictions of reader perception based on deterministic linguistic modeling.",
         "method": "Transparent structural and psycholinguistic modeling via CognitiveEngine. Zero generative AI.",
         "lexicon": {
