@@ -210,6 +210,7 @@ class CognitiveEngine:
             target_word = match.group(1).lower()
             rhs_phrase = match.group(2).strip().lower()
             
+            # Clean leading articles without truncating words like 'an'
             clean_rhs = re.sub(r"^(?:an?\s+|the\s+)", "", rhs_phrase).strip()
             rhs_tokens = [
                 t for t in re.findall(r"[a-z\-]+", clean_rhs)
@@ -370,12 +371,13 @@ class CognitiveEngine:
                     overlap = content_lemmas & prev.primed_neighborhood
                     direct_answer_words = {"yes", "no", "maybe", "never", "of", "course", "sure", "did", "didn't"}
 
-                    # Direct answers to naming/identifying questions ("What is this called?" -> "The Lower Bailey")
+                    # Checks if this is an answer to a naming/locational question
                     is_naming_question = bool(re.search(r"\b(called|name|who|where|what is|what are)\b", prev.utterance.lower()))
                     has_proper_noun_answer = bool(re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", quote))
-                    is_valid_identification = is_naming_question and has_proper_noun_answer
+                    is_direct_copula_answer = bool(re.match(r"^(?:this|it|that|he|she|they)\s+(?:is|are|was|were)\b", quote.strip(), re.IGNORECASE))
+                    is_valid_direct_answer = is_direct_copula_answer or (is_naming_question and (has_proper_noun_answer or len(words) >= 4))
 
-                    if not overlap and not any(w in direct_answer_words for w in words) and not is_valid_identification:
+                    if not overlap and not any(w in direct_answer_words for w in words) and not is_valid_direct_answer:
                         hits.append(
                             SubtextHit(
                                 utterance=quote,
