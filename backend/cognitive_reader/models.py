@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class MetaphorHit:
-    metaphor_type: str  # 'copula_metaphor' | 'simile_metaphor' | 'verb_frame_metaphor' | 'denominal_verb_metaphor' | 'idiom_expression'
+    metaphor_type: str
     span: str
     target_concept: str
     source_concept: str
@@ -21,7 +21,7 @@ class SubtextHit:
     utterance: str
     speaker: Optional[str]
     target_entity: Optional[str]
-    subtext_category: str  # 'POLARITY_INVERSION_SARCASM' | 'TEMPORAL_HYPERBOLE_SARCASM' | 'SOMATIC_MASKING' | 'GRICEAN_EVASION' | 'QUANTITY_ASYMMETRY'
+    subtext_category: str
     surface_valence: float
     contextual_prior: float
     divergence_score: float
@@ -35,7 +35,7 @@ class SubtextHit:
 
 @dataclass
 class ContinuityAlert:
-    alert_type: str  # 'LIGHTING_CONTRADICTION' | 'MEMORY_DECAY_FAILURE' | 'ENTITY_NAME_COLLISION' | 'NGRAM_TYPO_ANOMALY'
+    alert_type: str
     paragraph_index: int
     entity: str
     trigger_span: str
@@ -47,7 +47,7 @@ class ContinuityAlert:
 
 @dataclass
 class EpistemicAlert:
-    alert_type: str  # 'DRAMATIC_IRONY_SPIKE'
+    alert_type: str
     paragraph_index: int
     character: str
     fact_id: str
@@ -75,11 +75,25 @@ class OpenPromise:
 
 @dataclass
 class ReaderNote:
-    category: str  # 'continuity' | 'subtext' | 'tension' | 'imagery' | 'pacing' | 'sensory'
+    category: str
     label: str
     paragraph_index: int
     excerpt: str
     body: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ParagraphDiagnosis:
+    paragraph_index: int
+    headline: str
+    cognitive_function: str  # 'KINETIC_ACTION' | 'VISCERAL_GROUNDING' | 'SOCIAL_HIERARCHY' | 'SPATIAL_BLUEPRINT' | 'INTERIOR_STAKES' | 'DIALOGUE_SUBTEXT' | 'WHITE_ROOM_ALERT' | 'SEMANTIC_SLACK_ALERT'
+    reader_experience: str
+    salient_words: List[str]
+    primary_senses: List[str]
+    craft_advisory: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -109,6 +123,7 @@ class ParagraphTick:
     subtext_hits: List[SubtextHit] = field(default_factory=list)
     continuity_alerts: List[ContinuityAlert] = field(default_factory=list)
     epistemic_alerts: List[EpistemicAlert] = field(default_factory=list)
+    diagnosis: Optional[ParagraphDiagnosis] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -131,6 +146,7 @@ class DocumentReport:
     affinity_matrix: Dict[str, float]
     reader_notes: List[ReaderNote]
     ticks: List[ParagraphTick]
+    paragraph_diagnoses: List[ParagraphDiagnosis] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
