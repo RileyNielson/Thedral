@@ -36,12 +36,12 @@ PROMISE_CUE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Fixed regex: strictly separates articles with word boundaries so 'an' does not strip down to 'n'
+# Captures the full simile target without cutting off 'an' into 'n'
 COPULA_AND_SIMILE_RE = re.compile(
     r"\b(?:the\s+|a\s+|an\s+|his\s+|her\s+|their\s+|my\s+|our\s+)?([a-z]+)\s+"
     r"(?:is|was|were|are|became|becomes|remained|felt|seemed|looked|sounded)\s+"
-    r"(?:like\s+|as\s+though\s+|as\s+if\s+|made\s+of\s+)?"
-    r"(?:\b(?:an|a|the)\s+)?\s*([a-z\-\s]{2,40}?)(?:[\.,;!\?]|$|\s+(?:that|which|who|in|on|under|with)\b)",
+    r"(?:like\s+|as\s+though\s+|as\s+if\s+|made\s+of\s+)\s*"
+    r"([a-z\-\s]{2,40}?)(?:[\.,;!\?]|$|\s+(?:that|which|who|in|on|under|with)\b)",
     re.IGNORECASE,
 )
 
@@ -110,9 +110,11 @@ MORPH_SUFFIXES: List[Tuple[str, str, float]] = [
     ("able", "CAPABLE", 0.85), ("ible", "CAPABLE", 0.85), ("ly", "ADVERB", 0.95),
 ]
 
+# Common words that must never trigger N-gram split warnings (e.g. "knight was")
 STOPWORD_GRAMMAR = {
     "was", "is", "had", "has", "are", "were", "the", "a", "an", "in", "on", 
-    "to", "of", "and", "but", "or", "for", "with", "at", "by", "from", "up", "out"
+    "to", "of", "and", "but", "or", "for", "with", "at", "by", "from", "up", "out",
+    "it", "he", "she", "they", "we", "you", "not", "no"
 }
 
 
@@ -272,12 +274,16 @@ def detect_compound_ngram_anomalies(
             if len(w1) < 3 or len(w2) < 3:
                 continue
             joined = w1 + w2
-            if len(joined) < 7:
+            # Only compare if the joined compound is actually long enough
+            if len(joined) < 8:
                 continue
             for target_word in frequent_compounds:
-                if abs(len(joined) - len(target_word)) <= 2:
+                # Do not flag if w1 is identical to target_word minus 's' (e.g. knight vs knights)
+                if w1 == target_word or target_word.startswith(w1):
+                    continue
+                if abs(len(joined) - len(target_word)) <= 1:
                     dist = levenshtein_distance(joined, target_word)
-                    if 1 <= dist <= 2 and w1 != target_word:
+                    if dist <= 1:
                         anomalies.append((p_idx, f"{w1} {w2}", target_word))
                         break
     return anomalies
@@ -359,7 +365,7 @@ def extract_proper_entities(
     norm = normalize_text(paragraph)
     entities: List[str] = []
 
-    # Match compound titles like 'Weapons Master', 'Sir Grinn'
+    # 1. Match full multi-word titles: 'Weapons Master Gorbal', 'Sir Grinn'
     titled_matches = re.findall(
         r"\b((?:Sir|Dame|Dane|Lord|Lady|King|Queen|Weapons\s+Master|Master|Captain)\s+[A-Z][a-z]+)\b", norm
     )
@@ -376,8 +382,9 @@ def extract_proper_entities(
         "Because", "Oh", "Well", "Yeah", "Yes", "No", "Fine", "But", "And", "Perhaps",
         "Grief", "Melancholy", "Silence", "Time", "Hope", "Fear", "Anger", "Bureaucracy",
         "Holding", "Clutching", "Drawing", "Once", "Still", "Soon", "Every", "Two",
-        "Weapons",
+        "Weapons",  # Never allow raw "Weapons" as a standalone person
     }
+
     for sent in split_sentences(norm):
         clean_sent = re.sub(r'^["\'\s]+', "", sent)
         words = re.findall(r"[A-Za-z]+", clean_sent)
