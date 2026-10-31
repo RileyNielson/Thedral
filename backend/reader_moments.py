@@ -4,19 +4,12 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-for _candidate_path in (
-    _PROJECT_ROOT,
-    _PROJECT_ROOT / "cognitive_reader_pkg",
-    _PROJECT_ROOT.parent / "cognitive_reader_pkg",
-):
-    if (_candidate_path / "cognitive_reader" / "__init__.py").exists():
-        if str(_candidate_path) not in sys.path:
-            sys.path.insert(0, str(_candidate_path))
-        break
+# Prioritize backend/cognitive_reader over any site-packages or sibling packages
+_BACKEND_DIR = Path(__file__).resolve().parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
 
-# In backend/reader_moments.py, change:
-from backend.cognitive_reader import CognitiveEngine, build_cognitive_database
+from cognitive_reader import CognitiveEngine, build_cognitive_database
 from backend.reader_text import (
     _search,
     _first_matching_sentence,
@@ -46,7 +39,6 @@ def _loss_and_care(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List[D
     """Detects where loss occurs after an established bond of care on the SAME entity."""
     moments = []
     
-    # 1. Harvest paragraphs with care bonds and extract target nouns
     care_bonds = []
     for idx, p in enumerate(paragraphs, 1):
         if _search(cues["care"], p):
@@ -61,7 +53,6 @@ def _loss_and_care(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List[D
     if not care_bonds:
         return moments
 
-    # 2. Check subsequent paragraphs for loss referencing the same entities
     for idx, p in enumerate(paragraphs, 1):
         if "sunset" in p.lower() or "dusk" in p.lower():
             continue
@@ -97,7 +88,6 @@ def _empathy_moments(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List
     """Detects raw vulnerability or emotional shame, ignoring requests for solitude."""
     moments = []
     for idx, p in enumerate(paragraphs, 1):
-        # Ignore requests for solitude / privacy ("talk alone", "leave alone", "be alone")
         if re.search(r"\b(?:talk|speak|meet|leave|let|be)\s+(?:\w+\s+)?alone\b", p, re.IGNORECASE):
             continue
 
