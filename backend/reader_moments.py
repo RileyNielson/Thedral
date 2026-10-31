@@ -15,7 +15,8 @@ for _candidate_path in (
             sys.path.insert(0, str(_candidate_path))
         break
 
-from cognitive_reader import CognitiveEngine, build_cognitive_database
+# In backend/reader_moments.py, change:
+from backend.cognitive_reader import CognitiveEngine, build_cognitive_database
 from backend.reader_text import (
     _search,
     _first_matching_sentence,
