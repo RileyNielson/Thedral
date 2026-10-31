@@ -19,6 +19,7 @@ from cognitive_reader.models import (
     EpistemicAlert,
     MetaphorHit,
     OpenPromise,
+    ParagraphDiagnosis,
     ParagraphTick,
     ReaderNote,
     SubtextHit,
@@ -158,7 +159,6 @@ class CognitiveEngine:
         if context_lemmas is None:
             context_lemmas = {normalize_lemma(w) for w in extract_words(clean)}
 
-        # A. Multi-Word Idioms
         idioms, phrasal_map = self.scan_mwes(clean)
         idiom_spans = set()
         for idm in idioms:
@@ -178,7 +178,6 @@ class CognitiveEngine:
                 )
             )
 
-        # B. Denominal / Reflexive Verb Metaphors
         for d_match in DENOMINAL_VERB_RE.finditer(clean):
             subj_w, verb_w, refl_target = d_match.group(1), d_match.group(2), d_match.group(3)
             noun_stem = normalize_lemma(verb_w)
@@ -204,13 +203,11 @@ class CognitiveEngine:
                         )
                     )
 
-        # C. Copula & Simile Mapping
         for match in COPULA_AND_SIMILE_RE.finditer(clean):
             full_span = match.group(0).strip()
             target_word = match.group(1).lower()
             rhs_phrase = match.group(2).strip().lower()
-            
-            # Clean leading articles without truncating words like 'an'
+
             clean_rhs = re.sub(r"^(?:an?\s+|the\s+)", "", rhs_phrase).strip()
             rhs_tokens = [
                 t for t in re.findall(r"[a-z\-]+", clean_rhs)
@@ -270,7 +267,6 @@ class CognitiveEngine:
                         )
                     )
 
-        # D. Verb Selectional Preference Violations
         for triple in extract_svo_triples(clean, phrasal_replacements=phrasal_map):
             if any(idm_p in triple.raw_span.lower() for idm_p in idiom_spans):
                 continue
@@ -369,15 +365,22 @@ class CognitiveEngine:
                 prev = brain.last_dialogue_turn
                 if prev.is_question and content_lemmas:
                     overlap = content_lemmas & prev.primed_neighborhood
-                    direct_answer_words = {"yes", "no", "maybe", "never", "of", "course", "sure", "did", "didn't"}
+                    direct_answer_tokens = {"yes", "no", "maybe", "never", "of", "course", "sure", "did", "didn't", "can't", "won't"}
 
-                    # Checks if this is an answer to a naming/locational question
-                    is_naming_question = bool(re.search(r"\b(called|name|who|where|what is|what are)\b", prev.utterance.lower()))
-                    has_proper_noun_answer = bool(re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", quote))
-                    is_direct_copula_answer = bool(re.match(r"^(?:this|it|that|he|she|they)\s+(?:is|are|was|were)\b", quote.strip(), re.IGNORECASE))
-                    is_valid_direct_answer = is_direct_copula_answer or (is_naming_question and (has_proper_noun_answer or len(words) >= 4))
+                    is_copular_identification = bool(
+                        re.match(r"^(?:this|that|it|he|she|they)\s+(?:is|are|was|were|'s|'re)\b", quote.strip(), re.IGNORECASE)
+                    )
+                    is_wh_question = bool(re.search(r"\b(who|what|where|which|how|called|name)\b", prev.utterance.lower()))
+                    has_substantive_noun_phrase = len(words) >= 3 and any(w[0].isupper() for w in quote.split())
 
-                    if not overlap and not any(w in direct_answer_words for w in words) and not is_valid_direct_answer:
+                    is_cooperative_answer = (
+                        bool(overlap)
+                        or any(w in direct_answer_tokens for w in words)
+                        or is_copular_identification
+                        or (is_wh_question and has_substantive_noun_phrase)
+                    )
+
+                    if not is_cooperative_answer:
                         hits.append(
                             SubtextHit(
                                 utterance=quote,
@@ -500,6 +503,180 @@ class CognitiveEngine:
                 )
         return hits
 
+    def diagnose_semantic_paragraph(
+        self,
+        paragraph_index: int,
+        raw_paragraph: str,
+        word_vectors: List[Dict[str, Any]],
+        sensory: Dict[str, float],
+        velocity: float,
+        dialogue_ratio: float,
+        arousal: float,
+        valence: float,
+        surprisal: float,
+    ) -> ParagraphDiagnosis:
+        """
+        Uses lexical semantics, psycholinguistic sensory vectors, and ontological domains
+        to diagnose what this paragraph accomplishes in the reader's consciousness,
+        flagging semantic slack to cut or white rooms to flesh out.
+        """
+        domains = Counter(v.get("ontological_domain", "") for v in word_vectors if v)
+        concreteness_vals = [float(v.get("concreteness", 0.5)) for v in word_vectors if v]
+        avg_concreteness = sum(concreteness_vals) / len(concreteness_vals) if concreteness_vals else 0.5
+        words = extract_words(raw_paragraph)
+
+        # 1. Non-visual visceral grounding (Smell, Taste, Sound, Touch)
+        prominent_senses = []
+        if sensory.get("olfactory", 0) >= 0.14:
+            prominent_senses.append("Scent/Smell")
+        if sensory.get("gustatory", 0) >= 0.14:
+            prominent_senses.append("Taste")
+        if sensory.get("auditory", 0) >= 0.18:
+            prominent_senses.append("Sound")
+        if sensory.get("haptic", 0) >= 0.20:
+            prominent_senses.append("Touch/Texture")
+
+        olfactory_lemmas = [
+            v["lemma"] for v in word_vectors if float(v.get("sensory_olfactory", 0)) >= 0.6
+        ]
+        auditory_lemmas = [
+            v["lemma"] for v in word_vectors if float(v.get("sensory_auditory", 0)) >= 0.6
+        ]
+
+        if prominent_senses and (olfactory_lemmas or auditory_lemmas or len(prominent_senses) >= 2):
+            salient = list(dict.fromkeys(olfactory_lemmas + auditory_lemmas))[:4]
+            return ParagraphDiagnosis(
+                paragraph_index=paragraph_index,
+                headline="Visceral Sensory Grounding",
+                cognitive_function="VISCERAL_GROUNDING",
+                reader_experience=(
+                    f"Engages non-visual physical senses ({', '.join(prominent_senses)}). "
+                    f"Tangible sensory anchors make the scene physically real rather than an abstract stage."
+                ),
+                salient_words=salient,
+                primary_senses=prominent_senses,
+                craft_advisory="Strong visceral hold. Keep sensory details specific and diegetic.",
+            )
+
+        # 2. Kinetic Physical Action
+        action_verbs = [
+            v["lemma"] for v in word_vectors
+            if v.get("pos") == "verb" and float(v.get("velocity", 0)) >= 0.5
+        ]
+        if len(action_verbs) >= 2 and velocity >= 1.2:
+            return ParagraphDiagnosis(
+                paragraph_index=paragraph_index,
+                headline="Kinetic Momentum & Motion",
+                cognitive_function="KINETIC_ACTION",
+                reader_experience=(
+                    "High physical velocity. The reader visualizes active movement and anticipates physical collisions."
+                ),
+                salient_words=action_verbs[:5],
+                primary_senses=["Visual/Kinetic"],
+                craft_advisory="Propulsive drive. Great place for punchy, staccato clauses.",
+            )
+
+        # 3. Social Hierarchy & Underdog Power Asymmetry
+        social_words = [
+            v["lemma"] for v in word_vectors if v.get("ontological_domain") == "SOCIAL_CONSTRUCT"
+        ]
+        low_status_markers = [
+            w.lower() for w in words if w.lower() in ("barefoot", "plain", "rags", "beggar", "dirt", "poor", "patch")
+        ]
+        high_status_markers = [
+            w.lower() for w in words if w.lower() in ("knight", "knights", "armor", "electricity", "commander", "castle", "keep", "invincibility", "lord", "lady")
+        ]
+        if (social_words or high_status_markers) and low_status_markers:
+            return ParagraphDiagnosis(
+                paragraph_index=paragraph_index,
+                headline="Social Asymmetry & Vulnerability",
+                cognitive_function="SOCIAL_HIERARCHY",
+                reader_experience=(
+                    "Striking status contrast. Pairing markers of humility with authority figures establishes immediate underdog empathy."
+                ),
+                salient_words=low_status_markers[:2] + high_status_markers[:3],
+                primary_senses=["Status/Empathy"],
+                craft_advisory="Effective thematic contrast that grounds character stakes.",
+            )
+
+        # 4. White Room Alert (Candidate to Flesh Out)
+        if dialogue_ratio >= 0.65 and avg_concreteness < 0.42 and not prominent_senses and len(words) >= 15:
+            return ParagraphDiagnosis(
+                paragraph_index=paragraph_index,
+                headline="White Room Syndrome (Needs Grounding)",
+                cognitive_function="WHITE_ROOM_ALERT",
+                reader_experience=(
+                    "The conversation is moving, but the physical environment has evaporated. "
+                    "The reader cannot feel the room or see what the characters' hands are doing."
+                ),
+                salient_words=[w.lower() for w in words if len(w) > 4][:3],
+                primary_senses=[],
+                craft_advisory="Flesh out: Anchor the dialogue with a tactile motion, lighting change, or object interaction.",
+            )
+
+        # 5. Spatial Architecture / Blueprint Pause
+        if domains.get("SPACE_CONTAINER", 0) + domains.get("ARTIFACT_SOLID", 0) >= 3 and velocity <= 0.8 and dialogue_ratio == 0:
+            building_words = [
+                v["lemma"] for v in word_vectors
+                if v.get("ontological_domain") in ("SPACE_CONTAINER", "ARTIFACT_SOLID") and float(v.get("concreteness", 0)) >= 0.8
+            ]
+            return ParagraphDiagnosis(
+                paragraph_index=paragraph_index,
+                headline="Spatial Architecture (Exposition Pause)",
+                cognitive_function="SPATIAL_BLUEPRINT",
+                reader_experience=(
+                    "Spatial mapping. The reader pauses narrative momentum to visualize the geometry and boundaries of the setting."
+                ),
+                salient_words=building_words[:4],
+                primary_senses=["Visual/Architecture"],
+                craft_advisory=(
+                    "Review pacing: If the chapter needs urgent momentum, weave this architectural layout into the protagonist's active motion."
+                ),
+            )
+
+        # 6. Deep Interiority & Motivational Stakes
+        intent_lemmas = [
+            v["lemma"] for v in word_vectors
+            if v.get("ontological_domain") == "ABSTRACT_STATE" and float(v.get("arousal", 0)) >= 0.35
+        ]
+        if (domains.get("ABSTRACT_STATE", 0) >= 2 or intent_lemmas) and dialogue_ratio == 0:
+            return ParagraphDiagnosis(
+                paragraph_index=paragraph_index,
+                headline="Character Interiority & Motivation",
+                cognitive_function="INTERIOR_STAKES",
+                reader_experience=(
+                    "Internal stakes. The reader steps directly inside the protagonist's desires, priorities, and internal pressure."
+                ),
+                salient_words=intent_lemmas[:4],
+                primary_senses=["Interoception/Emotion"],
+                craft_advisory="Strong character intimacy. Keeps the author's voice aligned with character psychology.",
+            )
+
+        # 7. Semantic Slack Alert (Candidate to Trim or Merge)
+        if len(words) >= 35 and dialogue_ratio == 0 and avg_concreteness < 0.40 and not prominent_senses and abs(valence) < 0.20:
+            return ParagraphDiagnosis(
+                paragraph_index=paragraph_index,
+                headline="Semantic Slack (Candidate to Trim)",
+                cognitive_function="SEMANTIC_SLACK_ALERT",
+                reader_experience=(
+                    "Cognitive idling. The prose explains conditions without advancing motion, shifting stakes, or providing physical sensory immersion."
+                ),
+                salient_words=[w.lower() for w in words if len(w) > 4][:3],
+                primary_senses=[],
+                craft_advisory="Candidate to cut: Condense this explanation or merge it directly into the next active decision.",
+            )
+
+        # Default: Narrative Flow
+        return ParagraphDiagnosis(
+            paragraph_index=paragraph_index,
+            headline="Narrative Progression",
+            cognitive_function="NARRATIVE_FLOW",
+            reader_experience="Seamless narrative progression carrying the scene between dramatic focal points.",
+            salient_words=[w.lower() for w in words if len(w) > 4][:3],
+            primary_senses=["Visual"],
+            craft_advisory=None,
+        )
+
     def analyze_document(
         self, text: str, brain: Optional[VirtualBrainState] = None
     ) -> DocumentReport:
@@ -514,10 +691,13 @@ class CognitiveEngine:
         all_epistemic: List[EpistemicAlert] = []
         reader_notes: List[ReaderNote] = []
         habituation_warnings: List[int] = []
+        diagnoses: List[ParagraphDiagnosis] = []
 
         for p_idx, para in enumerate(paragraphs):
             tick = self.step_paragraph(para, p_idx, brain)
             ticks.append(tick)
+            if tick.diagnosis:
+                diagnoses.append(tick.diagnosis)
             all_metaphors.extend(tick.metaphors)
             all_subtext.extend(tick.subtext_hits)
             all_continuity.extend(tick.continuity_alerts)
@@ -618,6 +798,7 @@ class CognitiveEngine:
             affinity_matrix=affinity_serialized,
             reader_notes=reader_notes,
             ticks=ticks,
+            paragraph_diagnoses=diagnoses,
         )
 
     def step_paragraph(
@@ -658,11 +839,13 @@ class CognitiveEngine:
         unprimed_hits = 0
         evaluated_words = 0
         detected_location: Optional[str] = None
+        collected_vectors: List[Dict[str, Any]] = []
 
         for lem in lemmas:
             vec = self.get_vector(lem, context_lemma_set)
             if not vec:
                 continue
+            collected_vectors.append(vec)
             evaluated_words += 1
             if brain.primed_concepts and lem not in brain.primed_concepts:
                 unprimed_hits += 1
@@ -836,6 +1019,18 @@ class CognitiveEngine:
             paragraph_index=paragraph_index,
         )
 
+        diagnosis = self.diagnose_semantic_paragraph(
+            paragraph_index=paragraph_index + 1,
+            raw_paragraph=norm,
+            word_vectors=collected_vectors,
+            sensory=sensory_profile,
+            velocity=syntactic_velocity,
+            dialogue_ratio=dialogue_ratio,
+            arousal=felt_arousal,
+            valence=raw_valence,
+            surprisal=surprisal_n400,
+        )
+
         return ParagraphTick(
             paragraph_index=paragraph_index,
             word_count=word_count,
@@ -859,4 +1054,5 @@ class CognitiveEngine:
             subtext_hits=subtext_hits,
             continuity_alerts=continuity_alerts,
             epistemic_alerts=epistemic_alerts,
+            diagnosis=diagnosis,
         )
