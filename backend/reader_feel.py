@@ -1,9 +1,4 @@
-"""Text-only estimates of what a reader experiences, with no author input.
-
-Every detector reads structure the prose itself exposes: paragraph rhythm, who is
-afraid of whom, where the vocabulary changes, what is stated and then undercut,
-and how a scene opens and closes. Each insight carries the passages it rests on.
-"""
+"""Text-only estimates of what a reader experiences, with no author input."""
 import re
 from collections import Counter
 
@@ -284,7 +279,7 @@ def _voice(paragraphs: list[str], text: str) -> list[dict]:
     if rate < VOICE_THRESHOLD:
         return []
 
-    # Safe evidence extraction that prevents IndexError when similes is empty
+    # Safe evidence extraction: prevents IndexError if similes is empty
     lead_evidence = similes[0] if similes else (quips[0] if quips else (questions[0] if questions else text[:180]))
     target_para = _paragraph_index(paragraphs, lead_evidence) or 1
     secondary = quips[0] if quips and similes else ""
