@@ -1,95 +1,112 @@
 <template>
-  <div v-if="store.activeInspectorTab === 'telemetry'" class="space-y-4">
-    <header class="flex items-start justify-between gap-2">
-      <div class="space-y-1">
-        <h2 class="text-[11px] font-semibold text-zinc-200">Scene patterns in manuscript context</h2>
-        <p class="text-[9px] leading-relaxed text-zinc-500">These are measurable text features, not reader reactions. Comparisons use other scenes in this manuscript, so a difference is descriptive—not a quality judgment.</p>
+  <div v-if="store.activeInspectorTab === 'prose' || store.activeInspectorTab === 'telemetry'" class="space-y-4 select-none">
+    <header class="flex items-start justify-between gap-2 border-b border-zinc-800 pb-2">
+      <div class="space-y-0.5">
+        <h2 class="text-[11px] font-semibold text-zinc-200">Prose Cadence & Precision</h2>
+        <p class="text-[9px] text-zinc-500">Sentence rhythm, repeated word echoes, and dialogue attributions.</p>
       </div>
-      <button @click="loadManuscriptAnalytics" :disabled="analyticsLoading" class="shrink-0 rounded border border-zinc-700 px-2 py-1 text-[9px] text-zinc-400 hover:text-zinc-200 disabled:opacity-50">
+      <button @click="loadManuscriptAnalytics" :disabled="analyticsLoading" class="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-[9px] text-zinc-400 hover:text-zinc-200 disabled:opacity-50">
         {{ analyticsLoading ? 'Updating…' : 'Refresh' }}
       </button>
     </header>
 
-    <div v-if="analyticsLoading" class="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-[10px] text-zinc-500">
-      Comparing this scene with the manuscript…
-    </div>
-    <div v-else-if="analyticsError" class="rounded-lg border border-rose-900/50 bg-rose-950/20 p-3 text-[10px] text-rose-200">
-      {{ analyticsError }}
-    </div>
-    <template v-else-if="selectedSceneAnalytics">
-      <div class="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+    <template v-if="selectedSceneAnalytics">
+      <!-- Silent Reading Time -->
+      <div class="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-1.5">
         <div class="flex items-baseline justify-between gap-2">
-          <span class="text-[10px] uppercase tracking-wider text-amber-400">Estimated silent read</span>
+          <span class="text-[10px] uppercase font-mono tracking-wider text-amber-400">Silent Read Time</span>
           <span class="font-mono text-sm font-semibold text-zinc-100">{{ readTimeRange }}</span>
         </div>
-        <p class="text-[9px] text-zinc-500">
-          {{ selectedSceneAnalytics.telemetry.words.toLocaleString() }} words · estimated at 200–250 words/minute · scene {{ analyticsPosition }} of {{ manuscriptAnalytics.scenes.length }}
+        <p class="text-[9px] text-zinc-500 font-mono">
+          {{ selectedSceneAnalytics.telemetry.words.toLocaleString() }} words · scene {{ analyticsPosition }} of {{ manuscriptAnalytics.scenes.length }}
         </p>
-        <p class="text-[9px] text-zinc-500">{{ sceneLengthComparison }}</p>
       </div>
 
-      <div class="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-3">
-        <div class="text-[10px] uppercase tracking-wider text-amber-400">How this scene is written</div>
-        <div v-for="metric in manuscriptPatternComparisons" :key="metric.label" class="space-y-1">
-          <div class="flex items-baseline justify-between gap-2 text-[10px]">
-            <span class="text-zinc-300">{{ metric.label }}</span>
-            <span class="font-mono text-zinc-100">{{ metric.value }}</span>
+      <!-- Dialogue Attribution & Strained Tag Audit -->
+      <div class="rounded-xl border border-purple-900/40 bg-purple-950/10 p-3 space-y-2">
+        <div class="flex items-center justify-between text-[10px] font-mono">
+          <span class="text-purple-300 uppercase tracking-wider font-bold">Dialogue Attributions</span>
+          <span class="text-zinc-400">{{ selectedSceneAnalytics.telemetry.dialogue_ratio }}% dialogue</span>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-2 text-[10px] font-mono">
+          <div class="p-2 bg-zinc-950 rounded border border-zinc-800/80">
+            <div class="text-zinc-500">Strained Tags:</div>
+            <div class="text-sm font-bold mt-0.5" :class="selectedSceneAnalytics.telemetry.strained_tags_count > 3 ? 'text-amber-400' : 'text-zinc-300'">
+              {{ selectedSceneAnalytics.telemetry.strained_tags_count || 0 }}
+            </div>
+            <div class="text-[8px] text-zinc-600 mt-0.5">hissed, groaned, barked</div>
           </div>
-          <p class="text-[9px] text-zinc-500">{{ metric.context }}</p>
+
+          <div class="p-2 bg-zinc-950 rounded border border-zinc-800/80">
+            <div class="text-zinc-500">Passive Voice:</div>
+            <div class="text-sm font-bold mt-0.5" :class="selectedSceneAnalytics.telemetry.passive_count > 4 ? 'text-rose-400' : 'text-zinc-300'">
+              {{ selectedSceneAnalytics.telemetry.passive_count || 0 }}
+            </div>
+            <div class="text-[8px] text-zinc-600 mt-0.5">was [verb]ed by</div>
+          </div>
+        </div>
+
+        <div v-if="selectedSceneAnalytics.telemetry.dialogue_adverbs?.length" class="space-y-1 pt-1 border-t border-purple-900/30">
+          <span class="text-[9px] uppercase font-mono text-rose-400 font-bold">Dialogue-Tag Adverbs (Review):</span>
+          <div class="flex flex-wrap gap-1">
+            <span v-for="adv in selectedSceneAnalytics.telemetry.dialogue_adverbs" :key="adv" class="px-1.5 py-0.5 rounded bg-zinc-900 text-rose-300 border border-rose-900/40 text-[9px]">
+              said {{ adv }}
+            </span>
+          </div>
         </div>
       </div>
 
-      <div class="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-2">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-400">Nearby scene lengths</div>
-        <div v-if="previousSceneAnalytics" class="flex justify-between gap-2 text-[9px]">
-          <span class="truncate text-zinc-500">Before · {{ previousSceneAnalytics.title }}</span>
-          <span class="shrink-0 font-mono text-zinc-300">{{ previousSceneAnalytics.telemetry.words.toLocaleString() }} words</span>
+      <!-- Word Echoes / Proximity Repetitions -->
+      <div v-if="Object.keys(selectedSceneAnalytics.telemetry.echoes || {}).length" class="rounded-xl border border-amber-900/50 bg-amber-950/10 p-3 space-y-2">
+        <div class="flex items-center justify-between text-[10px] font-mono">
+          <span class="text-amber-300 uppercase tracking-wider font-bold">Proximity Word Echoes</span>
+          <span class="text-zinc-500">Repeated within 2–3 paragraphs</span>
         </div>
-        <div class="flex justify-between gap-2 text-[9px]">
-          <span class="truncate text-zinc-300">Selected · {{ selectedSceneAnalytics.title }}</span>
-          <span class="shrink-0 font-mono text-zinc-100">{{ selectedSceneAnalytics.telemetry.words.toLocaleString() }} words</span>
+        <p class="text-[9px] text-zinc-400 leading-snug">
+          Unusual words used multiple times in close proximity that may draw accidental attention:
+        </p>
+        <div class="flex flex-wrap gap-1.5 pt-1">
+          <span 
+            v-for="(data, word) in selectedSceneAnalytics.telemetry.echoes" 
+            :key="word" 
+            class="px-2 py-0.5 rounded bg-zinc-950 border border-amber-800/60 text-amber-200 text-[10px] font-mono"
+            :title="`Repeated ${data.count} times across paragraphs: ${data.paragraphs.join(', ')}`"
+          >
+            {{ word }} <strong class="text-amber-400 font-bold">({{ data.count }}×)</strong>
+          </span>
         </div>
-        <div v-if="nextSceneAnalytics" class="flex justify-between gap-2 text-[9px]">
-          <span class="truncate text-zinc-500">After · {{ nextSceneAnalytics.title }}</span>
-          <span class="shrink-0 font-mono text-zinc-300">{{ nextSceneAnalytics.telemetry.words.toLocaleString() }} words</span>
-        </div>
-        <p v-if="!previousSceneAnalytics && !nextSceneAnalytics" class="text-[9px] text-zinc-500">This is the only scene in the manuscript.</p>
       </div>
 
-      <details class="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5">
-        <summary class="cursor-pointer text-[10px] text-zinc-400 hover:text-zinc-200">Possible filter-word repetitions</summary>
-        <p class="my-2 text-[9px] text-zinc-500">Occurrences to review—not automatic errors. Keep any wording that serves the scene.</p>
-        <div v-if="Object.keys(selectedSceneAnalytics.telemetry.filters || {}).length" class="space-y-1">
+      <!-- Filter Verbs & Crutch Clutter -->
+      <details class="rounded-xl border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+        <summary class="cursor-pointer text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200">
+          Filter Words & Sensory Buffers
+        </summary>
+        <p class="text-[9px] text-zinc-500 leading-snug pt-1">
+          Words like <em>saw</em>, <em>felt</em>, and <em>noticed</em> that decouple the reader from the sensory reality.
+        </p>
+        <div v-if="Object.keys(selectedSceneAnalytics.telemetry.filters || {}).length" class="space-y-1 pt-1">
           <div v-for="(count, word) in selectedSceneAnalytics.telemetry.filters" :key="word" class="flex justify-between text-[10px] font-mono">
-            <span class="text-zinc-300">{{ word }}</span><span class="text-zinc-500">{{ count }}×</span>
+            <span class="text-zinc-300">{{ word }}</span>
+            <span class="text-zinc-500">{{ count }}×</span>
           </div>
         </div>
-        <p v-else class="text-[9px] text-zinc-600">No configured filter words found.</p>
       </details>
     </template>
-    <div v-else class="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-[10px] text-zinc-500">
-      Select a scene within a manuscript to compare its patterns.
-    </div>
-    <p class="text-[9px] leading-relaxed text-zinc-600">The selected scene uses current editor text; comparison scenes use their saved drafts. {{ store.aiEnabled ? 'Actual reader responses and the AI first-read rehearsal are in the Reader tab.' : 'Actual reader responses are in the Reader tab.' }} Sentence and dialogue patterns cannot tell us what a reader felt or understood.</p>
   </div>
 </template>
 
 <script setup>
 import { inject } from 'vue'
-import { store, showToast } from '../../store.js'
-import { API_BASE } from '@/api'
+import { store } from '../../store.js'
 
 const {
-  analyticsError,
   analyticsLoading,
   analyticsPosition,
   loadManuscriptAnalytics,
   manuscriptAnalytics,
-  manuscriptPatternComparisons,
-  nextSceneAnalytics,
-  previousSceneAnalytics,
   readTimeRange,
-  sceneLengthComparison,
   selectedSceneAnalytics
 } = inject('inspectorState')
 </script>
