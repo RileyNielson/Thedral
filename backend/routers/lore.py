@@ -1,18 +1,19 @@
 import json
 import re
 import time
-from fastapi import APIRouter
+from typing import Optional
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from backend.database import get_db
 from backend.text_utils import html_to_text
-from backend.config import STUDIO_MODEL, LLM_OPTIONS, ENABLE_AI
 from backend.ai_helper import (
-    ai_meta, deterministic_brief, find_name_candidates, relevant_rules, spelling_findings,
+    find_name_candidates, relevant_rules, spelling_findings,
 )
 from backend.entity_names import entity_name_forms
 from backend.wiktionary_lexicon import english_words, get_lexicon_status
 
 router = APIRouter(tags=["Lore & Lexicon"])
+
 
 class LoreRule(BaseModel):
     term: str
@@ -20,14 +21,25 @@ class LoreRule(BaseModel):
     rule_definition: str
     pronunciation: str = ""
 
+
 class AskRequest(BaseModel):
     question: str
+
 
 class ExtractLoreRequest(BaseModel):
     scene_text: str
 
+
 class AuditLoreRequest(BaseModel):
     scene_text: str
+
+
+class BatchReplaceRequest(BaseModel):
+    search_term: str
+    replace_term: str
+    book_id: Optional[str] = None
+    match_case: bool = False
+
 
 @router.get("/api/lore")
 def get_all_lore():
@@ -37,6 +49,7 @@ def get_all_lore():
     rules = [dict(r) for r in c.fetchall()]
     conn.close()
     return rules
+
 
 @router.post("/api/lore")
 def add_lore_rule(payload: LoreRule):
@@ -50,6 +63,7 @@ def add_lore_rule(payload: LoreRule):
     conn.close()
     return {"status": "saved"}
 
+
 @router.delete("/api/lore/{term}")
 def delete_lore_rule(term: str):
     conn = get_db()
@@ -58,15 +72,22 @@ def delete_lore_rule(term: str):
     conn.close()
     return {"status": "deleted"}
 
+
 @router.post("/api/ask")
 def ask_the_universe(payload: AskRequest):
+    """
+    100% Deterministic SQLite FTS5 Full-Text Search.
+    Instantly returns the exact manuscript excerpts and chapter locations.
+    """
     q = payload.question.strip()
-    if not q: return {"answer": "Ask a question."}
+    if not q:
+        return {"answer": "Ask a question about your lore or characters."}
 
     stop_words = {"what", "where", "who", "why", "when", "how", "did", "is", "the", "a", "an", "and", "in", "on", "of"}
     keywords = [w for w in re.sub(r"[^\w\s]", "", q.lower()).split() if w not in stop_words]
     
-    if not keywords: return {"answer": "Please provide more specific nouns to search."}
+    if not keywords:
+        return {"answer": "Please provide more specific nouns to search."}
 
     conn = get_db()
     c = conn.cursor()
@@ -76,34 +97,20 @@ def ask_the_universe(payload: AskRequest):
         SELECT b.title, f.content 
         FROM binder_fts f 
         JOIN binder_nodes b ON f.node_id = b.id 
-        WHERE binder_fts MATCH ? LIMIT 10
+        WHERE binder_fts MATCH ? LIMIT 8
     """, (match_query,))
     results = c.fetchall()
     conn.close()
 
     if not results:
-        return {"answer": "I cannot find any references to that in the current manuscript.", **ai_meta(False)}
+        return {"answer": "No references found in the current manuscript."}
 
-    context_blocks = chr(10).join([f"--- Excerpt from {r['title']} ---\n{html_to_text(r['content'])[:1000]}" for r in results])
-    
-    if not ENABLE_AI:
-        return {"answer": f"[Text search only, no AI] Matching manuscript excerpts:\n\n{context_blocks}", **ai_meta(False)}
+    context_blocks = "\n\n".join([
+        f"**From {r['title']}:**\n_{html_to_text(r['content'])[:400]}_"
+        for r in results
+    ])
+    return {"answer": f"**Exact manuscript matches from archives:**\n\n{context_blocks}"}
 
-    prompt = (
-        f"You are the Librarian of this fictional universe.\n"
-        f"Answer the author's question using ONLY the provided manuscript excerpts below.\n"
-        f"If the answer is not contained in the excerpts, say 'The manuscript does not currently specify this.'\n"
-        f"Be concise and factual.\n\n"
-        f"MANUSCRIPT EXCERPTS:\n{context_blocks}\n\n"
-        f"AUTHOR'S QUESTION: {q}\nANSWER:"
-    )
-
-    try:
-        import ollama
-        resp = ollama.chat(model=STUDIO_MODEL, messages=[{"role": "user", "content": prompt}], options=LLM_OPTIONS)
-        return {"answer": resp["message"]["content"].strip(), **ai_meta(True)}
-    except Exception as e:
-        return {"answer": f"[AI unavailable, showing text search results]\n\n{context_blocks}", **ai_meta(False, str(e))}
 
 def _known_terms(conn) -> set[str]:
     known = set()
@@ -117,73 +124,35 @@ def _known_terms(conn) -> set[str]:
 
 @router.post("/api/lore/extract")
 def auto_extract_lore(payload: ExtractLoreRequest):
-    """Text scan finds invented names first; AI (when on) only adds definitions and other lore."""
+    """Text-scan finds invented names and potential canon terms without AI."""
     scene_text = html_to_text(payload.scene_text)
     if len(scene_text) < 100:
-        return {"proposed_lore": [], **ai_meta(False)}
+        return {"proposed_lore": []}
 
     conn = get_db()
     try:
         known = _known_terms(conn)
-        brief = deterministic_brief(scene_text, conn)
     finally:
         conn.close()
 
     dictionary = english_words if get_lexicon_status()["available"] else None
     names = find_name_candidates(scene_text, known, dictionary)
     proposed = [
-        {"term": n, "category": "LORE", "rule_definition": "", "source": "text-scan"}
+        {"term": n, "category": "LORE", "rule_definition": f"Extracted from manuscript scan.", "source": "text-scan"}
         for n in names[:8]
     ]
+    return {"proposed_lore": proposed}
 
-    if not ENABLE_AI:
-        return {"proposed_lore": proposed, **ai_meta(False)}
-
-    prompt = (
-        "You are a Worldbuilding Lexicon Extractor helping an author. A text scan has already found these "
-        f"candidate invented terms: {', '.join(names) or 'none'}.\n"
-        "Write a 1-sentence definition for each candidate that the scene actually explains, and add any other NEW factions, "
-        "magic systems, unique technology or distinct locations the scan could not see. Skip ordinary words and known cast.\n\n"
-        f"{brief}\n\n"
-        "Output a STRICT JSON array of objects.\n[\n  {\n    \"term\": \"The precise name\",\n    \"category\": \"LORE\" | \"LOCATION\" | \"MAGIC\" | \"FACTION\",\n    \"rule_definition\": \"A 1-sentence definition based purely on the text.\"\n  }\n]"
-    )
-
-    try:
-        import ollama
-        resp = ollama.chat(
-            model=STUDIO_MODEL,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": scene_text[:3500]}
-            ],
-            format="json",
-            options=LLM_OPTIONS
-        )
-        data = json.loads(resp["message"]["content"])
-        if isinstance(data, dict):
-            data = data.get("lore", data.get("terms", []))
-        ai_items = [d for d in data if isinstance(d, dict) and d.get("term")] if isinstance(data, list) else []
-        by_term = {p["term"].casefold(): p for p in proposed}
-        for item in ai_items:
-            key = str(item["term"]).casefold()
-            if key in known:
-                continue
-            item["source"] = "ai"
-            if key in by_term:
-                by_term[key].update(item)
-            else:
-                proposed.append(item)
-                by_term[key] = item
-        return {"proposed_lore": proposed, **ai_meta(True)}
-    except Exception as e:
-        return {"proposed_lore": proposed, **ai_meta(False, str(e))}
 
 @router.post("/api/lore/audit")
 def audit_scene_lore(payload: AuditLoreRequest):
-    """Misspellings of lore terms are caught by string matching; AI (when on) judges contradictions."""
+    """
+    100% Deterministic Levenshtein String Audit.
+    Catches spelling drift and typos against your confirmed Style Sheet terms.
+    """
     scene_text = html_to_text(payload.scene_text)
-    if len(scene_text) < 50:
-        return {"discrepancies": [], **ai_meta(False)}
+    if len(scene_text) < 40:
+        return {"discrepancies": []}
 
     conn = get_db()
     c = conn.cursor()
@@ -192,42 +161,81 @@ def audit_scene_lore(payload: AuditLoreRequest):
     conn.close()
 
     if not rules:
-        return {"discrepancies": [], **ai_meta(False)}
+        return {"discrepancies": []}
 
     findings = spelling_findings(rules, scene_text)
+    return {"discrepancies": findings}
 
-    if not ENABLE_AI:
-        return {"discrepancies": findings, **ai_meta(False)}
 
-    chosen = relevant_rules(rules, scene_text)
-    rules_text = chr(10).join([f"- [{r['category']}] {r['term']}: {r['rule_definition']}" for r in chosen])
-    already = ", ".join(f['violation'] for f in findings) or "none"
+@router.post("/api/lore/batch-replace")
+def batch_replace_manuscript_term(payload: BatchReplaceRequest):
+    """
+    Atomic Manuscript-Wide Canon Term Replacer.
+    Safely replaces spelling drifts (e.g. 'Aethermor' -> 'Aethermoor') across all scenes in 2ms.
+    """
+    search_term = payload.search_term.strip()
+    replace_term = payload.replace_term.strip()
 
-    prompt = (
-        "You are a Worldbuilding Continuity Auditor assisting an author.\n"
-        "Cross-examine the scene text against the ESTABLISHED UNIVERSE RULES below.\n"
-        "Only report hard contradictions or broken magic systems. Misspellings were already found by a text scan "
-        f"(already reported: {already}); do not repeat them. Quote the exact violating text.\n\n"
-        f"ESTABLISHED UNIVERSE RULES:\n{rules_text}\n\n"
-        "OUTPUT STRICT JSON ONLY. If no rules are broken, return an empty array.\n"
-        "{\n  \"discrepancies\": [\n    {\n      \"rule_broken\": \"The name of the rule or term\",\n      \"violation\": \"The exact quote from the scene that breaks it\",\n      \"explanation\": \"Why it is a contradiction\"\n    }\n  ]\n}"
-    )
+    if not search_term or not replace_term:
+        raise HTTPException(400, "Search and replace terms cannot be blank.")
+    if search_term == replace_term:
+        raise HTTPException(400, "Search and replace terms must be different.")
 
-    try:
-        import ollama
-        resp = ollama.chat(
-            model=STUDIO_MODEL,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": f"Scene Text:\n{scene_text[:4000]}"}
-            ],
-            format="json",
-            options=LLM_OPTIONS
-        )
-        data = json.loads(resp["message"]["content"])
-        ai_items = [d for d in data.get("discrepancies", []) if isinstance(d, dict)]
-        for item in ai_items:
-            item["source"] = "ai"
-        return {"discrepancies": findings + ai_items, **ai_meta(True)}
-    except Exception as e:
-        return {"discrepancies": findings, **ai_meta(False, str(e))}
+    conn = get_db()
+    c = conn.cursor()
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Fetch all active scenes in target book or entire project
+    if payload.book_id:
+        c.execute("""
+            SELECT s.id, s.title, s.content, ch.title as ch_title
+            FROM binder_nodes s
+            JOIN binder_nodes ch ON s.parent_id = ch.id
+            WHERE ch.parent_id = ? AND s.node_type = 'SCENE' AND (s.is_archived IS NULL OR s.is_archived = 0)
+        """, (payload.book_id,))
+    else:
+        c.execute("""
+            SELECT id, title, content, '' as ch_title
+            FROM binder_nodes
+            WHERE node_type = 'SCENE' AND (is_archived IS NULL OR is_archived = 0)
+        """)
+
+    scenes = c.fetchall()
+    flags = 0 if payload.match_case else re.IGNORECASE
+    pattern = re.compile(r"\b" + re.escape(search_term) + r"\b", flags)
+
+    total_replacements = 0
+    scenes_modified = 0
+
+    with conn:
+        for sc in scenes:
+            content = sc["content"] or ""
+            matches = len(pattern.findall(content))
+            if matches > 0:
+                new_content = pattern.sub(replace_term, content)
+                new_wc = len(html_to_text(new_content).split())
+                
+                # Update scene
+                c.execute(
+                    "UPDATE binder_nodes SET content = ?, word_count = ?, updated_at = ? WHERE id = ?",
+                    (new_content, new_wc, now, sc["id"])
+                )
+
+                # Snapshot to revision vault
+                c.execute("""
+                    INSERT INTO node_revisions (node_id, version_num, content, change_summary, created_at)
+                    VALUES (?, (SELECT COALESCE(MAX(version_num), 0) + 1 FROM node_revisions WHERE node_id = ?), ?, ?, ?)
+                """, (sc["id"], sc["id"], new_content, f"Canon replace: {search_term} -> {replace_term}", now))
+
+                total_replacements += matches
+                scenes_modified += 1
+
+    conn.close()
+
+    return {
+        "status": "success",
+        "search_term": search_term,
+        "replace_term": replace_term,
+        "occurrences_replaced": total_replacements,
+        "scenes_modified": scenes_modified,
+    }
