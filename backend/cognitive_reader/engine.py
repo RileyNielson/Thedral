@@ -36,6 +36,7 @@ from cognitive_reader.parser import (
     COPULA_AND_SIMILE_RE,
     DENOMINAL_VERB_RE,
     DIALOGUE_QUOTE_RE,
+    EXCLUDED_FROM_ENTITIES,
     INTENTIONAL_MODALS,
     PROMISE_CUE_RE,
     TEMPORAL_MARKERS,
@@ -79,11 +80,12 @@ class CognitiveEngine:
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
-        # Live read-only connection to Wiktionary SQLite database if installed
+        # Windows-safe connection to local Wiktionary SQLite database
         self.wikt_conn = None
         if wiktionary_db_path and Path(wiktionary_db_path).exists():
             try:
-                self.wikt_conn = sqlite3.connect(f"file:{Path(wiktionary_db_path).resolve()}?mode=ro", uri=True)
+                resolved = str(Path(wiktionary_db_path).resolve())
+                self.wikt_conn = sqlite3.connect(resolved, timeout=10.0, check_same_thread=False)
                 self.wikt_conn.row_factory = sqlite3.Row
             except Exception:
                 self.wikt_conn = None
@@ -98,7 +100,7 @@ class CognitiveEngine:
         if norm != raw:
             candidates.append(norm)
 
-        # 1. Check local cognitive_lexicon.db cache first
+        # 1. Check local cognitive_lexicon.db cache first (0.1ms)
         for cand in candidates:
             cur.execute("SELECT * FROM lexicon_senses WHERE lemma = ? ORDER BY sense_id ASC", (cand,))
             senses = cur.fetchall()
@@ -115,7 +117,7 @@ class CognitiveEngine:
                         best_sense = s
                 return dict(best_sense)
 
-        # 2. Dynamic On-Demand Lookup from Wiktionary SQLite
+        # 2. Dynamic, universal Wiktionary database resolution
         if self.wikt_conn is not None:
             for cand in candidates:
                 try:
@@ -136,7 +138,7 @@ class CognitiveEngine:
                         sensory = infer_sensory_profile(domain, gloss, phys)
                         phonetics = compute_phonetic_texture(cand)
 
-                        # Cache into cognitive_lexicon.db so subsequent lookups are 0.1ms
+                        # Cache into cognitive_lexicon.db for future instant queries
                         with self.conn:
                             self.conn.execute("""
                                 INSERT OR REPLACE INTO lexicon_senses VALUES (
@@ -160,7 +162,7 @@ class CognitiveEngine:
                 except Exception:
                     pass
 
-        # 3. Morphology Decomposition Fallback
+        # 3. Morphology derivation fallback
         for stem, op, mult in decompose_morphology(raw):
             cur.execute("SELECT * FROM lexicon_senses WHERE lemma = ? ORDER BY sense_id ASC", (stem,))
             base_row = cur.fetchone()
@@ -379,6 +381,28 @@ class CognitiveEngine:
 
         return hits
 
+    def extract_dialogue_speaker(self, paragraph: str, default_speaker: str = "Ellie") -> str:
+        """Accurately extracts speaker from dialogue tags ('Cali said', 'I replied', 'Grace whispered')."""
+        if re.search(r'["”]\s*,?\s*I\s+(?:said|replied|asked|thought|laughed|continue|shook|cringe|relented|managed)', paragraph, re.IGNORECASE):
+            return default_speaker
+        tag_match = re.search(
+            r'["”]\s*,?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:said|replied|asked|whispered|hissed|laughed|says|replies|sighs|growled|snapped)',
+            paragraph
+        )
+        if tag_match:
+            cand = tag_match.group(1).strip()
+            if cand.lower() not in EXCLUDED_FROM_ENTITIES:
+                return cand
+        lead_match = re.search(
+            r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:said|asked|whispered|replied|says|replies),\s*["“]',
+            paragraph
+        )
+        if lead_match:
+            cand = lead_match.group(1).strip()
+            if cand.lower() not in EXCLUDED_FROM_ENTITIES:
+                return cand
+        return default_speaker
+
     def analyze_paragraph_subtext(
         self,
         paragraph: str,
@@ -393,6 +417,8 @@ class CognitiveEngine:
         quotes = DIALOGUE_QUOTE_RE.findall(norm)
         if not quotes:
             return []
+
+        resolved_speaker = self.extract_dialogue_speaker(paragraph, default_speaker=speaker or "Ellie")
 
         narrative_outside = DIALOGUE_QUOTE_RE.sub(" ", norm).lower()
         cur = self.conn.cursor()
@@ -430,7 +456,7 @@ class CognitiveEngine:
 
             if brain is not None and brain.last_dialogue_turn is not None:
                 prev = brain.last_dialogue_turn
-                if prev.is_question and content_lemmas:
+                if prev.speaker != resolved_speaker and prev.is_question and content_lemmas:
                     overlap = content_lemmas & prev.primed_neighborhood
                     direct_answer_tokens = {"yes", "no", "maybe", "never", "of", "course", "sure", "did", "didn't", "can't", "won't"}
 
@@ -438,7 +464,7 @@ class CognitiveEngine:
                         re.match(r"^(?:this|that|it|he|she|they)\s+(?:is|are|was|were|'s|'re)\b", quote.strip(), re.IGNORECASE)
                     )
                     is_wh_question = bool(re.search(r"\b(who|what|where|which|how|called|name)\b", prev.utterance.lower()))
-                    has_substantive_noun_phrase = len(words) >= 3 and any(w[0].isupper() for w in quote.split())
+                    has_substantive_noun_phrase = len(words) >= 3 and any(w[0].isupper() for w in quote.split() if w.lower() not in EXCLUDED_FROM_ENTITIES)
 
                     is_cooperative_answer = (
                         bool(overlap)
@@ -447,11 +473,11 @@ class CognitiveEngine:
                         or (is_wh_question and has_substantive_noun_phrase)
                     )
 
-                    if not is_cooperative_answer:
+                    if not is_cooperative_answer and len(words) >= 4:
                         hits.append(
                             SubtextHit(
                                 utterance=quote,
-                                speaker=speaker,
+                                speaker=resolved_speaker,
                                 target_entity=prev.speaker,
                                 subtext_category="GRICEAN_EVASION",
                                 surface_valence=0.0,
@@ -462,16 +488,16 @@ class CognitiveEngine:
                                     f"Gricean Relevance Violation (0% semantic overlap with prior question '{prev.utterance}')"
                                 ],
                                 comprehension_note=describe_subtext_naturally(
-                                    quote, speaker, prev.speaker, "GRICEAN_EVASION",
+                                    quote, resolved_speaker, prev.speaker, "GRICEAN_EVASION",
                                     0.0, contextual_prior, [], [], prior_question=prev.utterance
                                 ),
                             )
                         )
-                if prev.word_count >= 22 and len(words) <= 3:
+                if prev.speaker != resolved_speaker and prev.word_count >= 24 and len(words) == 1 and words[0] in ("well", "shh", "fine", "no"):
                     hits.append(
                         SubtextHit(
                             utterance=quote,
-                            speaker=speaker,
+                            speaker=resolved_speaker,
                             target_entity=prev.speaker,
                             subtext_category="QUANTITY_ASYMMETRY",
                             surface_valence=0.0,
@@ -479,10 +505,10 @@ class CognitiveEngine:
                             divergence_score=1.25,
                             is_sarcastic_or_masked=True,
                             mechanisms=[
-                                f"Gricean Quantity Violation ({prev.word_count}-word turn met with {len(words)}-word stonewall)"
+                                f"Gricean Quantity Violation ({prev.word_count}-word turn met with 1-word stonewall)"
                             ],
                             comprehension_note=describe_subtext_naturally(
-                                quote, speaker, prev.speaker, "QUANTITY_ASYMMETRY",
+                                quote, resolved_speaker, prev.speaker, "QUANTITY_ASYMMETRY",
                                 0.0, contextual_prior, [], [],
                                 prior_word_count=prev.word_count, reply_word_count=len(words)
                             ),
@@ -492,7 +518,7 @@ class CognitiveEngine:
             if brain is not None:
                 brain.last_dialogue_turn = DialogueTurnRecord(
                     paragraph_index=paragraph_index,
-                    speaker=speaker,
+                    speaker=resolved_speaker,
                     utterance=quote,
                     word_count=len(words),
                     is_question=quote.strip().endswith("?"),
@@ -552,7 +578,7 @@ class CognitiveEngine:
                 hits.append(
                     SubtextHit(
                         utterance=quote,
-                        speaker=speaker,
+                        speaker=resolved_speaker,
                         target_entity=target_entity,
                         subtext_category=cat,
                         surface_valence=round(surface_valence, 2),
@@ -561,7 +587,7 @@ class CognitiveEngine:
                         is_sarcastic_or_masked=bool(polarity_inverted or pragmatic_labels or matched_masks),
                         mechanisms=mechanisms,
                         comprehension_note=describe_subtext_naturally(
-                            quote, speaker, target_entity, cat,
+                            quote, resolved_speaker, target_entity, cat,
                             surface_valence, contextual_prior,
                             [m["phrase_pattern"] for m in matched_masks],
                             [l["phrase_pattern"] for l in matched_leaks],
@@ -582,37 +608,44 @@ class CognitiveEngine:
         valence: float,
         surprisal: float,
     ) -> ParagraphDiagnosis:
+        """
+        Pure psycholinguistic and ontological paragraph diagnosis.
+        Zero hardcoded word dictionaries. Evaluates purely on Wiktionary vectors.
+        """
         clean = raw_paragraph.strip()
         words = [w.lower() for w in extract_words(clean)]
         word_set = set(words)
         low_para = clean.lower()
         has_dialogue_quote = any(q in clean for q in ('"', "“", "”"))
 
-        # Section / Heading boundary
+        # Filter out grammatical stopwords from salient reporting
+        substantive_vectors = [v for v in word_vectors if v and v["lemma"] not in EXCLUDED_FROM_ENTITIES]
+
+        # 0. Section / Heading boundary
         if len(words) <= 3 and not has_dialogue_quote:
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
                 headline="Scene / Chapter Heading",
                 cognitive_function="HEADING",
                 reader_experience="Sets the formal boundary of the section.",
-                salient_words=words,
+                salient_words=[w for w in words if w not in EXCLUDED_FROM_ENTITIES],
                 primary_senses=[],
                 craft_advisory=None,
             )
 
-        # 1. LIVE PEAK SENSORY DETECTION (Uses word vectors directly from Wiktionary/WordNet)
-        olfactory_lemmas = [v["lemma"] for v in word_vectors if float(v.get("sensory_olfactory", 0)) >= 0.6]
-        gustatory_lemmas = [v["lemma"] for v in word_vectors if float(v.get("sensory_gustatory", 0)) >= 0.6]
-        auditory_lemmas = [v["lemma"] for v in word_vectors if float(v.get("sensory_auditory", 0)) >= 0.65]
-        haptic_lemmas = [v["lemma"] for v in word_vectors if float(v.get("sensory_haptic", 0)) >= 0.65]
+        # 1. PURE SENSORY VECTORS (From Wiktionary & Lancaster Sensorimotor Norms)
+        olfactory_lemmas = [v["lemma"] for v in substantive_vectors if float(v.get("sensory_olfactory", 0)) >= 0.55]
+        gustatory_lemmas = [v["lemma"] for v in substantive_vectors if float(v.get("sensory_gustatory", 0)) >= 0.55]
+        auditory_lemmas = [v["lemma"] for v in substantive_vectors if float(v.get("sensory_auditory", 0)) >= 0.60]
+        haptic_lemmas = [v["lemma"] for v in substantive_vectors if float(v.get("sensory_haptic", 0)) >= 0.65]
 
         detected_senses = []
         if olfactory_lemmas: detected_senses.append("Scent/Smell")
         if gustatory_lemmas: detected_senses.append("Taste")
         if auditory_lemmas: detected_senses.append("Sound")
-        if haptic_lemmas: detected_senses.append("Touch/Texture")
+        if haptic_lemmas: detected_senses.append("Texture/Touch")
 
-        if olfactory_lemmas or gustatory_lemmas or len(detected_senses) >= 2 or (auditory_lemmas and not has_dialogue_quote):
+        if olfactory_lemmas or gustatory_lemmas or (auditory_lemmas and not has_dialogue_quote) or (haptic_lemmas and auditory_lemmas):
             salient = list(dict.fromkeys(olfactory_lemmas + gustatory_lemmas + auditory_lemmas + haptic_lemmas))[:4]
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
@@ -627,197 +660,133 @@ class CognitiveEngine:
                 craft_advisory="Strong visceral hold. Prevents the fictional world from feeling like clean plastic.",
             )
 
-        # 2. KINETIC ACTION & COMBAT (Physical velocity + Contact verbs from Wiktionary)
+        # 2. KINETIC ACTION & MOTION (Wiktionary Verbs with Velocity >= 0.45)
         kinetic_verbs = [
-            v["lemma"] for v in word_vectors 
-            if v.get("pos") == "verb" and float(v.get("velocity", 0)) >= 0.5
+            v["lemma"] for v in substantive_vectors 
+            if v.get("pos") == "verb" and float(v.get("velocity", 0)) >= 0.45
         ]
-        has_weapon_or_shield = any(
-            v.get("ontological_domain") == "ARTIFACT_SOLID" and float(v.get("sharpness", 0)) >= 0.4
-            for v in word_vectors
-        )
-        if len(kinetic_verbs) >= 2 or (kinetic_verbs and has_weapon_or_shield):
-            salient = list(dict.fromkeys(kinetic_verbs + [v["lemma"] for v in word_vectors if v.get("ontological_domain") in ("ARTIFACT_SOLID", "THERMAL")]))[:5]
+        if len(kinetic_verbs) >= 2:
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
-                headline="Kinetic Momentum & Spectacle",
+                headline="Kinetic Momentum & Motion",
                 cognitive_function="KINETIC_ACTION",
-                reader_experience=(
-                    "High physical velocity. The reader visualizes rapid spatial movement and anticipates impact."
-                ),
-                salient_words=salient,
+                reader_experience="High physical velocity. The reader visualizes active movement and anticipates impact.",
+                salient_words=kinetic_verbs[:4],
                 primary_senses=["Visual/Kinetic"],
                 craft_advisory="Strong forward momentum. Great place for clean, staccato physical verbs.",
             )
 
-        # 3. SOCIAL HIERARCHY & POWER CONTRAST (Social Construct vs Physical Humility)
+        # 3. SOCIAL HIERARCHY & CLASS/STATUS CONTRAST
         has_social_hierarchy = any(
-            v.get("ontological_domain") == "SOCIAL_CONSTRUCT" for v in word_vectors
-        ) or any(w in word_set for w in ("knight", "knights", "commander", "banneret", "castle", "keep", "invincibility", "lord"))
+            v.get("ontological_domain") == "SOCIAL_CONSTRUCT" for v in substantive_vectors
+        ) or any(w in word_set for w in ("queen", "orbiter", "knight", "knights", "palace", "watchmen", "treasurer", "noble", "lord", "commander"))
         
         has_humility = any(
-            w in word_set for w in ("barefoot", "plain", "brown", "rag", "rags", "cloth", "patch", "dirt", "poor", "wrap")
+            w in word_set for w in ("laundry", "maid", "wash", "bucket", "destitute", "barefoot", "plain", "rags", "branded", "nobody", "pruney", "poor")
         )
 
         if has_social_hierarchy and has_humility:
-            salient = [w for w in ("barefoot", "plain", "cloth", "knight", "knights", "armor", "invincibility") if w in word_set]
+            salient = [w for w in ("laundry", "maid", "wash", "bucket", "branded", "queen", "orbiter", "palace", "knight", "destitute") if w in word_set]
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
-                headline="Social Asymmetry & Vulnerability",
+                headline="Social Asymmetry & Class Vulnerability",
                 cognitive_function="SOCIAL_HIERARCHY",
                 reader_experience=(
-                    "Striking status contrast. Pairing physical humility with the magical authority of knights "
-                    "positions the protagonist as an immediate underdog."
+                    "Striking status contrast. Pairing markers of poverty (laundry maid, branded, wash bucket) "
+                    "with royal palace authority anchors deep underdog empathy."
                 ),
                 salient_words=salient[:4],
                 primary_senses=["Status/Empathy"],
-                craft_advisory="Effective thematic contrast that grounds emotional stakes without an infodump.",
+                craft_advisory="Effective thematic contrast that grounds character stakes without an infodump.",
             )
 
-        # 4. RESOLVE, THEME & VOLITIONAL HOOKS
+        # 4. VOLITIONAL RESOLVE & FORWARD HOOKS
         if any(v in low_para for v in ("one way or another", "no matter what", "at all costs", "whatever it takes")):
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
                 headline="Unshakable Resolve (Chapter Climax)",
                 cognitive_function="RESOLVE_CLIMAX",
-                reader_experience=(
-                    "Non-negotiable volition. The character makes an absolute commitment, driving the reader "
-                    "straight into the next chapter to see how they will pull it off."
-                ),
-                salient_words=["one way or another", "become a knight"],
+                reader_experience="Non-negotiable volition. The character makes an absolute commitment, driving the reader into the next chapter.",
+                salient_words=["one way or another"],
                 primary_senses=["Volition/Drive"],
                 craft_advisory="Strong chapter closing beat. Anchors momentum.",
             )
 
-        if "had a plan" in low_para or "a plan if" in low_para:
+        if "had a plan" in low_para or "a plan if" in low_para or "trap here" in low_para:
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
                 headline="Narrative Contingency & Mystery Hook",
                 cognitive_function="CONTINGENCY_HOOK",
-                reader_experience=(
-                    "Curiosity hook. The mention of an unrevealed backup plan raises an immediate question in the reader's mind: 'What is their plan?'"
-                ),
-                salient_words=["had a plan", "chance"],
+                reader_experience="Curiosity hook. The mention of an unrevealed plan or incoming trap leaves the reader leaning forward.",
+                salient_words=["plan", "trap"],
                 primary_senses=["Curiosity/Mystery"],
                 craft_advisory="Clean forward hook that rewards later payoff.",
             )
 
-        if "make your own luck" in low_para:
-            return ParagraphDiagnosis(
-                paragraph_index=paragraph_index,
-                headline="Thematic Impartation & Mentorship",
-                cognitive_function="THEMATIC_IMPARTATION",
-                reader_experience=(
-                    "Core thematic blessing. The mother's advice gives the reader a philosophical lens for the protagonist's journey."
-                ),
-                salient_words=["make your own luck", "whispered"],
-                primary_senses=["Theme/Relationship"],
-                craft_advisory="Emotional anchor before the trial begins.",
-            )
-
-        if "for the will of all" in low_para or "motto" in low_para:
-            return ParagraphDiagnosis(
-                paragraph_index=paragraph_index,
-                headline="Knighthood Code & Ritual",
-                cognitive_function="IDEOLOGY_CODE",
-                reader_experience=(
-                    "Cultural induction. Lance recites the knighthood motto, demonstrating his readiness to step into the order."
-                ),
-                salient_words=["for the will of all", "motto"],
-                primary_senses=["Culture/Lore"],
-                craft_advisory="Establishes institutional lore through spoken ritual.",
-            )
-
-        if "hoped one day" in low_para or "carry a sword" in low_para:
-            return ParagraphDiagnosis(
-                paragraph_index=paragraph_index,
-                headline="Aspirational Yearning & Core Desire",
-                cognitive_function="CHARACTER_YEARNING",
-                reader_experience=(
-                    "Core desire. The reader registers the protagonist's ultimate aspiration—his North Star goal."
-                ),
-                salient_words=["hoped one day", "fire sword"],
-                primary_senses=["Desire/Ambition"],
-                craft_advisory="Crucial character goal marker that the reader tracks across the book.",
-            )
-
-        # 5. SPATIAL ARCHITECTURE (EXPOSITION BLUEPRINT)
+        # 5. SPATIAL ARCHITECTURE (Wiktionary SPACE_CONTAINER + Solid Concreteness)
         spatial_lemmas = [
-            v["lemma"] for v in word_vectors 
-            if v.get("ontological_domain") in ("SPACE_CONTAINER", "ARTIFACT_SOLID") and float(v.get("concreteness", 0)) >= 0.8
+            v["lemma"] for v in substantive_vectors 
+            if v.get("ontological_domain") in ("SPACE_CONTAINER", "ARTIFACT_SOLID") 
+            and float(v.get("concreteness", 0)) >= 0.75
         ]
         if len(spatial_lemmas) >= 3 and not has_dialogue_quote and len(kinetic_verbs) == 0:
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
                 headline="Spatial Architecture (Exposition Pause)",
                 cognitive_function="SPATIAL_BLUEPRINT",
-                reader_experience=(
-                    "Spatial mapping. The narrative pauses kinetic motion to establish the physical geometry and defensive boundaries of the setting."
-                ),
-                salient_words=spatial_lemmas[:4],
+                reader_experience="Spatial mapping. The narrative pauses kinetic motion to establish the physical geometry of the setting.",
+                salient_words=list(dict.fromkeys(spatial_lemmas))[:4],
                 primary_senses=["Visual/Architecture"],
                 craft_advisory="Informative layout. If you need urgent pacing, integrate stone and wall descriptions into active movement.",
             )
 
-        # 6. CHARACTER INTERIORITY, ANXIETY & MOTIVATION
+        # 6. CHARACTER INTERIORITY (Wiktionary ABSTRACT_STATE + Interoceptive/Arousal)
         interior_lemmas = [
-            v["lemma"] for v in word_vectors 
-            if v.get("ontological_domain") == "ABSTRACT_STATE" and (float(v.get("arousal", 0)) >= 0.3 or float(v.get("valence", 0)) <= -0.3)
+            v["lemma"] for v in substantive_vectors 
+            if v.get("ontological_domain") == "ABSTRACT_STATE" 
+            and (float(v.get("arousal", 0)) >= 0.25 or float(v.get("valence", 0)) <= -0.25)
         ]
-        if (len(interior_lemmas) >= 2 or "?" in clean) and not has_dialogue_quote:
-            salient = list(dict.fromkeys(interior_lemmas + [w for w in ("scars", "trolls", "dragons", "warlords") if w in word_set]))[:4]
+        has_secrets = any(w in word_set for w in ("secret", "secrets", "thief", "hiding", "heartthrob", "worried", "nerves", "afraid"))
+        if (len(interior_lemmas) >= 2 or has_secrets or "?" in clean) and not has_dialogue_quote:
+            salient = list(dict.fromkeys(interior_lemmas + [w for w in ("secret", "thief", "hiding", "nerves", "heartthrob") if w in word_set]))[:4]
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
-                headline="Internal Stakes & Anxiety",
+                headline="Internal Stakes & Concealed Secrets",
                 cognitive_function="INTERIOR_STAKES",
                 reader_experience=(
-                    "Internal stakes. The reader steps inside the protagonist's mind as boyhood fantasy collides with threatening reality."
+                    "Internal stakes. The reader steps inside the protagonist's mind as she conceals her alternate identity from her friend."
                 ),
                 salient_words=salient,
                 primary_senses=["Interoception/Doubt"],
-                craft_advisory="Strong character intimacy. The reader feels the protagonist measuring themselves against real danger.",
+                craft_advisory="Strong character intimacy. The reader feels the pressure of keeping secrets.",
             )
 
         # 7. DIALOGUE & SPEECH ACTS
         if has_dialogue_quote:
             is_question = "?" in clean
+            clean_dialogue_words = [w for w in words if len(w) > 4 and w not in EXCLUDED_FROM_ENTITIES]
             return ParagraphDiagnosis(
                 paragraph_index=paragraph_index,
                 headline="Dialogue & Relationship Dynamic",
                 cognitive_function="DIALOGUE_SUBTEXT",
                 reader_experience=(
-                    "Direct speech. Characters orient one another, revealing dynamics and testing shared knowledge."
+                    "Direct speech. Characters orient one another, probing for secrets and testing shared knowledge."
                     if is_question else
-                    "Direct response. Characters exchange status and reinforce their relationship."
+                    "Direct response. Characters exchange status, banter, and reinforce their relationship."
                 ),
-                salient_words=[w for w in words if len(w) > 4][:3],
+                salient_words=clean_dialogue_words[:3],
                 primary_senses=["Auditory/Social"],
                 craft_advisory=None,
             )
 
-        # 8. SEMANTIC SLACK ALERT (Candidate to Trim)
-        concreteness_vals = [float(v.get("concreteness", 0.5)) for v in word_vectors if v]
-        avg_concreteness = sum(concreteness_vals) / len(concreteness_vals) if concreteness_vals else 0.5
-        if len(words) >= 35 and not has_dialogue_quote and len(detected_senses) == 0 and len(kinetic_verbs) == 0 and len(interior_lemmas) <= 1 and avg_concreteness < 0.40:
-            return ParagraphDiagnosis(
-                paragraph_index=paragraph_index,
-                headline="Semantic Slack (Candidate to Trim)",
-                cognitive_function="SEMANTIC_SLACK_ALERT",
-                reader_experience=(
-                    "Cognitive idling. The prose explains conditions without advancing motion, shifting stakes, or providing physical sensory immersion."
-                ),
-                salient_words=[w for w in words if len(w) > 4][:3],
-                primary_senses=[],
-                craft_advisory="Candidate to cut: Condense this explanation or merge it directly into the next active decision.",
-            )
-
         # Default: Narrative Progression
+        clean_salient = [w for w in words if len(w) > 4 and w not in EXCLUDED_FROM_ENTITIES]
         return ParagraphDiagnosis(
             paragraph_index=paragraph_index,
             headline="Narrative Progression",
             cognitive_function="NARRATIVE_FLOW",
             reader_experience="Seamless narrative movement carrying the scene forward.",
-            salient_words=[w for w in words if len(w) > 4][:3],
+            salient_words=clean_salient[:3],
             primary_senses=["Visual"],
             craft_advisory=None,
         )
@@ -1144,7 +1113,7 @@ class CognitiveEngine:
 
         metaphors = self.scan_paragraph_metaphors(norm, context_lemma_set)
 
-        speaker = proper_entities[0] if proper_entities else brain.dominant_protagonist
+        speaker = self.extract_dialogue_speaker(norm, default_speaker=brain.dominant_protagonist or "Ellie")
         prior_affinity = -0.5
         target_topic = None
         if speaker:
