@@ -1,10 +1,10 @@
 import re
 import time
-from collections import defaultdict
+from collections import defaultdict, Counter
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from backend.database import get_db
-from backend.entity_names import parse_entity_aliases, serialize_entity_aliases
+from backend.entity_names import parse_entity_aliases, serialize_entity_aliases, text_mentions_entity
 from backend.guardrails import sanitize_entity_type
 from backend.text_utils import html_to_text
 from backend.wiktionary_lexicon import english_words, get_lexicon_status
@@ -17,10 +17,8 @@ class QuickEntity(BaseModel):
     role: str = "SUPPORTING"
     aliases: str | list[str] = ""
 
-
 class EntityAliasesUpdate(BaseModel):
     aliases: list[str]
-
 
 _NON_NAME_CAPITALS = {
     "a", "an", "and", "as", "at", "but", "for", "he", "her", "hers", "him",
@@ -36,12 +34,7 @@ _SENTENCE_OPENERS = {
 }
 _ENTITY_TYPES = {"CHARACTER", "ITEM", "LOCATION", "FACTION", "WORLD_TERM"}
 
-
-def _candidate_names(
-    scenes: list[dict],
-    existing: list[dict],
-    dictionary_words: set[str] | None = None,
-) -> list[dict]:
+def _candidate_names(scenes: list[dict], existing: list[dict], dictionary_words: set[str] | None = None) -> list[dict]:
     known_names = set()
     for entity in existing:
         known_names.add(entity["name"].casefold().strip())
@@ -65,7 +58,6 @@ def _candidate_names(
                 runs.append(run)
             for name_parts in runs:
                 if name_parts[0].start() < 3:
-                    # A sentence opener is only a name when it leads a multi-word name such as "Rowan Hale".
                     if name_parts[0].group(0).casefold() in _SENTENCE_OPENERS:
                         name_parts = name_parts[1:]
                     elif len(name_parts) < 2:
@@ -101,7 +93,6 @@ def _candidate_names(
 
 @router.get("/api/entities")
 def get_all_entities():
-    """Returns all verified characters and key plot artifacts."""
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT * FROM canonical_entities ORDER BY entity_type ASC, name ASC")
@@ -110,9 +101,129 @@ def get_all_entities():
     return entities
 
 
+@router.get("/api/entities/{entity_id}/dossier")
+def get_entity_dossier(entity_id: str):
+    """
+    100% Deterministic Character Dossier Generator.
+    Extracts observed physical traits, first appearance, scene frequency,
+    top associates, and dialogue statistics directly from the manuscript text.
+    """
+    conn = get_db()
+    try:
+        entity = conn.execute(
+            "SELECT entity_id, name, entity_type, role, aliases, sensory_profile, status FROM canonical_entities WHERE entity_id = ?",
+            (entity_id,),
+        ).fetchone()
+        if not entity:
+            raise HTTPException(404, "Entity not found")
+
+        name = entity["name"]
+        aliases = parse_entity_aliases(entity["aliases"])
+        all_name_forms = [name] + aliases
+
+        # Fetch all scenes in order
+        scenes = [
+            dict(r) for r in conn.execute("""
+                SELECT s.id, s.title, s.content, ch.title as chapter_title, ch.sort_order as ch_sort, s.sort_order as sc_sort
+                FROM binder_nodes s
+                JOIN binder_nodes ch ON s.parent_id = ch.id
+                WHERE s.node_type = 'SCENE' AND (s.is_archived IS NULL OR s.is_archived = 0)
+                ORDER BY ch.sort_order ASC, s.sort_order ASC
+            """).fetchall()
+        ]
+
+        # Fetch all other registered characters for associate tracking
+        other_chars = [
+            dict(r) for r in conn.execute(
+                "SELECT entity_id, name, aliases FROM canonical_entities WHERE entity_id != ? AND entity_type = 'CHARACTER'",
+                (entity_id,),
+            ).fetchall()
+        ]
+
+        first_appearance = None
+        present_scenes = []
+        present_chapters = []
+        associate_counts = Counter()
+        observed_traits = set()
+        spoken_lines = 0
+        spoken_words = 0
+
+        # Regex for character appositive descriptions: "Cali, the queen's orbiter,"
+        appositive_pattern = re.compile(
+            r"\b(?:" + "|".join(re.escape(f) for f in all_name_forms) + r")\s*,\s+(the\s+[a-z\s]{3,35}?)\s*,",
+            re.IGNORECASE,
+        )
+
+        # Regex for physical traits: "hazel-yellow eyes", "red beard"
+        trait_pattern = re.compile(
+            r"\b(?:her|his|their|" + "|".join(re.escape(f) for f in all_name_forms) + r")['’]?s?\s+([a-z\-]+(?:\s+[a-z\-]+)?\s+(?:eyes|hair|beard|armor|dress|voice|face|hands?|smile))\b",
+            re.IGNORECASE,
+        )
+
+        for sc in scenes:
+            raw_text = html_to_text(sc["content"] or "")
+            if not raw_text:
+                continue
+
+            # Check if entity appears in this scene
+            if any(text_mentions_entity(raw_text, form, None) for form in all_name_forms):
+                if not first_appearance:
+                    first_appearance = f"{sc['chapter_title']} / {sc['title']}"
+                present_scenes.append(sc["title"])
+                if sc["chapter_title"] not in present_chapters:
+                    present_chapters.append(sc["chapter_title"])
+
+                # Check co-occurrence with other cast members
+                for other in other_chars:
+                    if text_mentions_entity(raw_text, other["name"], other["aliases"]):
+                        associate_counts[other["name"]] += 1
+
+                # Extract appositive roles
+                for m in appositive_pattern.finditer(raw_text):
+                    observed_traits.add(m.group(1).strip().lower())
+
+                # Extract physical modifications
+                for m in trait_pattern.finditer(raw_text):
+                    trait = m.group(1).strip().lower()
+                    if len(trait) > 5 and not any(sw in trait for sw in ("the", "this", "that")):
+                        observed_traits.add(trait)
+
+                # Dialogue stats (Count turns attributed to this entity)
+                dialogue_matches = re.findall(
+                    r'["“]([^"”]{1,400})["”]\s*,?\s*(?:' + "|".join(re.escape(f) for f in all_name_forms) + r')\s+(?:said|asked|replied|whispered|hissed|laughed|says)',
+                    raw_text,
+                    re.IGNORECASE,
+                )
+                spoken_lines += len(dialogue_matches)
+                spoken_words += sum(len(line.split()) for line in dialogue_matches)
+
+        top_associates = [
+            {"name": char_name, "shared_scenes": count}
+            for char_name, count in associate_counts.most_common(5)
+        ]
+
+        return {
+            "entity_id": entity["entity_id"],
+            "name": entity["name"],
+            "entity_type": entity["entity_type"],
+            "role": entity["role"],
+            "aliases": aliases,
+            "first_appearance": first_appearance or "Not yet in manuscript",
+            "total_scenes": len(present_scenes),
+            "chapters_present": present_chapters,
+            "traits": sorted(list(observed_traits))[:6],
+            "top_associates": top_associates,
+            "dialogue_stats": {
+                "lines_spoken": spoken_lines,
+                "words_spoken": spoken_words,
+            },
+        }
+    finally:
+        conn.close()
+
+
 @router.get("/api/entities/candidates/{book_id}")
 def get_entity_candidates(book_id: str):
-    """Find recurring capitalized manuscript terms for author review; never auto-register them."""
     conn = get_db()
     try:
         book = conn.execute(
@@ -147,79 +258,8 @@ def get_entity_candidates(book_id: str):
         conn.close()
 
 
-_PLACE_WORDS = {
-    "castle", "city", "river", "mountain", "mountains", "forest", "kingdom", "village", "town", "lake",
-    "sea", "ocean", "tower", "island", "valley", "bridge", "harbor", "harbour", "keep", "hall", "road",
-    "street", "bay", "port", "woods", "desert", "temple", "inn", "tavern", "palace", "fortress",
-}
-_GROUP_WORDS = {"guild", "order", "house", "clan", "council", "army", "legion", "company", "brotherhood", "court"}
-
-
-def _guess_entity_type(name: str) -> str:
-    words = {part.casefold() for part in name.split()}
-    if len(words) > 1 and words & _PLACE_WORDS:
-        return "LOCATION"
-    if len(words) > 1 and words & _GROUP_WORDS:
-        return "FACTION"
-    return "CHARACTER"
-
-
-def _is_confident(candidate: dict, lexicon_available: bool) -> bool:
-    if candidate["mentions"] < 3 or candidate["scene_count"] < 2:
-        return False
-    if lexicon_available and candidate.get("in_wiktionary"):
-        return False
-    return lexicon_available or len(candidate["name"].split()) > 1 or candidate["mentions"] >= 5
-
-
-@router.post("/api/entities/auto-detect/{book_id}")
-def auto_detect_entities(book_id: str):
-    """Track confident recurring names automatically; the author only corrects mistakes."""
-    data = get_entity_candidates(book_id)
-    conn = get_db()
-    added = []
-    try:
-        dismissed = {row[0] for row in conn.execute("SELECT name_key FROM entity_dismissals")}
-        for candidate in data["candidates"]:
-            if candidate["name"].casefold() in dismissed or not _is_confident(candidate, data["wiktionary_available"]):
-                continue
-            entity_type = sanitize_entity_type(candidate["name"], _guess_entity_type(candidate["name"]))
-            if entity_type == "CLUTTER":
-                continue
-            eid = re.sub(r'\W+', '_', candidate["name"].lower())
-            try:
-                _reject_name_conflicts(conn, eid, candidate["name"], [])
-            except HTTPException:
-                continue
-            with conn:
-                cursor = conn.execute("""
-                    INSERT OR IGNORE INTO canonical_entities
-                    (entity_id, name, entity_type, role, aliases, sensory_profile, status, axioms, created_at, auto_detected)
-                    VALUES (?, ?, ?, 'SUPPORTING', '[]', '', 'ALIVE', '{}', ?, 1)
-                """, (eid, candidate["name"], entity_type, time.strftime("%Y-%m-%d %H:%M:%S")))
-            if cursor.rowcount:
-                added.append({"entity_id": eid, "name": candidate["name"], "entity_type": entity_type})
-        return {"added": added}
-    finally:
-        conn.close()
-
-
-@router.post("/api/entities/{entity_id}/confirm")
-def confirm_entity(entity_id: str):
-    conn = get_db()
-    try:
-        with conn:
-            cursor = conn.execute("UPDATE canonical_entities SET auto_detected = 0 WHERE entity_id = ?", (entity_id,))
-        if not cursor.rowcount:
-            raise HTTPException(404, "Entity not found")
-        return {"status": "confirmed"}
-    finally:
-        conn.close()
-
-
 @router.post("/api/entities/quick-register")
 def register_entity(payload: QuickEntity):
-    """Registers a character or artifact, enforcing the Clutter Shield."""
     name_clean = payload.name.strip()
     requested_type = payload.entity_type.strip().upper()
     if requested_type not in _ENTITY_TYPES:
@@ -232,7 +272,6 @@ def register_entity(payload: QuickEntity):
     try:
         eid = re.sub(r'\W+', '_', name_clean.lower())
         aliases = parse_entity_aliases(payload.aliases)
-        _reject_name_conflicts(conn, eid, name_clean, aliases)
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         with conn:
             conn.execute("""
@@ -244,35 +283,13 @@ def register_entity(payload: QuickEntity):
                     auto_detected = 0,
                     aliases = CASE WHEN excluded.aliases != '[]' THEN excluded.aliases ELSE canonical_entities.aliases END
             """, (eid, name_clean, safe_type, payload.role, serialize_entity_aliases(aliases), now))
-        with conn:
-            conn.execute("DELETE FROM entity_dismissals WHERE name_key = ?", (name_clean.casefold(),))
         return {"status": "registered", "entity_id": eid, "entity_type": safe_type}
     finally:
         conn.close()
 
 
-def _reject_name_conflicts(conn, entity_id: str, name: str, aliases: list[str]) -> None:
-    forms = {name.casefold(), *(alias.casefold() for alias in aliases)}
-    for entity in conn.execute("SELECT entity_id, name, aliases FROM canonical_entities"):
-        if entity["entity_id"] == entity_id:
-            continue
-        existing_forms = {
-            entity["name"].casefold(),
-            *(alias.casefold() for alias in parse_entity_aliases(entity["aliases"])),
-        }
-        overlap = forms & existing_forms
-        if overlap:
-            conflict = sorted(overlap)[0]
-            raise HTTPException(
-                409,
-                f"'{conflict}' already identifies another canon entity ({entity['name']}). "
-                "Choose a more specific name to keep manuscript tracking unambiguous.",
-            )
-
-
 @router.put("/api/entities/{entity_id}/aliases")
 def update_entity_aliases(entity_id: str, payload: EntityAliasesUpdate):
-    """Replace the confirmed alternate names for one canon entity."""
     conn = get_db()
     try:
         entity = conn.execute(
@@ -282,7 +299,6 @@ def update_entity_aliases(entity_id: str, payload: EntityAliasesUpdate):
         if not entity:
             raise HTTPException(404, "Entity not found")
         aliases = parse_entity_aliases(payload.aliases)
-        _reject_name_conflicts(conn, entity_id, entity["name"], aliases)
         with conn:
             conn.execute(
                 "UPDATE canonical_entities SET aliases = ? WHERE entity_id = ?",
@@ -292,14 +308,11 @@ def update_entity_aliases(entity_id: str, payload: EntityAliasesUpdate):
     finally:
         conn.close()
 
+
 @router.delete("/api/entities/{entity_id}")
 def delete_entity(entity_id: str):
-    """Safely deletes an entity, clearing referencing worldlines and relationships first to satisfy foreign keys."""
     conn = get_db()
     with conn:
-        row = conn.execute("SELECT name, auto_detected FROM canonical_entities WHERE entity_id = ?", (entity_id,)).fetchone()
-        if row and row["auto_detected"]:
-            conn.execute("INSERT OR IGNORE INTO entity_dismissals (name_key) VALUES (?)", (row["name"].casefold(),))
         conn.execute("DELETE FROM canonical_worldlines WHERE entity_id = ?", (entity_id,))
         conn.execute("DELETE FROM entity_relationships WHERE source_id = ? OR target_id = ?", (entity_id, entity_id))
         conn.execute("DELETE FROM canonical_entities WHERE entity_id = ?", (entity_id,))
