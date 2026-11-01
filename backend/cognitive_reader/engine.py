@@ -5,14 +5,14 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from cognitive_reader.compiler import (
+from .compiler import (
     DEFAULT_DB_PATH,
     build_cognitive_database,
     score_gloss_from_primitives,
     infer_sensory_profile,
     compute_phonetic_texture,
 )
-from cognitive_reader.human_voice import (
+from .human_voice import (
     describe_habituation_naturally,
     describe_lighting_error_naturally,
     describe_metaphor_naturally,
@@ -20,7 +20,7 @@ from cognitive_reader.human_voice import (
     describe_ngram_anomaly_naturally,
     describe_subtext_naturally,
 )
-from cognitive_reader.models import (
+from .models import (
     ContinuityAlert,
     DocumentReport,
     EpistemicAlert,
@@ -31,7 +31,7 @@ from cognitive_reader.models import (
     ReaderNote,
     SubtextHit,
 )
-from cognitive_reader.parser import (
+from .parser import (
     CAUSAL_CONNECTIVES,
     COPULA_AND_SIMILE_RE,
     DENOMINAL_VERB_RE,
@@ -53,7 +53,7 @@ from cognitive_reader.parser import (
     split_paragraphs,
     split_sentences,
 )
-from cognitive_reader.state import DialogueTurnRecord, VirtualBrainState
+from .state import DialogueTurnRecord, VirtualBrainState
 
 PHYSICS_DIMENSIONS = [
     "mass_weight",
@@ -80,7 +80,6 @@ class CognitiveEngine:
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
-        # Windows-safe connection to local Wiktionary SQLite database
         self.wikt_conn = None
         if wiktionary_db_path and Path(wiktionary_db_path).exists():
             try:
@@ -100,7 +99,6 @@ class CognitiveEngine:
         if norm != raw:
             candidates.append(norm)
 
-        # 1. Check local cognitive_lexicon.db cache first (0.1ms)
         for cand in candidates:
             cur.execute("SELECT * FROM lexicon_senses WHERE lemma = ? ORDER BY sense_id ASC", (cand,))
             senses = cur.fetchall()
@@ -117,7 +115,6 @@ class CognitiveEngine:
                         best_sense = s
                 return dict(best_sense)
 
-        # 2. Dynamic, universal Wiktionary database resolution
         if self.wikt_conn is not None:
             for cand in candidates:
                 try:
@@ -138,7 +135,6 @@ class CognitiveEngine:
                         sensory = infer_sensory_profile(domain, gloss, phys)
                         phonetics = compute_phonetic_texture(cand)
 
-                        # Cache into cognitive_lexicon.db for future instant queries
                         with self.conn:
                             self.conn.execute("""
                                 INSERT OR REPLACE INTO lexicon_senses VALUES (
@@ -162,7 +158,6 @@ class CognitiveEngine:
                 except Exception:
                     pass
 
-        # 3. Morphology derivation fallback
         for stem, op, mult in decompose_morphology(raw):
             cur.execute("SELECT * FROM lexicon_senses WHERE lemma = ? ORDER BY sense_id ASC", (stem,))
             base_row = cur.fetchone()
@@ -382,7 +377,6 @@ class CognitiveEngine:
         return hits
 
     def extract_dialogue_speaker(self, paragraph: str, default_speaker: str = "Ellie") -> str:
-        """Accurately extracts speaker from dialogue tags ('Cali said', 'I replied', 'Grace whispered')."""
         if re.search(r'["”]\s*,?\s*I\s+(?:said|replied|asked|thought|laughed|continue|shook|cringe|relented|managed)', paragraph, re.IGNORECASE):
             return default_speaker
         tag_match = re.search(
@@ -608,17 +602,12 @@ class CognitiveEngine:
         valence: float,
         surprisal: float,
     ) -> ParagraphDiagnosis:
-        """
-        Pure psycholinguistic and ontological paragraph diagnosis.
-        Zero hardcoded word dictionaries. Evaluates purely on Wiktionary vectors.
-        """
         clean = raw_paragraph.strip()
         words = [w.lower() for w in extract_words(clean)]
         word_set = set(words)
         low_para = clean.lower()
         has_dialogue_quote = any(q in clean for q in ('"', "“", "”"))
 
-        # Filter out grammatical stopwords from salient reporting
         substantive_vectors = [v for v in word_vectors if v and v["lemma"] not in EXCLUDED_FROM_ENTITIES]
 
         # 0. Section / Heading boundary
@@ -660,7 +649,7 @@ class CognitiveEngine:
                 craft_advisory="Strong visceral hold. Prevents the fictional world from feeling like clean plastic.",
             )
 
-        # 2. KINETIC ACTION & MOTION (Wiktionary Verbs with Velocity >= 0.45)
+        # 2. KINETIC ACTION & MOTION
         kinetic_verbs = [
             v["lemma"] for v in substantive_vectors 
             if v.get("pos") == "verb" and float(v.get("velocity", 0)) >= 0.45
