@@ -1,75 +1,162 @@
 <template>
-  <aside v-show="!store.isVoidMode" class="w-64 border-r bg-zinc-950 md:bg-zinc-900/60 shadow-2xl backdrop-blur-xl flex flex-col transition-all z-20 shrink-0 select-none" :class="store.isCandlelight ? 'border-amber-900/40 bg-[#120f0c]' : 'border-zinc-800/80'">
-    <div class="p-3 border-b flex items-center justify-between text-xs font-semibold uppercase tracking-wider shrink-0" :class="store.isCandlelight ? 'border-amber-900/40 text-amber-300/80' : 'border-zinc-800/80 text-zinc-400'">
+  <aside 
+    v-show="!store.isVoidMode" 
+    class="w-64 border-r bg-zinc-950 md:bg-zinc-900/60 shadow-2xl backdrop-blur-xl flex flex-col transition-all z-20 shrink-0 select-none" 
+    :class="store.isCandlelight ? 'border-amber-900/40 bg-[#120f0c]' : 'border-zinc-800/80'"
+  >
+    <!-- Header -->
+    <div 
+      class="p-3 border-b flex items-center justify-between text-xs font-semibold uppercase tracking-wider shrink-0" 
+      :class="store.isCandlelight ? 'border-amber-900/40 text-amber-300/80' : 'border-zinc-800/80 text-zinc-400'"
+    >
       <div class="flex items-center gap-2">
         <BookMarked class="w-3.5 h-3.5 text-amber-500" />
         <span>Binder</span>
-        <button @click="store.toggleModal('vault', true)" class="px-1.5 py-0.5 bg-zinc-800/80 hover:bg-zinc-700 text-amber-400/90 rounded text-[10px] font-mono flex items-center gap-1 transition border border-zinc-700/50">
+        <button 
+          @click="store.toggleModal('vault', true)" 
+          class="px-1.5 py-0.5 bg-zinc-800/80 hover:bg-zinc-700 text-amber-400/90 rounded text-[10px] font-mono flex items-center gap-1 transition border border-zinc-700/50"
+        >
           <Library class="w-3 h-3" /> Bookcase
         </button>
       </div>
+
       <div class="flex items-center space-x-1">
-        <button v-if="store.aiEnabled" @click="autoTitleScenes" title="Auto-title generic scenes (uses local AI)" class="p-1 hover:bg-zinc-800 rounded text-amber-400 hover:text-amber-300 transition"><Sparkles class="w-4 h-4" /></button>
-        <button @click="addChapter" title="Add Chapter" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"><FolderPlus class="w-4 h-4" /></button>
-        <button @click="addScene" title="Add Scene" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"><FilePlus class="w-4 h-4" /></button>
+        <button @click="addChapter" title="Add Chapter" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition">
+          <FolderPlus class="w-4 h-4" />
+        </button>
+        <button @click="addScene" title="Add Scene" class="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition">
+          <FilePlus class="w-4 h-4" />
+        </button>
       </div>
     </div>
+
+    <!-- Active Manuscript Selector -->
     <div v-if="store.tree.length" class="px-3 py-2 border-b border-zinc-800/70">
       <label class="block text-[9px] uppercase tracking-wider text-zinc-500 mb-1" for="active-manuscript">Working manuscript</label>
-      <select id="active-manuscript" :value="store.activeBookId" @change="store.setActiveBook($event.target.value)" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-[11px] text-zinc-300 focus:outline-none focus:border-amber-500/50">
+      <select 
+        id="active-manuscript" 
+        :value="store.activeBookId" 
+        @change="store.setActiveBook($event.target.value)" 
+        class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-[11px] text-zinc-300 focus:outline-none focus:border-amber-500/50"
+      >
         <option v-for="book in store.tree" :key="book.id" :value="book.id">{{ book.title }}</option>
       </select>
     </div>
+
+    <!-- Hierarchy Tree with Native Drag & Drop -->
     <div class="flex-1 overflow-y-auto p-2 space-y-1 text-sm custom-scrollbar">
       <div v-if="!store.tree || store.tree.length === 0" class="py-12 px-4 text-center text-zinc-600 space-y-3">
         <BookOpen class="w-8 h-8 mx-auto text-zinc-800" />
         <p class="text-xs">No manuscripts loaded.</p>
         <button @click="store.createManuscript()" class="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded transition">Create Manuscript</button>
       </div>
+
       <template v-for="book in store.tree" :key="book.id">
-        <div :id="'book-node-' + book.id" class="font-bold text-zinc-200 text-xs px-2 py-1.5 flex items-center justify-between group hover:bg-zinc-800/40 rounded cursor-pointer transition-colors" @click="store.setActiveBook(book.id); toggleCollapse(book.id)">
+        <!-- Manuscript Node -->
+        <div 
+          :id="'book-node-' + book.id" 
+          class="font-bold text-zinc-200 text-xs px-2 py-1.5 flex items-center justify-between group hover:bg-zinc-800/40 rounded cursor-pointer transition-colors" 
+          @click="store.setActiveBook(book.id); toggleCollapse(book.id)"
+        >
           <div class="flex items-center gap-1.5 truncate flex-1 mr-2" @dblclick.stop="startRename(book, $event)">
             <ChevronRight v-if="isCollapsed(book.id)" class="w-3.5 h-3.5 text-zinc-500 shrink-0" />
             <ChevronDown v-else class="w-3.5 h-3.5 text-zinc-500 shrink-0" />
             <BookOpen class="w-3.5 h-3.5 text-amber-500 shrink-0" /> 
-            <input v-if="editingNodeId === book.id" :id="'rename-' + book.id" v-model="editingTitle" @keyup.enter="saveRename(book)" @blur="saveRename(book)" @click.stop class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" />
+            <input 
+              v-if="editingNodeId === book.id" 
+              :id="'rename-' + book.id" 
+              v-model="editingTitle" 
+              @keyup.enter="saveRename(book)" 
+              @blur="saveRename(book)" 
+              @click.stop 
+              class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" 
+            />
             <span v-else class="truncate tracking-wide">{{ book.title }}</span>
           </div>
           <div class="shrink-0 flex items-center space-x-0.5">
-            <button @click.stop="startRename(book, $event)" title="Rename manuscript" aria-label="Rename manuscript" class="p-1 text-zinc-400 hover:text-amber-300 focus-visible:text-amber-300 rounded transition"><Pencil class="w-3 h-3" /></button>
-            <button @click.stop="checkInBook(book)" title="Check in to Bookcase" aria-label="Check in to Bookcase" class="p-1 text-zinc-400 hover:text-amber-300 focus-visible:text-amber-300 rounded transition"><Archive class="w-3.5 h-3.5" /></button>
-            <button @click.stop="deleteNode(book)" title="Delete manuscript" aria-label="Delete manuscript" class="p-1 text-zinc-400 hover:text-rose-300 focus-visible:text-rose-300 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
+            <button @click.stop="startRename(book, $event)" title="Rename" class="p-1 text-zinc-500 hover:text-amber-400 rounded transition"><Pencil class="w-3 h-3" /></button>
+            <button @click.stop="checkInBook(book)" title="Check in to Bookcase" class="p-1 text-zinc-500 hover:text-amber-400 rounded transition"><Archive class="w-3.5 h-3.5" /></button>
+            <button @click.stop="deleteNode(book)" title="Delete manuscript" class="p-1 text-zinc-500 hover:text-rose-400 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
           </div>
         </div>
+
+        <!-- Chapters -->
         <div v-show="!isCollapsed(book.id)" v-for="chapter in book.children" :key="chapter.id" class="ml-2">
-          <div class="text-zinc-400 text-xs px-2 py-1.5 font-medium flex items-center justify-between group hover:bg-zinc-800/40 rounded cursor-pointer transition-colors" @click="toggleCollapse(chapter.id)">
+          
+          <!-- Chapter Folder Drop Zone -->
+          <div 
+            class="text-zinc-400 text-xs px-2 py-1.5 font-medium flex items-center justify-between group hover:bg-zinc-800/40 rounded cursor-pointer transition-all"
+            :class="dragOverChapterId === chapter.id ? 'bg-amber-950/40 border border-dashed border-amber-500/60' : ''"
+            @click="toggleCollapse(chapter.id)"
+            @dragover.prevent="onDragOverChapter(chapter.id)"
+            @dragleave="onDragLeaveChapter(chapter.id)"
+            @drop="onDropOnChapter(chapter.id, chapter)"
+          >
             <div class="flex items-center gap-1.5 truncate flex-1 mr-2" @dblclick.stop="startRename(chapter, $event)">
               <ChevronRight v-if="isCollapsed(chapter.id)" class="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <ChevronDown v-else class="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <Folder class="w-3.5 h-3.5 text-zinc-500 shrink-0" /> 
-              <input v-if="editingNodeId === chapter.id" :id="'rename-' + chapter.id" v-model="editingTitle" @keyup.enter="saveRename(chapter)" @blur="saveRename(chapter)" @click.stop class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" />
+              <input 
+                v-if="editingNodeId === chapter.id" 
+                :id="'rename-' + chapter.id" 
+                v-model="editingTitle" 
+                @keyup.enter="saveRename(chapter)" 
+                @blur="saveRename(chapter)" 
+                @click.stop 
+                class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" 
+              />
               <span v-else class="truncate">{{ chapter.title }}</span>
             </div>
+
             <div class="shrink-0 flex items-center space-x-0.5">
-              <button @click.stop="startRename(chapter, $event)" title="Rename chapter" aria-label="Rename chapter" class="p-1 text-zinc-400 hover:text-amber-300 focus-visible:text-amber-300 rounded transition"><Pencil class="w-3 h-3" /></button>
-              <button @click.stop="addSceneTo(chapter.id)" title="Add scene to chapter" aria-label="Add scene to chapter" class="p-1 text-zinc-400 hover:text-white focus-visible:text-white rounded transition"><Plus class="w-3 h-3" /></button>
-              <button @click.stop="deleteNode(chapter)" title="Delete chapter" aria-label="Delete chapter" class="p-1 text-zinc-400 hover:text-rose-300 focus-visible:text-rose-300 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
+              <button @click.stop="startRename(chapter, $event)" title="Rename" class="p-1 text-zinc-500 hover:text-amber-400 rounded transition"><Pencil class="w-3 h-3" /></button>
+              <button @click.stop="addSceneTo(chapter.id)" title="Add scene" class="p-1 text-zinc-500 hover:text-white rounded transition"><Plus class="w-3 h-3" /></button>
+              <button @click.stop="deleteNode(chapter)" title="Delete chapter" class="p-1 text-zinc-500 hover:text-rose-400 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
             </div>
           </div>
+
+          <!-- Scenes Container (Draggable) -->
           <div v-show="!isCollapsed(chapter.id)" v-for="scene in chapter.children" :key="scene.id" class="ml-4">
-            <div @click="selectNode(scene.id)" :class="['w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between group transition cursor-pointer', store.activeNode?.id === scene.id ? 'bg-amber-500/15 text-amber-300 font-medium border border-amber-500/30' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 border border-transparent']">
+            <div 
+              draggable="true"
+              @dragstart="onDragStart(scene, chapter, $event)"
+              @dragover.prevent="onDragOverScene(scene.id)"
+              @dragleave="onDragLeaveScene(scene.id)"
+              @drop="onDropOnScene(scene, chapter, $event)"
+              @dragend="onDragEnd"
+              @click="selectNode(scene.id)" 
+              :class="[
+                'w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between group transition cursor-pointer relative',
+                dragOverSceneId === scene.id ? 'border-t-2 border-amber-500 bg-amber-950/20' : '',
+                draggedScene?.id === scene.id ? 'opacity-40' : '',
+                store.activeNode?.id === scene.id 
+                  ? 'bg-amber-500/15 text-amber-300 font-medium border border-amber-500/30' 
+                  : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 border border-transparent'
+              ]"
+            >
               <div class="flex items-center gap-1.5 truncate flex-1 mr-2" @dblclick.stop="startRename(scene, $event)">
+                <GripVertical class="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 shrink-0 cursor-grab" />
                 <FileText class="w-3 h-3 text-zinc-500 shrink-0" /> 
-                <input v-if="editingNodeId === scene.id" :id="'rename-' + scene.id" v-model="editingTitle" @keyup.enter="saveRename(scene)" @blur="saveRename(scene)" @click.stop class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" />
+                <input 
+                  v-if="editingNodeId === scene.id" 
+                  :id="'rename-' + scene.id" 
+                  v-model="editingTitle" 
+                  @keyup.enter="saveRename(scene)" 
+                  @blur="saveRename(scene)" 
+                  @click.stop 
+                  class="bg-zinc-950 text-amber-400 px-1 py-0.5 rounded border border-amber-500 text-xs w-full focus:outline-none font-sans" 
+                />
                 <span v-else class="truncate">{{ scene.title }}</span>
               </div>
+
               <div class="shrink-0 flex items-center space-x-1">
                 <span class="text-[10px] text-zinc-500 font-mono">{{ scene.word_count || 0 }}w</span>
-                <button @click.stop="startRename(scene, $event)" title="Rename scene" aria-label="Rename scene" class="p-1 text-zinc-400 hover:text-amber-300 focus-visible:text-amber-300 rounded transition"><Pencil class="w-3 h-3" /></button>
-                <button @click.stop="deleteNode(scene)" title="Delete scene" aria-label="Delete scene" class="p-1 text-zinc-400 hover:text-rose-300 focus-visible:text-rose-300 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
+                <button @click.stop="startRename(scene, $event)" title="Rename" class="p-1 text-zinc-500 hover:text-amber-400 rounded transition"><Pencil class="w-3 h-3" /></button>
+                <button @click.stop="deleteNode(scene)" title="Delete scene" class="p-1 text-zinc-500 hover:text-rose-400 rounded transition"><Trash2 class="w-3.5 h-3.5" /></button>
               </div>
             </div>
           </div>
+
         </div>
       </template>
     </div>
@@ -79,7 +166,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
-import { BookMarked, Library, Sparkles, FolderPlus, FilePlus, ChevronRight, ChevronDown, BookOpen, Pencil, Archive, Trash2, Folder, Plus, FileText } from '@lucide/vue'
+import { BookMarked, Library, FolderPlus, FilePlus, ChevronRight, ChevronDown, BookOpen, Pencil, Archive, Trash2, Folder, Plus, FileText, GripVertical } from '@lucide/vue'
 
 import { API_BASE } from '@/api'
 
@@ -89,6 +176,137 @@ const toggleCollapse = (id) => { collapsed.value[id] = !collapsed.value[id] }
 
 const editingNodeId = ref(null)
 const editingTitle = ref('')
+
+// Native Drag and Drop State
+const draggedScene = ref(null)
+const draggedParentChapter = ref(null)
+const dragOverSceneId = ref(null)
+const dragOverChapterId = ref(null)
+
+const onDragStart = (scene, chapter, event) => {
+  draggedScene.value = scene
+  draggedParentChapter.value = chapter
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', scene.id)
+}
+
+const onDragOverScene = (sceneId) => {
+  if (draggedScene.value && draggedScene.value.id !== sceneId) {
+    dragOverSceneId.value = sceneId
+  }
+}
+
+const onDragLeaveScene = (sceneId) => {
+  if (dragOverSceneId.value === sceneId) {
+    dragOverSceneId.value = null
+  }
+}
+
+const onDragOverChapter = (chapterId) => {
+  if (draggedScene.value) {
+    dragOverChapterId.value = chapterId
+  }
+}
+
+const onDragLeaveChapter = (chapterId) => {
+  if (dragOverChapterId.value === chapterId) {
+    dragOverChapterId.value = null
+  }
+}
+
+const onDragEnd = () => {
+  draggedScene.value = null
+  draggedParentChapter.value = null
+  dragOverSceneId.value = null
+  dragOverChapterId.value = null
+}
+
+// Dropped between scenes (Reorder in place)
+const onDropOnScene = async (targetScene, targetChapter, event) => {
+  event.preventDefault()
+  if (!draggedScene.value || draggedScene.value.id === targetScene.id) {
+    onDragEnd()
+    return
+  }
+
+  const movingScene = draggedScene.value
+  const fromChapter = draggedParentChapter.value
+
+  // Remove moving scene from its original chapter list
+  fromChapter.children = fromChapter.children.filter(s => s.id !== movingScene.id)
+
+  // Find insert position in target chapter
+  const targetIdx = targetChapter.children.findIndex(s => s.id === targetScene.id)
+  targetChapter.children.splice(targetIdx, 0, movingScene)
+  movingScene.parent_id = targetChapter.id
+
+  // Recalculate fractional sort orders
+  const batch = []
+  targetChapter.children.forEach((s, idx) => {
+    s.sort_order = (idx + 1) * 10.0
+    batch.push({
+      id: s.id,
+      parent_id: targetChapter.id,
+      sort_order: s.sort_order
+    })
+  })
+
+  onDragEnd()
+
+  try {
+    const res = await fetch(`${API_BASE}/api/binder/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: batch })
+    })
+    if (!res.ok) throw new Error('Reordering failed on server')
+    showToast(`Moved "${movingScene.title}"`, 'info')
+  } catch (err) {
+    showToast('Failed to save scene order.', 'error')
+    await fetchTree()
+  }
+}
+
+// Dropped onto a chapter folder (Migrate scene to new chapter)
+const onDropOnChapter = async (targetChapterId, targetChapter) => {
+  if (!draggedScene.value || draggedParentChapter.value?.id === targetChapterId) {
+    onDragEnd()
+    return
+  }
+
+  const movingScene = draggedScene.value
+  const fromChapter = draggedParentChapter.value
+
+  fromChapter.children = fromChapter.children.filter(s => s.id !== movingScene.id)
+  targetChapter.children.push(movingScene)
+  movingScene.parent_id = targetChapterId
+
+  const batch = []
+  targetChapter.children.forEach((s, idx) => {
+    s.sort_order = (idx + 1) * 10.0
+    batch.push({
+      id: s.id,
+      parent_id: targetChapterId,
+      sort_order: s.sort_order
+    })
+  })
+
+  onDragEnd()
+  collapsed.value[targetChapterId] = false
+
+  try {
+    const res = await fetch(`${API_BASE}/api/binder/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: batch })
+    })
+    if (!res.ok) throw new Error('Migration failed')
+    showToast(`Moved "${movingScene.title}" to ${targetChapter.title}`, 'info')
+  } catch (err) {
+    showToast('Failed to migrate scene.', 'error')
+    await fetchTree()
+  }
+}
 
 const fetchTree = async () => { await store.fetchTree() }
 
@@ -103,33 +321,35 @@ const selectNode = async (id) => {
 const addChapter = async () => {
   const bookId = store.activeBookId
   if (!bookId) {
-    showToast('Create or select a manuscript first.', 'info')
+    showToast('Select a manuscript first.', 'info')
     return
   }
   try {
-    const response = await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: bookId, node_type: 'CHAPTER', title: 'New Chapter' }) })
-    if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to create chapter`)
-    store.readerStoryCache = null
+    const response = await fetch(`${API_BASE}/api/node`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ parent_id: bookId, node_type: 'CHAPTER', title: 'New Chapter' }) 
+    })
+    if (!response.ok) throw new Error('Failed to create chapter')
     collapsed.value[bookId] = false
     await fetchTree()
   } catch (e) { showToast(e.message, "error") }
 }
 
 const addScene = async () => {
-  if (!store.getBook()) {
-    showToast('Create or select a manuscript first.', 'info')
-    return
-  }
   const chapterId = store.getBook()?.children?.find(node => node.node_type === 'CHAPTER')?.id
   if (chapterId) { addSceneTo(chapterId) } else { showToast("Create a chapter first.", "info") }
 }
 
 const addSceneTo = async (chId) => {
   try {
-    const res = await fetch(`${API_BASE}/api/node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: chId, node_type: 'SCENE', title: 'New Scene' }) })
-    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to create scene`)
+    const res = await fetch(`${API_BASE}/api/node`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ parent_id: chId, node_type: 'SCENE', title: 'New Scene' }) 
+    })
+    if (!res.ok) throw new Error('Failed to create scene')
     const data = await res.json()
-    store.readerStoryCache = null
     await fetchTree()
     await selectNode(data.id)
   } catch (e) { showToast(e.message, "error") }
@@ -139,7 +359,10 @@ const startRename = (node, event) => {
   if (event) event.stopPropagation()
   editingNodeId.value = node.id
   editingTitle.value = node.title
-  nextTick(() => { const el = document.getElementById(`rename-${node.id}`); if (el) { el.focus(); el.select() } })
+  nextTick(() => { 
+    const el = document.getElementById(`rename-${node.id}`)
+    if (el) { el.focus(); el.select() } 
+  })
 }
 
 const saveRename = async (node) => {
@@ -150,75 +373,39 @@ const saveRename = async (node) => {
   node.title = newTitle
   if (store.activeNode?.id === node.id) store.activeNode.title = newTitle
   try {
-    const response = await fetch(`${API_BASE}/api/node/${node.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle }) })
-    if (!response.ok) throw new Error(`HTTP ${response.status}: Rename failed`)
-    store.readerStoryCache = null
+    await fetch(`${API_BASE}/api/node/${node.id}`, { 
+      method: 'PUT', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ title: newTitle }) 
+    })
     await fetchTree()
   } catch(e) { showToast("Rename failed.", "error") }
 }
 
 const checkInBook = async (book) => {
-if (!window.confirm(`Check in "${book.title}" to the Bookcase?\n\nIt will be removed from the active Binder and kept safe until you check it out again.`)) return
+  if (!window.confirm(`Check in "${book.title}" to the Bookcase?\n\nIt will be preserved outside the active Binder.`)) return
   try {
     await fetch(`${API_BASE}/api/vault/${book.id}/toggle`, { method: 'POST' })
-    if (store.activeNode?.book_id === book.id || store.activeNode?.id === book.id || store.activeNode?.parent_id === book.id) { store.activeNode = null }
+    if (store.activeNode?.book_id === book.id || store.activeNode?.id === book.id) { 
+      store.activeNode = null 
+    }
     await fetchTree()
-} catch (e) { showToast("Could not check in the book.", "error") }
+  } catch (e) { showToast("Could not check in the book.", "error") }
 }
 
 const deleteNode = async (node) => {
   const type = node.node_type ? node.node_type.toLowerCase() : 'item'
   if (!window.confirm(`Delete ${type} "${node.title}"? This cannot be undone.`)) return
   try {
-    const res = await fetch(`${API_BASE}/api/node/${node.id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error('Delete failed on server')
-    store.readerStoryCache = null
-    // Crucial: Clear active node so it doesn't auto-save and recreate itself
-    if (store.activeNode?.id === node.id || store.activeNode?.parent_id === node.id || store.activeNode?.book_id === node.id) {
-      store.activeNode = null
-    }
+    await fetch(`${API_BASE}/api/node/${node.id}`, { method: 'DELETE' })
+    if (store.activeNode?.id === node.id) store.activeNode = null
     await fetchTree()
     showToast(`Deleted ${node.title}`, 'info')
   } catch (e) { showToast("Delete failed.", "error") }
 }
 
-const autoTitleScenes = async () => {
-  store.saveStatus = 'Local AI generating titles...'
-  try {
-    const bId = store.activeBookId || null
-    const res = await fetch(`${API_BASE}/api/binder/auto-title-scenes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ book_id: bId }) })
-    if (!res.ok) throw new Error('Auto-titling failed')
-    store.readerStoryCache = null
-    const result = await res.json()
-    if (!result.ai_generated) {
-      showToast('AI is off or Ollama is not installed, so scenes were not retitled.', 'info')
-    } else if (result.updated_count) {
-      showToast(`AI titled ${result.updated_count} scene(s). Rename any you dislike.`, 'info')
-    } else {
-      const reasons = []
-      if (result.skipped_named) reasons.push(`${result.skipped_named} already have names (only “Scene 1”-style or untitled scenes are retitled)`)
-      if (result.skipped_short) reasons.push(`${result.skipped_short} are too short`)
-      if (result.failed) reasons.push(`${result.failed} failed${result.error ? `: ${result.error}` : ' (the AI gave no usable title)'}`)
-      showToast(`No scenes were retitled: ${reasons.join('; ') || 'there are no scenes in this book'}.`, 'info')
-    }
-    await fetchTree()
-  } catch(e) { showToast("Auto-titling failed.", "error") }
-}
-
-const revealBook = async (event) => {
-  const bookId = event.detail?.bookId
-  if (!bookId) return
-  await fetchTree()
-  store.tree.forEach(book => { collapsed.value[book.id] = book.id !== bookId })
-  store.setActiveBook(bookId)
-  await nextTick()
-  document.getElementById('book-node-' + bookId)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-}
-
 onMounted(() => {
   fetchTree()
   window.addEventListener('refresh-tree', fetchTree)
-  window.addEventListener('reveal-book', revealBook)
 })
-onUnmounted(() => window.removeEventListener('reveal-book', revealBook))
 </script>
