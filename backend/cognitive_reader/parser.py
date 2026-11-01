@@ -7,6 +7,24 @@ from typing import Dict, List, Optional, Set, Tuple
 ABBREVIATIONS = {"mr.", "mrs.", "ms.", "dr.", "prof.", "st.", "capt.", "gen.", "lt.", "col.", "vs.", "etc."}
 STOPWORDS_DETERMINERS = {"the", "a", "an", "his", "her", "their", "my", "our", "your", "its", "this", "that", "these", "those"}
 
+# Words that can be capitalized at the start of a sentence/quote but are NEVER character names
+EXCLUDED_FROM_ENTITIES = {
+    # Pronouns & Determiners
+    "the", "a", "an", "his", "her", "their", "my", "our", "your", "its", "this", "that", "these", "those",
+    "what", "who", "which", "where", "when", "why", "how", "it", "he", "she", "they", "we", "you", "i",
+    "nothing", "something", "anything", "everything", "someone", "anyone", "everyone", "nobody", "somebody",
+    "all", "none", "some", "any", "one", "two", "three", "both", "each", "every",
+    # Discourse markers, adverbs & interjections
+    "anyway", "though", "although", "however", "meanwhile", "besides", "instead", "well", "oh", "ah", "shh",
+    "yeah", "yes", "no", "fine", "right", "please", "listen", "look", "see", "now", "still", "then", "so",
+    "suddenly", "luckily", "hopefully", "surely", "actually", "perhaps", "maybe", "already", "soon", "later",
+    # Conjunctions & Prepositions
+    "and", "but", "or", "for", "with", "without", "from", "into", "onto", "under", "over", "behind", "before", "after",
+    # Common verbs that start sentences
+    "pursed", "decided", "managed", "doubted", "attempted", "frowned", "chuckled", "laughed", "leaving", "leaning",
+    "poked", "pulled", "stepped", "turned", "smiled", "nodded", "stopped", "approached", "walked", "stood", "took"
+}
+
 TEMPORAL_MARKERS = {
     "later", "morning", "evening", "night", "dawn", "dusk", "yesterday",
     "tomorrow", "hours", "days", "weeks", "years", "suddenly", "meanwhile", "afterward",
@@ -32,11 +50,15 @@ NEGATION_RE = re.compile(
 )
 
 PROMISE_CUE_RE = re.compile(
-    r"\b(vowed|swore|promised|warned|hid|buried|secreted|planted|tucked\s+away)\b[^\.!\?]{3,90}[\.!\?]",
+    r"\b(?:"
+    r"promise[sd]?|swore|sworn|vowed|pledg(?:ed?|ing)|"
+    r"(?:would|will|was going to|were going to|determined to|resolved to|set out to)\s+[a-z]{3,15}|"
+    r"one way or another|no matter what|at all costs|whatever it takes|"
+    r"(?:must|have to|has to|need to|needs to)\s+(?:find|reach|stop|protect|save|kill|discover|escape|become|prove|return|free)"
+    r")\b",
     re.IGNORECASE,
 )
 
-# Captures the full simile target without cutting off 'an' into 'n'
 COPULA_AND_SIMILE_RE = re.compile(
     r"\b(?:the\s+|a\s+|an\s+|his\s+|her\s+|their\s+|my\s+|our\s+)?([a-z]+)\s+"
     r"(?:is|was|were|are|became|becomes|remained|felt|seemed|looked|sounded)\s+"
@@ -51,12 +73,12 @@ DENOMINAL_VERB_RE = re.compile(
 )
 
 APPOSITIVE_ALIAS_RE = re.compile(
-    r"\b((?:Sir|Dame|Lord|Lady|King|Queen|Weapons\s+Master)\s+[A-Z][a-z]+|[A-Z][a-z]+)\s*,\s+"
+    r"\b((?:Sir|Dame|Lord|Lady|King|Queen|Weapons\s+Master|Miss)\s+[A-Z][a-z]+|[A-Z][a-z]+)\s*,\s+"
     r"(the\s+[a-z\s]{3,35}?)\s*,"
 )
 
 SELF_INTRO_ALIAS_RE = re.compile(
-    r'["\']I\'m\s+((?:Sir|Dame|Lord|Lady|Weapons\s+Master)?\s*[A-Z][a-z]+)\b[^"\']*["\']\s*(?:,\s*)?(the\s+[a-z]+)'
+    r'["\']I\'m\s+((?:Sir|Dame|Lord|Lady|Weapons\s+Master|Miss)?\s*[A-Z][a-z]+)\b[^"\']*["\']\s*(?:,\s*)?(the\s+[a-z]+)'
 )
 
 PASSIVE_BY_RE = re.compile(
@@ -83,7 +105,7 @@ SVO_ACTIVE_RE = re.compile(
 
 DIALOGUE_QUOTE_RE = re.compile(r'["“]([^"”]{1,350})["”]')
 
-HONORIFICS = {"Sir", "Dame", "Lord", "Lady", "King", "Queen", "Captain", "Master", "Dane", "Weapons"}
+HONORIFICS = {"Sir", "Dame", "Lord", "Lady", "King", "Queen", "Captain", "Master", "Dane", "Miss", "Mr", "Mrs"}
 
 IRREGULAR_LEMMAS = {
     "extinguished": "extinguish", "strangled": "strangle", "choked": "choke",
@@ -110,7 +132,6 @@ MORPH_SUFFIXES: List[Tuple[str, str, float]] = [
     ("able", "CAPABLE", 0.85), ("ible", "CAPABLE", 0.85), ("ly", "ADVERB", 0.95),
 ]
 
-# Common words that must never trigger N-gram split warnings (e.g. "knight was")
 STOPWORD_GRAMMAR = {
     "was", "is", "had", "has", "are", "were", "the", "a", "an", "in", "on", 
     "to", "of", "and", "but", "or", "for", "with", "at", "by", "from", "up", "out",
@@ -207,18 +228,15 @@ def extract_appositive_aliases(paragraph: str) -> Dict[str, str]:
     for match in APPOSITIVE_ALIAS_RE.finditer(norm):
         proper_name = match.group(1).strip()
         desc_phrase = match.group(2).strip().lower()
+        if proper_name.lower() in EXCLUDED_FROM_ENTITIES:
+            continue
         aliases[desc_phrase] = proper_name
-        for color in ("red", "blue", "purple", "green", "yellow"):
-            if color in desc_phrase and "knight" in desc_phrase:
-                aliases[f"the {color} knight"] = proper_name
-                aliases[f"{color} knight"] = proper_name
-        if "banneret" in desc_phrase:
-            aliases["the banneret"] = proper_name
-            aliases["banneret"] = proper_name
 
     for match in SELF_INTRO_ALIAS_RE.finditer(norm):
         proper_name = match.group(1).strip()
         role_phrase = match.group(2).strip().lower()
+        if proper_name.lower() in EXCLUDED_FROM_ENTITIES:
+            continue
         aliases[role_phrase] = proper_name
         aliases[role_phrase.replace("the ", "")] = proper_name
 
@@ -230,8 +248,14 @@ def detect_entity_collisions(
     entity_counts: Counter,
 ) -> List[Tuple[str, str, int, int, int]]:
     collisions: List[Tuple[str, str, int, int, int]] = []
-    rare_entities = [e for e, c in entity_counts.items() if c <= 2 and len(e) >= 4]
-    frequent_entities = [e for e, c in entity_counts.items() if c >= 3 and len(e) >= 4]
+    rare_entities = [
+        e for e, c in entity_counts.items() 
+        if c <= 2 and len(e) >= 4 and e.lower() not in EXCLUDED_FROM_ENTITIES
+    ]
+    frequent_entities = [
+        e for e, c in entity_counts.items() 
+        if c >= 3 and len(e) >= 4 and e.lower() not in EXCLUDED_FROM_ENTITIES
+    ]
 
     for rare in rare_entities:
         for freq in frequent_entities:
@@ -257,7 +281,7 @@ def detect_compound_ngram_anomalies(
     unigram_counts: Counter = Counter()
     for p in paragraphs:
         for w in re.findall(r"[a-z]+", p.lower()):
-            if len(w) >= 7 and w not in STOPWORD_GRAMMAR:
+            if len(w) >= 7 and w not in EXCLUDED_FROM_ENTITIES:
                 unigram_counts[w] += 1
 
     frequent_compounds = [w for w, c in unigram_counts.items() if c >= 3]
@@ -269,16 +293,14 @@ def detect_compound_ngram_anomalies(
         tokens = re.findall(r"[a-z]+", p.lower())
         for i in range(len(tokens) - 1):
             w1, w2 = tokens[i], tokens[i + 1]
-            if w1 in STOPWORD_GRAMMAR or w2 in STOPWORD_GRAMMAR:
+            if w1 in EXCLUDED_FROM_ENTITIES or w2 in EXCLUDED_FROM_ENTITIES:
                 continue
             if len(w1) < 3 or len(w2) < 3:
                 continue
             joined = w1 + w2
-            # Only compare if the joined compound is actually long enough
             if len(joined) < 8:
                 continue
             for target_word in frequent_compounds:
-                # Do not flag if w1 is identical to target_word minus 's' (e.g. knight vs knights)
                 if w1 == target_word or target_word.startswith(w1):
                     continue
                 if abs(len(joined) - len(target_word)) <= 1:
@@ -365,9 +387,9 @@ def extract_proper_entities(
     norm = normalize_text(paragraph)
     entities: List[str] = []
 
-    # 1. Match full multi-word titles: 'Weapons Master Gorbal', 'Sir Grinn'
+    # 1. Multi-word titles: 'Lord Perring', 'Miss Reginon', 'Sir Grinn'
     titled_matches = re.findall(
-        r"\b((?:Sir|Dame|Dane|Lord|Lady|King|Queen|Weapons\s+Master|Master|Captain)\s+[A-Z][a-z]+)\b", norm
+        r"\b((?:Sir|Dame|Dane|Lord|Lady|King|Queen|Weapons\s+Master|Master|Captain|Miss|Mr|Mrs)\s+[A-Z][a-z]+)\b", norm
     )
     titled_head_words: Set[str] = set()
     for full_title in titled_matches:
@@ -376,26 +398,19 @@ def extract_proper_entities(
         if full_title not in entities:
             entities.append(full_title)
 
-    common_starters = {
-        "The", "A", "An", "He", "She", "They", "It", "We", "I", "You", "His", "Her",
-        "In", "On", "At", "When", "While", "After", "Before", "Although", "Had", "If",
-        "Because", "Oh", "Well", "Yeah", "Yes", "No", "Fine", "But", "And", "Perhaps",
-        "Grief", "Melancholy", "Silence", "Time", "Hope", "Fear", "Anger", "Bureaucracy",
-        "Holding", "Clutching", "Drawing", "Once", "Still", "Soon", "Every", "Two",
-        "Weapons",  # Never allow raw "Weapons" as a standalone person
-    }
-
     for sent in split_sentences(norm):
         clean_sent = re.sub(r'^["\'\s]+', "", sent)
         words = re.findall(r"[A-Za-z]+", clean_sent)
         for idx, w in enumerate(words):
             if w in titled_head_words or w in HONORIFICS:
                 continue
-            if w[0].isupper() and len(w) > 2:
-                if idx == 0 and w in common_starters:
-                    continue
-                if w not in common_starters and w not in entities:
-                    entities.append(w)
+            if w.lower() in EXCLUDED_FROM_ENTITIES:
+                continue
+            # A lone capitalized word at index 0 is sentence capitalization unless verified
+            if idx == 0:
+                continue
+            if w[0].isupper() and len(w) > 2 and w not in entities:
+                entities.append(w)
 
     if alias_map:
         low_para = norm.lower()
@@ -428,7 +443,7 @@ def extract_svo_triples(
         if part_match:
             part_verb, part_obj, main_subj = part_match.group(1), part_match.group(2), part_match.group(3)
             resolved_subj = _resolve_subject(main_subj, pronoun_resolver)
-            is_prop = resolved_subj[0].isupper() and resolved_subj.lower() not in STOPWORDS_DETERMINERS
+            is_prop = resolved_subj[0].isupper() and resolved_subj.lower() not in EXCLUDED_FROM_ENTITIES
             triples.append(
                 SVOTriple(
                     raw_span=part_match.group(0).strip(),
@@ -449,7 +464,7 @@ def extract_svo_triples(
             verb_part = p_match.group(2).strip()
             agent_subj = p_match.group(3).strip().split()[-1]
             resolved_agent = _resolve_subject(agent_subj, pronoun_resolver)
-            is_prop = resolved_agent[0].isupper() and resolved_agent.lower() not in STOPWORDS_DETERMINERS
+            is_prop = resolved_agent[0].isupper() and resolved_agent.lower() not in EXCLUDED_FROM_ENTITIES
             passive_spans.add(p_match.group(0))
             triples.append(
                 SVOTriple(
@@ -476,12 +491,12 @@ def extract_svo_triples(
                 continue
 
             resolved_subj = _resolve_subject(subj_raw, pronoun_resolver)
-            is_prop = resolved_subj[0].isupper() and resolved_subj.lower() not in STOPWORDS_DETERMINERS
+            is_prop = resolved_subj[0].isupper() and resolved_subj.lower() not in EXCLUDED_FROM_ENTITIES
 
             if is_prop and pronoun_resolver is not None:
                 pronoun_resolver["LAST"] = resolved_subj
                 if resolved_subj.endswith(("a", "e", "i")) or any(
-                    f in resolved_subj for f in ("Mara", "Elena", "Lindsey", "Sarah", "Selica", "Verona")
+                    f in resolved_subj for f in ("Mara", "Elena", "Lindsey", "Sarah", "Selica", "Verona", "Ellie", "Cali", "Grace")
                 ):
                     pronoun_resolver["SHE"] = resolved_subj
                 else:
