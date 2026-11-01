@@ -75,7 +75,7 @@ def _is_prose(paragraph: str) -> bool:
     letters = [c for c in stripped if c.isalpha()]
     if letters and all(c.isupper() for c in letters):
         return False
-    return len(stripped.split()) > 8 or stripped[-1] in '.!?"”’—…'
+    return len(stripped.split()) > 8 or (stripped and stripped[-1] in '.!?"”’—…')
 
 
 def _words(text: str) -> int:
@@ -93,8 +93,8 @@ def _first(text: str, pattern: re.Pattern) -> str:
 def _capitalized_terms(text: str) -> Counter:
     counts: Counter = Counter()
     for sentence in _sentences(text):
-        for token in re.findall(r"\b[A-Z][a-z]{2,}\b", sentence)[1:] if sentence[:1].isupper() \
-                else re.findall(r"\b[A-Z][a-z]{2,}\b", sentence):
+        tokens = re.findall(r"\b[A-Z][a-z]{2,}\b", sentence)
+        for token in tokens[1:] if sentence[:1].isupper() else tokens:
             if token.lower() not in _SKIP_TERMS:
                 counts[token] += 1
     return counts
@@ -147,8 +147,7 @@ def _tempo(paragraphs: list[str]) -> list[dict]:
         window = range(start, start + 5)
         short = [i for i in window if counts[i] <= 12 and not _has_quote(paragraphs[i])]
         mean = sum(counts[i] for i in window) / 5
-        if len(short) >= 2 and mean <= 20 and min(counts[i] for i in window) <= 5 \
-                and counts[start - 1] >= 30:
+        if len(short) >= 2 and mean <= 20 and min(counts[i] for i in window) <= 5 and counts[start - 1] >= 30:
             if best is None or (len(short), -mean) > (len(best[2]), -best[0]):
                 best = (mean, start, short)
     if not best:
@@ -284,15 +283,21 @@ def _voice(paragraphs: list[str], text: str) -> list[dict]:
     rate = markers / words * 1000
     if rate < VOICE_THRESHOLD:
         return []
+
+    # Safe evidence extraction that prevents IndexError when similes is empty
+    lead_evidence = similes[0] if similes else (quips[0] if quips else (questions[0] if questions else text[:180]))
+    target_para = _paragraph_index(paragraphs, lead_evidence) or 1
+    secondary = quips[0] if quips and similes else ""
+
     return [_item(
         "voice", "The narrator’s personality is carrying the scene",
         f"{len(similes)} comparisons, {len(quips)} one-beat asides, "
         f"{len(questions)} questions asked out loud and {asides} dashed asides in "
         f"{words} words. Readers will hear a personality before they follow a plot, "
         "and the scene works as a voice-first read.",
-        "Voice markers per thousand words", _paragraph_index(paragraphs, similes[0]) or 1,
-        similes[0] if similes else quips[0],
-        quips[0] if quips and similes else "",
+        "Voice markers per thousand words", target_para,
+        lead_evidence,
+        secondary,
     )]
 
 
