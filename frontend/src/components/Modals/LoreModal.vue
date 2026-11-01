@@ -10,16 +10,16 @@
       <div class="flex items-center justify-between border-b border-zinc-800 pb-3 shrink-0">
         <div class="flex items-center gap-4">
           <h3 class="text-base font-bold text-white flex items-center gap-2">
-            <BookOpenCheck class="w-5 h-5 text-amber-500" /> Living Style Sheet & Lore
+            <BookOpenCheck class="w-5 h-5 text-amber-500" /> Living Style Sheet & Canon Rules
           </h3>
           <button 
             @click="auditSceneLore" 
             :disabled="isAuditingLore || !store.activeNode?.content" 
-            class="px-3 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-[10px] font-bold uppercase transition disabled:opacity-50 flex items-center gap-1.5"
-            :title="store.aiEnabled ? 'Spelling of lore terms is checked by text matching; contradictions are judged by local AI' : 'Checks the scene for misspelled lore terms'"
+            class="px-3 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-[10px] font-bold uppercase transition disabled:opacity-50 flex items-center gap-1.5"
+            title="Scan scene for spelling drift against established canon"
           >
-            <ShieldAlert class="w-3.5 h-3.5" />
-            <span>{{ isAuditingLore ? 'Auditing...' : store.aiEnabled ? 'Audit Scene (text + AI)' : 'Audit Scene' }}</span>
+            <ShieldCheck class="w-3.5 h-3.5" />
+            <span>{{ isAuditingLore ? 'Scanning...' : 'Audit Spelling Drift' }}</span>
           </button>
         </div>
         <button @click="closeModal" class="text-zinc-500 hover:text-white transition">
@@ -27,22 +27,36 @@
         </button>
       </div>
 
-      <!-- Lore Contradiction Alert Box -->
+      <!-- Lore Contradiction & Drift Alert Box with 1-Click Fix -->
       <div 
         v-if="loreDiscrepancies.length" 
-        class="bg-rose-950/40 border border-rose-900/50 rounded-xl p-3 shrink-0 space-y-2 max-h-40 overflow-y-auto custom-scrollbar"
+        class="bg-amber-950/20 border border-amber-800/50 rounded-xl p-3 shrink-0 space-y-2 max-h-48 overflow-y-auto custom-scrollbar"
       >
-        <div class="text-[10px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
-          <AlertCircle class="w-3.5 h-3.5" /> Lore Contradictions Detected ({{ loreDiscrepancies.length }})
+        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center justify-between font-mono">
+          <span class="flex items-center gap-1.5">
+            <AlertCircle class="w-3.5 h-3.5 text-amber-500" /> Canon Spelling Drift Detected ({{ loreDiscrepancies.length }})
+          </span>
+          <span class="text-zinc-500 text-[9px]">Levenshtein String Verification</span>
         </div>
+
         <div 
           v-for="(disc, i) in loreDiscrepancies" 
           :key="i" 
-          class="p-2.5 bg-zinc-950 rounded border border-rose-900/40 text-xs space-y-1"
+          class="p-2.5 bg-zinc-950 rounded border border-amber-900/40 text-xs space-y-2"
         >
-          <div class="font-bold text-rose-300 font-mono text-[11px]">Rule Broken: {{ disc.rule_broken }} <span class="text-[9px] text-zinc-500 uppercase">{{ disc.source === 'ai' ? 'AI' : 'text match' }}</span></div>
-          <div class="text-zinc-400 italic line-clamp-2 font-serif">"{{ disc.violation }}"</div>
-          <div class="text-zinc-300 leading-snug">{{ disc.explanation }}</div>
+          <div class="flex items-center justify-between">
+            <div class="font-bold text-zinc-200 font-mono text-[11px]">
+              Found: <span class="text-rose-400">"{{ disc.violation }}"</span> ➔ Canon: <span class="text-emerald-400">"{{ disc.rule_broken }}"</span>
+            </div>
+            <button 
+              @click="batchReplaceCanon(disc.violation, disc.rule_broken)"
+              class="px-2 py-0.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white font-mono text-[10px] transition flex items-center gap-1 shadow"
+              title="Replace this misspelled term across the entire book"
+            >
+              <Wand2 class="w-3 h-3" /> Fix Across Manuscript
+            </button>
+          </div>
+          <div class="text-zinc-400 text-[10px] leading-snug">{{ disc.explanation }}</div>
         </div>
       </div>
 
@@ -51,17 +65,8 @@
         
         <!-- Left: Rule Definition Form -->
         <div class="w-1/3 border-r border-zinc-800 pr-4 space-y-3 shrink-0 overflow-y-auto custom-scrollbar">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-amber-400 font-mono uppercase text-[10px] tracking-wider">Establish Rule</span>
-            <button 
-              @click="extractLoreFromScene" 
-              :disabled="isExtractingLore || !store.activeNode?.content" 
-              class="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded border border-amber-500/30 text-[9px] font-bold uppercase transition disabled:opacity-50 flex items-center gap-1"
-              :title="store.aiEnabled ? 'Invented names come from a text scan; definitions come from local AI' : 'Finds invented names in the scene'"
-            >
-              <Sparkles class="w-3 h-3" />
-              <span>{{ isExtractingLore ? 'Scanning...' : store.aiEnabled ? 'Extract (text + AI)' : 'Extract' }}</span>
-            </button>
+          <div class="text-xs font-bold text-amber-400 font-mono uppercase text-[10px] tracking-wider mb-2">
+            Establish Rule
           </div>
 
           <input 
@@ -76,7 +81,7 @@
           >
             <option value="LORE">World Lore</option>
             <option value="SPELLING">Spelling & Orthography</option>
-            <option value="MAGIC">Magic / Physics Rule</option>
+            <option value="MAGIC">Magic / Technology Rule</option>
           </select>
 
           <input 
@@ -88,7 +93,7 @@
           <textarea 
             v-model="newLore.rule_definition" 
             rows="4" 
-            placeholder="Define universal law or fact..." 
+            placeholder="Define universal law or spelling standard..." 
             class="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-200 text-xs focus:border-amber-500/50 focus:outline-none transition resize-none"
           ></textarea>
 
@@ -97,7 +102,7 @@
             :disabled="!newLore.term || !newLore.rule_definition"
             class="w-full py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 font-bold rounded text-xs transition shadow"
           >
-            Save Rule
+            Save Canon Rule
           </button>
         </div>
 
@@ -117,7 +122,7 @@
             </button>
 
             <div class="flex items-baseline gap-2 mb-1">
-              <span class="font-bold text-amber-400 text-sm">{{ rule.term }}</span>
+              <span class="font-bold text-amber-400 text-sm font-serif">{{ rule.term }}</span>
               <span v-if="rule.pronunciation" class="text-[10px] text-zinc-500 font-mono">
                 /{{ rule.pronunciation }}/
               </span>
@@ -130,7 +135,7 @@
           </div>
 
           <div v-if="!store.loreRules?.length" class="text-center py-12 text-xs text-zinc-500 italic">
-            No lore rules established. Define canon on the left or extract from your scene.
+            No canon rules established yet. Define universal spellings or lore on the left.
           </div>
         </div>
 
@@ -143,7 +148,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { store, showToast } from '../../store.js'
-import { BookOpenCheck, X, Trash2, ShieldAlert, AlertCircle, Sparkles } from '@lucide/vue'
+import { BookOpenCheck, X, Trash2, ShieldCheck, AlertCircle, Wand2 } from '@lucide/vue'
 
 import { API_BASE } from '@/api'
 
@@ -154,18 +159,18 @@ const newLore = ref({
   pronunciation: ''
 })
 
-const isExtractingLore = ref(false)
 const isAuditingLore = ref(false)
 const loreDiscrepancies = ref([])
 
 const closeModal = () => {
   store.toggleModal('lore', false)
+  loreDiscrepancies.value = []
 }
 
 const fetchLore = async () => {
   try {
     const res = await fetch(`${API_BASE}/api/lore`)
-    if (!res.ok) throw new Error('Failed to load lore')
+    if (!res.ok) throw new Error('Failed to load style sheet')
     store.loreRules = await res.json()
   } catch(e) { 
     store.loreRules = [] 
@@ -184,7 +189,7 @@ const saveRule = async () => {
     if (!res.ok) throw new Error('Failed to persist rule')
     newLore.value = { term: '', category: 'LORE', rule_definition: '', pronunciation: '' }
     await fetchLore()
-    showToast('World law committed to canon.', 'info')
+    showToast('Canon rule committed to style sheet.', 'info')
   } catch(e) {
     showToast(e.message, 'error')
   }
@@ -197,37 +202,6 @@ const deleteRule = async (term) => {
     await fetchLore()
   } catch(e) {
     showToast('Failed to delete rule', 'error')
-  }
-}
-
-const extractLoreFromScene = async () => {
-  if (!store.activeNode?.content) return
-  isExtractingLore.value = true
-  try {
-    const res = await fetch(`${API_BASE}/api/lore/extract`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scene_text: store.activeNode.content })
-    })
-    if (!res.ok) throw new Error('Lore extraction failed')
-    const data = await res.json()
-    if (data.proposed_lore && data.proposed_lore.length > 0) {
-      const suggestion = data.proposed_lore[0]
-      newLore.value = {
-        term: suggestion.term,
-        category: suggestion.category || 'LORE',
-        rule_definition: suggestion.rule_definition,
-        pronunciation: suggestion.pronunciation || ''
-      }
-      const by = suggestion.source === 'ai' ? 'AI' : 'text scan'
-      showToast(store.aiEnabled ? `Suggested by ${by}: "${suggestion.term}". Review before saving.` : `Found "${suggestion.term}". Review before saving.`, 'info')
-    } else {
-      showToast('No new entities or laws detected in this scene.', 'info')
-    }
-  } catch(e) {
-    showToast(e.message, 'error')
-  } finally {
-    isExtractingLore.value = false
   }
 }
 
@@ -245,12 +219,40 @@ const auditSceneLore = async () => {
     const data = await res.json()
     loreDiscrepancies.value = data.discrepancies || []
     if (loreDiscrepancies.value.length === 0) {
-      showToast(data.ai_generated ? 'Lore audit clean (text match + AI).' : store.aiEnabled ? 'No misspellings found (text match only; AI was unavailable).' : 'No misspellings found.', 'info')
+      showToast('All words in scene match canonical style sheet.', 'info')
     }
   } catch(e) {
     showToast(e.message, 'error')
   } finally {
     isAuditingLore.value = false
+  }
+}
+
+const batchReplaceCanon = async (searchTerm, replaceTerm) => {
+  if (!window.confirm(`Replace all occurrences of "${searchTerm}" with "${replaceTerm}" across the entire book?\n\nSnapshots will be archived in the Revision Vault.`)) return
+
+  try {
+    const res = await fetch(`${API_BASE}/api/lore/batch-replace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        search_term: searchTerm,
+        replace_term: replaceTerm,
+        book_id: store.activeBookId || null
+      })
+    })
+    if (!res.ok) throw new Error('Batch replacement failed')
+    const data = await res.json()
+    showToast(`Replaced ${data.occurrences_replaced} occurrence(s) across ${data.scenes_modified} scene(s).`, 'success')
+    
+    // Refresh editor if active scene was modified
+    if (store.activeNode?.id) {
+      await store.loadScene(store.activeNode.id)
+    }
+    // Remove fixed discrepancy from list
+    loreDiscrepancies.value = loreDiscrepancies.value.filter(d => d.violation !== searchTerm)
+  } catch(e) {
+    showToast(e.message, 'error')
   }
 }
 
