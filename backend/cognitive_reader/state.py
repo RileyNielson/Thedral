@@ -3,7 +3,10 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
-from cognitive_reader.models import ContinuityAlert, EpistemicAlert, OpenPromise
+try:
+    from .models import ContinuityAlert, EpistemicAlert, OpenPromise
+except (ImportError, ValueError):
+    from cognitive_reader.models import ContinuityAlert, EpistemicAlert, OpenPromise
 
 
 @dataclass
@@ -45,16 +48,13 @@ class VirtualBrainState:
         self.hippocampus: Dict[str, MemoryTrace] = {}
         self.working_memory: List[str] = []
 
-        # Entity Alias & Collision Tracking
         self.alias_map: Dict[str, str] = {}
         self.entity_mention_counts: Counter = Counter()
         self.entity_first_paragraph: Dict[str, int] = {}
 
-        # Autonomic Nervous System
         self.neurotransmitter_pool: float = 1.0
         self.felt_arousal: float = 0.15
 
-        # 5D Situation Model
         self.current_location: str = "UNSPECIFIED"
         self.lighting: str = "LIT"
         self.active_light_source: Optional[str] = None
@@ -62,28 +62,24 @@ class VirtualBrainState:
         self.inventory: Dict[str, Set[str]] = {}
         self.dominant_protagonist: Optional[str] = None
 
-        # Pronoun Coreference Stack & Gricean Turn Memory
         self.pronoun_stack: Dict[str, str] = {}
         self.last_dialogue_turn: Optional[DialogueTurnRecord] = None
 
-        # Theory of Mind
         self.reader_knowledge: Set[str] = set()
         self.character_knowledge: Dict[str, Set[str]] = {}
         self.fact_danger_weights: Dict[str, float] = {}
 
-        # Relational Affinity & Agency
         self.affinity_ledger: Dict[Tuple[str, str], float] = {}
         self.subject_action_counts: Dict[str, int] = {}
         self.object_target_counts: Dict[str, int] = {}
 
-        # Chekhov Spans & Predictive Priming
         self.promises: List[OpenPromise] = []
         self.primed_concepts: Set[str] = set()
 
     def register_entity_in_stack(self, entity: str) -> None:
         self.pronoun_stack["LAST"] = entity
         if entity.endswith(("a", "e", "i")) or any(
-            f in entity for f in ("Mara", "Elena", "Lindsey", "Sarah", "Selica", "Verona", "Dame")
+            f in entity for f in ("Mara", "Elena", "Lindsey", "Sarah", "Selica", "Verona", "Dame", "Ellie", "Cali", "Grace")
         ):
             self.pronoun_stack["SHE"] = entity
         else:
