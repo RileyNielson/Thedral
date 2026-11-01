@@ -1,6 +1,7 @@
 import time
 import json
 import uuid
+from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -12,6 +13,7 @@ from backend.astrolabe import build_astrolabe_manifest
 
 router = APIRouter(tags=["Binder"])
 
+
 class NodeUpdate(BaseModel):
     title: str | None = None
     synopsis: str | None = None
@@ -20,11 +22,25 @@ class NodeUpdate(BaseModel):
     notes: str | None = None
     status: str | None = None
     card_data: str | dict | None = None
+    parent_id: str | None = None
+    sort_order: float | None = None
+
 
 class NodeCreate(BaseModel):
     parent_id: str | None = None
     node_type: str
     title: str
+
+
+class ReorderItem(BaseModel):
+    id: str
+    parent_id: Optional[str] = None
+    sort_order: float
+
+
+class BatchReorderRequest(BaseModel):
+    items: List[ReorderItem]
+
 
 @router.put("/api/scenes/{node_id}")
 @router.put("/api/node/{node_id}")
@@ -68,8 +84,33 @@ def update_node(node_id: str, payload: NodeUpdate):
     conn.close()
     return {"status": "saved"}
 
+
+@router.post("/api/binder/reorder")
+def batch_reorder_nodes(payload: BatchReorderRequest):
+    """Atomic batch reordering and chapter migration for scenes and chapters."""
+    conn = get_db()
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with conn:
+        for item in payload.items:
+            if item.parent_id is not None:
+                conn.execute("""
+                    UPDATE binder_nodes 
+                    SET parent_id = ?, sort_order = ?, updated_at = ? 
+                    WHERE id = ?
+                """, (item.parent_id, item.sort_order, now, item.id))
+            else:
+                conn.execute("""
+                    UPDATE binder_nodes 
+                    SET sort_order = ?, updated_at = ? 
+                    WHERE id = ?
+                """, (item.sort_order, now, item.id))
+    conn.close()
+    return {"status": "reordered", "count": len(payload.items)}
+
+
 class RestoreRevisionRequest(BaseModel):
     version_num: int
+
 
 @router.post("/api/node/{node_id}/restore")
 @router.post("/api/scenes/{node_id}/restore")
@@ -85,11 +126,8 @@ def restore_node_revision(node_id: str, payload: RestoreRevisionRequest):
         raise HTTPException(404, "Revision not found")
 
     restored_content = row["content"]
-    current = c.execute("SELECT content FROM binder_nodes WHERE id = ?", (node_id,)).fetchone()
-    if not current:
-        conn.close()
-        raise HTTPException(404, "Scene not found")
-    current_content = current["content"] or ""
+    current = c.execute("SELECT content FROM binder_nodes WHERE id = ?", (node_id,))
+    current_content = current.fetchone()["content"] or "" if current else ""
     word_count = len(html_to_text(restored_content).split()) if restored_content else 0
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with conn:
@@ -111,6 +149,7 @@ def restore_node_revision(node_id: str, payload: RestoreRevisionRequest):
     conn.close()
     return {"status": "restored", "version_num": payload.version_num, "word_count": word_count}
 
+
 @router.get("/api/node/{node_id}/revisions")
 @router.get("/api/scenes/{node_id}/revisions")
 def get_node_revisions(node_id: str):
@@ -124,6 +163,7 @@ def get_node_revisions(node_id: str):
     conn.close()
     return rows
 
+
 @router.get("/api/scenes/{node_id}/telemetry")
 @router.get("/api/node/{node_id}/telemetry")
 def get_node_telemetry_endpoint(node_id: str):
@@ -135,6 +175,7 @@ def get_node_telemetry_endpoint(node_id: str):
     if not row:
         raise HTTPException(404, "Node not found")
     return calculate_text_telemetry(row["content"] or "")
+
 
 @router.get("/api/scenes/{node_id}/lens")
 @router.get("/api/node/{node_id}/lens")
@@ -150,18 +191,29 @@ def get_node_lens_endpoint(node_id: str):
     conn.close()
     return manifest
 
+
 @router.post("/api/node")
 def create_node(payload: NodeCreate):
     conn = get_db()
     node_id = f"{payload.node_type.lower()}_{uuid.uuid4().hex[:8]}"
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with conn:
+        # Auto-compute sequential sort order
+        if payload.parent_id:
+            c = conn.cursor()
+            c.execute("SELECT COALESCE(MAX(sort_order), 0.0) FROM binder_nodes WHERE parent_id = ?", (payload.parent_id,))
+            max_sort = float(c.fetchone()[0])
+            new_sort = max_sort + 10.0
+        else:
+            new_sort = 10.0
+
         conn.execute("""
             INSERT INTO binder_nodes (id, parent_id, project_id, node_type, title, sort_order, is_archived, card_data, created_at, updated_at)
-            VALUES (?, ?, 'default', ?, ?, 999.0, 0, '{}', ?, ?)
-        """, (node_id, payload.parent_id, payload.node_type, payload.title, now, now))
+            VALUES (?, ?, 'default', ?, ?, ?, 0, '{}', ?, ?)
+        """, (node_id, payload.parent_id, payload.node_type, payload.title, new_sort, now, now))
     conn.close()
     return {"id": node_id, "title": payload.title}
+
 
 @router.delete("/api/node/{node_id}")
 def delete_node(node_id: str):
@@ -199,6 +251,7 @@ def get_binder_tree():
         else:
             root_nodes.append(node)
     return root_nodes
+
 
 @router.get("/api/scenes/{node_id}")
 @router.get("/api/node/{node_id}")
