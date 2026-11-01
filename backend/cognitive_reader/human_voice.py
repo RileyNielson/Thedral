@@ -14,36 +14,53 @@ def describe_metaphor_naturally(
         )
 
     qualities: List[str] = []
-    if physics.get("mass_weight", 0) >= 0.6:
-        qualities.append("heavy and crushing")
-    elif physics.get("mass_weight", 0) <= -0.6:
-        qualities.append("light and fragile")
 
-    if physics.get("velocity", 0) <= -0.6:
-        qualities.append("stuck in place and impossible to shake")
-    elif physics.get("velocity", 0) >= 0.6:
-        qualities.append("fast and sudden")
+    # 1. Luminance & Light (Checked FIRST so sunsets/stars/firelight are vivid, not boiling)
+    if physics.get("luminance", 0) >= 0.7:
+        qualities.append("radiant and brightly lit")
+    elif physics.get("luminance", 0) >= 0.4:
+        qualities.append("glowing, vivid, and colorful")
+    elif physics.get("luminance", 0) <= -0.6:
+        qualities.append("dark and cloaked in shadow")
 
-    if physics.get("sharpness", 0) >= 0.6:
-        qualities.append("sharp and cutting")
-    elif physics.get("sharpness", 0) <= -0.6:
-        qualities.append("soft and gentle")
-
-    if physics.get("corrosion_decay", 0) >= 0.6:
-        qualities.append("worn down and eating away at things")
-
-    if physics.get("temperature", 0) >= 0.6:
-        qualities.append("burning hot")
+    # 2. Temperature (Graduated: only scorching if temperature is high AND luminance is not dominating)
+    if physics.get("temperature", 0) >= 0.8:
+        qualities.append("searing hot")
+    elif physics.get("temperature", 0) >= 0.4 and physics.get("luminance", 0) < 0.4:
+        qualities.append("warm and comforting")
     elif physics.get("temperature", 0) <= -0.6:
         qualities.append("freezing and numb")
 
+    # 3. Mass & Weight
+    if physics.get("mass_weight", 0) >= 0.6:
+        qualities.append("heavy and crushing")
+    elif physics.get("mass_weight", 0) <= -0.6:
+        qualities.append("light and weightless")
+
+    # 4. Velocity & Motion
+    if physics.get("velocity", 0) <= -0.6:
+        qualities.append("stagnant and stuck in place")
+    elif physics.get("velocity", 0) >= 0.6:
+        qualities.append("kinetic and sudden")
+
+    # 5. Sharpness & Texture
+    if physics.get("sharpness", 0) >= 0.6:
+        qualities.append("sharp and cutting")
+    elif physics.get("sharpness", 0) <= -0.6:
+        qualities.append("soft and blunt")
+
+    # 6. Corrosion & Decay
+    if physics.get("corrosion_decay", 0) >= 0.6:
+        qualities.append("eroded and decaying")
+
+    # 7. Dominance & Agency
     if physics.get("dominance", 0) <= -0.7:
-        qualities.append("suffocating and trapping")
+        qualities.append("trapped and powerless")
     elif physics.get("dominance", 0) >= 0.65:
-        qualities.append("armored, unyielding, and strong")
+        qualities.append("unyielding and dominant")
 
     if not qualities:
-        qualities.append("vivid and physical")
+        qualities.append("vivid and distinct")
 
     feeling_str = (
         qualities[0]
@@ -69,7 +86,7 @@ def describe_metaphor_naturally(
         )
 
     return (
-        f"Comparing `{target_word}` to `{source_phrase}` really works—it makes the image "
+        f"Comparing `{target_word}` to `{source_phrase}` makes the image "
         f"come across as {feeling_str}."
     )
 
