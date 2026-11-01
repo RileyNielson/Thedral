@@ -1,5 +1,6 @@
 import re
 import math
+from collections import Counter
 from backend.config import FILTER_VERBS, CRUTCH_WORDS, TENSION_KEYWORDS
 from backend.text_utils import html_to_text
 from backend.spectrometer import SIGNAL_LEXICONS, analyze_text_signals
@@ -15,11 +16,58 @@ COMPOUND_IDIOM_PATTERNS = [
     r"\bcold shoulder\b", r"\bcold feet\b", r"\bstone cold\b"
 ]
 
+COMMON_PROSE_STOPWORDS = {
+    "the", "and", "that", "this", "with", "from", "have", "were", "been", "there", "their", "they",
+    "what", "when", "where", "which", "would", "could", "should", "about", "into", "then", "them",
+    "more", "some", "like", "just", "over", "only", "other", "after", "before", "while", "said",
+    "asked", "replied", "look", "looked", "looking", "back", "down", "went", "come", "came", "make",
+    "made", "away", "well", "even", "much", "must", "might", "also", "very", "your", "know", "knew"
+}
+
+STRAINED_DIALOGUE_TAGS = {
+    "hissed", "gasped", "groaned", "sneered", "snarled", "barked", "growled", "sighed", "wheezed",
+    "whined", "croaked", "bellowed", "sputtered", "roared", "stammered", "quavered", "snapped"
+}
+
+PASSIVE_VOICE_PATTERN = re.compile(
+    r"\b(?:was|were|is|are|been|being|had\s+been)\s+([a-z]+ed|[a-z]+en)\s+(?:by\s+([a-z]+)|to|in|at)\b",
+    re.IGNORECASE
+)
+
+DIALOGUE_ADVERB_PATTERN = re.compile(
+    r'["”]\s*,?\s*(?:I|[A-Z][a-z]+)\s+(?:said|asked|replied|says|whispered)\s+([a-z]{3,15}ly)\b',
+    re.IGNORECASE
+)
+
+
 def scrub_idioms(text: str) -> str:
     scrubbed = text
     for pattern in COMPOUND_IDIOM_PATTERNS:
         scrubbed = re.sub(pattern, " ", scrubbed, flags=re.IGNORECASE)
     return scrubbed
+
+
+def detect_word_echoes(paragraphs: list[str], window_size: int = 3) -> dict[str, list[dict]]:
+    """Detects unusual words repeated within close proximity (2-3 paragraphs)."""
+    echoes = {}
+    total_paras = len(paragraphs)
+    
+    for i in range(total_paras):
+        window_end = min(total_paras, i + window_size)
+        window_text = " ".join(paragraphs[i:window_end]).lower()
+        words = [w for w in re.findall(r"[a-z]{4,}", window_text) if w not in COMMON_PROSE_STOPWORDS]
+        counts = Counter(words)
+        
+        for word, count in counts.items():
+            if count >= 3:
+                if word not in echoes:
+                    echoes[word] = {"count": count, "first_para": i + 1, "paragraphs": [i + 1]}
+                elif (i + 1) not in echoes[word]["paragraphs"]:
+                    echoes[word]["paragraphs"].append(i + 1)
+                    echoes[word]["count"] = max(echoes[word]["count"], count)
+                    
+    return dict(sorted(echoes.items(), key=lambda x: -x[1]["count"])[:8])
+
 
 def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> dict:
     text = html_to_text(text)
@@ -29,7 +77,9 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
             "dialogue_ratio": 0.0, "tension_elevation": 0.35,
             "pacing_velocity": 0.0, "pacing_momentum": 0.0,
             "pacing_slope": 0.0, "slope_diagnosis": "NO_PREVIOUS_SCENE",
-            "filters": {}, "crutches": {},
+            "filters": {}, "crutches": {}, "echoes": {},
+            "dialogue_adverbs": [], "strained_tags_count": 0,
+            "passive_count": 0,
             "text_signals": analyze_text_signals("")
         }
 
@@ -58,6 +108,17 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     dialogue_paras = sum([1 for p in paragraphs if '"' in p or '“' in p])
     dialogue_ratio = round((dialogue_paras / max(1, len(paragraphs))) * 100, 1)
+
+    # Word Echoes
+    echoes = detect_word_echoes(paragraphs)
+
+    # Passive voice count
+    passive_matches = PASSIVE_VOICE_PATTERN.findall(text)
+    passive_count = len(passive_matches)
+
+    # Dialogue tags and adverbs
+    adverb_matches = DIALOGUE_ADVERB_PATTERN.findall(text)
+    strained_tags = sum(len(re.findall(r"\b" + tag + r"\b", text_lower)) for tag in STRAINED_DIALOGUE_TAGS)
 
     scrubbed_text_lower = scrub_idioms(text).lower()
     tension_hits = sum(len(re.findall(r"\b" + re.escape(k) + r"\b", scrubbed_text_lower)) for k in TENSION_KEYWORDS)
@@ -100,15 +161,15 @@ def calculate_text_telemetry(text: str, prev_tension: float | None = None) -> di
         "slope_diagnosis": slope_diagnosis,
         "filters": dict(sorted(filters_found.items(), key=lambda i: i[1], reverse=True)[:5]),
         "crutches": dict(sorted(crutches_found.items(), key=lambda i: i[1], reverse=True)[:5]),
+        "echoes": echoes,
+        "dialogue_adverbs": list(set(adverb_matches))[:5],
+        "strained_tags_count": strained_tags,
+        "passive_count": passive_count,
         "text_signals": analyze_text_signals(text)
     }
 
-# =============================================================================
-# MULTI-LENS SENTENCE ENERGETICS & TELEMETRY CLASSIFIER
-# =============================================================================
 
 def highlight_clutter_words(sentence_text: str) -> tuple[str, list, list]:
-    """Wraps exact filter verbs and crutch words in HTML span tags."""
     filters_hit = []
     crutches_hit = []
     html = sentence_text
@@ -127,6 +188,33 @@ def highlight_clutter_words(sentence_text: str) -> tuple[str, list, list]:
 
     return html, filters_hit, crutches_hit
 
+
+def highlight_tags_and_passive(sentence_text: str) -> tuple[str, list, bool]:
+    tags_hit = []
+    html = sentence_text
+
+    # Highlight strained tags (hissed, groaned, etc.)
+    for tag in STRAINED_DIALOGUE_TAGS:
+        pat = re.compile(r"\b(" + re.escape(tag) + r")\b", re.IGNORECASE)
+        if pat.search(sentence_text):
+            tags_hit.append(tag)
+            html = pat.sub(r'<span class="xray-strained-tag">\1</span>', html)
+
+    # Highlight dialogue adverbs (e.g. said daintily)
+    adv_match = DIALOGUE_ADVERB_PATTERN.search(sentence_text)
+    if adv_match:
+        adv = adv_match.group(1)
+        tags_hit.append(adv)
+        html = re.sub(r'\b(' + re.escape(adv) + r')\b', r'<span class="xray-dialogue-adverb">\1</span>', html)
+
+    # Highlight passive voice
+    is_passive = bool(PASSIVE_VOICE_PATTERN.search(sentence_text))
+    if is_passive:
+        html = PASSIVE_VOICE_PATTERN.sub(r'<span class="xray-passive">\g<0></span>', html)
+
+    return html, tags_hit, is_passive
+
+
 def classify_multi_lens_sentence(s: str, thresholds: dict | None = None) -> dict:
     options = {
         "staccato_threshold": 9,
@@ -143,7 +231,7 @@ def classify_multi_lens_sentence(s: str, thresholds: dict | None = None) -> dict
     expansive_limit = max(staccato_limit + 5, int(options["expansive_threshold"]))
     clutter_cutoff = max(1, int(options["clutter_sensitivity"]))
 
-    # 1. LENS: ENERGETICS (Pacing Physics)
+    # 1. Energetics
     has_tension_kw = any(k in scrubbed_s for k in TENSION_KEYWORDS)
     has_somatic = any(v in s_lower for v in [
         "locked", "struck", "skid", "dragged", "snapped", 
@@ -162,70 +250,59 @@ def classify_multi_lens_sentence(s: str, thresholds: dict | None = None) -> dict
 
     if is_pivot:
         energetics_type = "PIVOT"
-        energetics_reason = "A configured transition phrase appears; review whether it changes direction."
+        energetics_reason = "Transition hinge: shifts narrative trajectory or mood."
     elif (has_tension_kw or has_somatic) and (is_staccato or has_tension_kw):
         energetics_type = "ESCALATOR"
-        energetics_reason = f"Selected action cues or a short sentence pattern matched ({words} words)."
+        energetics_reason = f"Kinetic escalator: action cues and punchy syntax ({words} words)."
     elif (has_resolver_kw or is_long) and not has_tension_kw:
         energetics_type = "RESOLVER"
-        energetics_reason = f"A configured pause or long-sentence pattern matched ({words} words)."
+        energetics_reason = f"Lyrical resolver: contemplative pause allowing the reader to breathe ({words} words)."
     elif len(filters_in_s) >= clutter_cutoff or len(crutches_in_s) >= clutter_cutoff:
         energetics_type = "SLACK"
-        energetics_reason = f"Multiple configured filter or crutch terms matched ({', '.join(filters_in_s + crutches_in_s)}); review in context."
+        energetics_reason = f"Semantic clutter: filter verbs ({', '.join(filters_in_s)}) or crutches ({', '.join(crutches_in_s)})."
     else:
         energetics_type = "NEUTRAL"
-        energetics_reason = f"No configured transition, action, or pause pattern matched ({words} words)."
+        energetics_reason = f"Clean narrative baseline ({words} words)."
 
-    signal_counts = {
-        name: sum(
-            len(re.findall(r"\b" + re.escape(term) + r"\b", s_lower))
-            for term in terms
-        )
-        for name, terms in SIGNAL_LEXICONS.items()
-    }
-    signal_type = max(signal_counts, key=signal_counts.get) if any(signal_counts.values()) else "none"
-    signal_reason = (
-        f"Most selected cue matches: {signal_type.replace('_', ' ')} ({signal_counts[signal_type]}). "
-        "Cue counts do not measure reader response."
-        if signal_type != "none"
-        else "No selected word cues matched. This does not measure reader response."
-    )
-
-    # 3. LENS: CADENCE RHYTHM (Sentence Length)
+    # 2. Cadence
     if is_staccato:
         cadence_type = "STACCATO"
-        cadence_reason = f"Short sentence pattern ({words} words)."
+        cadence_reason = f"Staccato rhythm ({words} words)."
     elif is_long:
         cadence_type = "EXPANSIVE"
-        cadence_reason = f"Long sentence pattern ({words} words)."
+        cadence_reason = f"Expansive cadence ({words} words)."
     else:
         cadence_type = "BASELINE"
-        cadence_reason = f"Sentence length falls between the configured thresholds ({words} words)."
+        cadence_reason = f"Standard rhythmic cadence ({words} words)."
 
-    # 4. LENS: CLUTTER & FILTERS (Cleanse)
+    # 3. Clutter
     clutter_html, f_hits, c_hits = highlight_clutter_words(s)
     has_clutter = len(f_hits) > 0 or len(c_hits) > 0
-    clutter_reason = f"Matched configured terms: {', '.join(f_hits + c_hits)}" if has_clutter else "No configured filter verbs or crutch words matched."
+    clutter_reason = f"Matched: {', '.join(f_hits + c_hits)}" if has_clutter else "No filter verbs or crutch clutter."
+
+    # 4. Tags & Passive
+    tags_html, tags_hit, is_passive = highlight_tags_and_passive(s)
+    tags_reason = f"Dialogue cue: {', '.join(tags_hit)}" if tags_hit else ("Passive voice construction" if is_passive else "Clean active voice.")
 
     return {
         "text": s,
         "words": words,
-        "type": energetics_type,          # Backwards-compatible
-        "reason": energetics_reason,      # Backwards-compatible
+        "type": energetics_type,
+        "reason": energetics_reason,
         "energetics_type": energetics_type,
         "energetics_reason": energetics_reason,
-        "signal_type": signal_type,
-        "signal_counts": signal_counts,
-        "signal_reason": signal_reason,
         "cadence_type": cadence_type,
         "cadence_reason": cadence_reason,
         "has_clutter": has_clutter,
         "clutter_html": clutter_html,
-        "clutter_reason": clutter_reason
+        "clutter_reason": clutter_reason,
+        "has_tags_or_passive": len(tags_hit) > 0 or is_passive,
+        "tags_html": tags_html,
+        "tags_reason": tags_reason
     }
 
+
 def classify_sentence_energetics(text: str, thresholds: dict | None = None) -> list[dict]:
-    """Single-pass flat list parser (backwards compatible for test suite)."""
     if not text or not text.strip():
         return []
     raw_chunks = re.split(r'([.!?]+(?:\s+|\Z))', text)
@@ -238,8 +315,8 @@ def classify_sentence_energetics(text: str, thresholds: dict | None = None) -> l
         sentences.append(raw_chunks[-1].strip())
     return [classify_multi_lens_sentence(s, thresholds) for s in sentences]
 
+
 def classify_paragraph_energetics(text: str, thresholds: dict | None = None) -> list[list[dict]]:
-    """Native paragraph-by-paragraph multi-lens parser."""
     if not text or not text.strip():
         return []
     raw_paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
