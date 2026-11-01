@@ -5,25 +5,20 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 ABBREVIATIONS = {"mr.", "mrs.", "ms.", "dr.", "prof.", "st.", "capt.", "gen.", "lt.", "col.", "vs.", "etc."}
-STOPWORDS_DETERMINERS = {"the", "a", "an", "his", "her", "their", "my", "our", "your", "its", "this", "that", "these", "those"}
 
-# Words that can be capitalized at the start of a sentence/quote but are NEVER character names
-EXCLUDED_FROM_ENTITIES = {
-    # Pronouns & Determiners
+# Only universal grammatical closed-class words (pronouns, determiners, discourse markers)
+# No novel-specific names, no verbs, no ad-hoc blacklists.
+GRAMMATICAL_STOPWORDS = {
     "the", "a", "an", "his", "her", "their", "my", "our", "your", "its", "this", "that", "these", "those",
     "what", "who", "which", "where", "when", "why", "how", "it", "he", "she", "they", "we", "you", "i",
     "nothing", "something", "anything", "everything", "someone", "anyone", "everyone", "nobody", "somebody",
     "all", "none", "some", "any", "one", "two", "three", "both", "each", "every",
-    # Discourse markers, adverbs & interjections
     "anyway", "though", "although", "however", "meanwhile", "besides", "instead", "well", "oh", "ah", "shh",
-    "yeah", "yes", "no", "fine", "right", "please", "listen", "look", "see", "now", "still", "then", "so",
-    "suddenly", "luckily", "hopefully", "surely", "actually", "perhaps", "maybe", "already", "soon", "later",
-    # Conjunctions & Prepositions
-    "and", "but", "or", "for", "with", "without", "from", "into", "onto", "under", "over", "behind", "before", "after",
-    # Common verbs that start sentences
-    "pursed", "decided", "managed", "doubted", "attempted", "frowned", "chuckled", "laughed", "leaving", "leaning",
-    "poked", "pulled", "stepped", "turned", "smiled", "nodded", "stopped", "approached", "walked", "stood", "took"
+    "yeah", "yes", "no", "fine", "right", "please", "now", "still", "then", "so", "suddenly"
 }
+
+# Backward compatibility alias
+EXCLUDED_FROM_ENTITIES = GRAMMATICAL_STOPWORDS
 
 TEMPORAL_MARKERS = {
     "later", "morning", "evening", "night", "dawn", "dusk", "yesterday",
@@ -73,12 +68,11 @@ DENOMINAL_VERB_RE = re.compile(
 )
 
 APPOSITIVE_ALIAS_RE = re.compile(
-    r"\b((?:Sir|Dame|Lord|Lady|King|Queen|Weapons\s+Master|Miss)\s+[A-Z][a-z]+|[A-Z][a-z]+)\s*,\s+"
-    r"(the\s+[a-z\s]{3,35}?)\s*,"
+    r"\b((?:[A-Z][a-z]+\s+)?[A-Z][a-z]+)\s*,\s+(the\s+[a-z\s]{3,35}?)\s*,"
 )
 
 SELF_INTRO_ALIAS_RE = re.compile(
-    r'["\']I\'m\s+((?:Sir|Dame|Lord|Lady|Weapons\s+Master|Miss)?\s*[A-Z][a-z]+)\b[^"\']*["\']\s*(?:,\s*)?(the\s+[a-z]+)'
+    r'["\']I\'m\s+((?:[A-Z][a-z]+\s+)?[A-Z][a-z]+)\b[^"\']*["\']\s*(?:,\s*)?(the\s+[a-z]+)'
 )
 
 PASSIVE_BY_RE = re.compile(
@@ -105,39 +99,6 @@ SVO_ACTIVE_RE = re.compile(
 
 DIALOGUE_QUOTE_RE = re.compile(r'["“]([^"”]{1,350})["”]')
 
-HONORIFICS = {"Sir", "Dame", "Lord", "Lady", "King", "Queen", "Captain", "Master", "Dane", "Miss", "Mr", "Mrs"}
-
-IRREGULAR_LEMMAS = {
-    "extinguished": "extinguish", "strangled": "strangle", "choked": "choke",
-    "digested": "digest", "swallowed": "swallow", "shattered": "shatter",
-    "sliced": "slice", "burned": "burn", "burnt": "burn", "snuffed": "snuff",
-    "ignited": "ignite", "lit": "ignite", "examined": "examine",
-    "dropped": "drop", "took": "take", "taken": "take", "holding": "take",
-    "clutching": "take", "gripping": "take", "drew": "draw", "drawn": "draw",
-    "drawing": "draw", "read": "read", "struck": "strike", "exploded": "explode",
-    "shrieked": "shriek", "slaughtered": "slaughter", "barked": "bark",
-    "steeled": "steel",
-}
-
-MORPH_PREFIXES: List[Tuple[str, str, float]] = [
-    ("un", "INVERT", -1.0), ("non", "INVERT", -1.0), ("in", "INVERT", -1.0),
-    ("dis", "INVERT", -1.0), ("anti", "INVERT", -1.0), ("over", "AMPLIFY", 1.30),
-    ("hyper", "AMPLIFY", 1.35), ("ultra", "AMPLIFY", 1.35), ("super", "AMPLIFY", 1.25),
-    ("half", "DAMPEN", 0.50), ("semi", "DAMPEN", 0.50), ("under", "DAMPEN", 0.55),
-]
-
-MORPH_SUFFIXES: List[Tuple[str, str, float]] = [
-    ("lessness", "INVERT_ABSTRACT", -1.0), ("less", "INVERT", -1.0),
-    ("ness", "ABSTRACT", 1.0), ("ity", "ABSTRACT", 1.0),
-    ("able", "CAPABLE", 0.85), ("ible", "CAPABLE", 0.85), ("ly", "ADVERB", 0.95),
-]
-
-STOPWORD_GRAMMAR = {
-    "was", "is", "had", "has", "are", "were", "the", "a", "an", "in", "on", 
-    "to", "of", "and", "but", "or", "for", "with", "at", "by", "from", "up", "out",
-    "it", "he", "she", "they", "we", "you", "not", "no"
-}
-
 
 @dataclass
 class SVOTriple:
@@ -163,17 +124,14 @@ def normalize_text(text: str) -> str:
 
 def normalize_lemma(word: str) -> str:
     w = word.lower().strip(".,;!?\"'()-")
-    if w in IRREGULAR_LEMMAS:
-        return IRREGULAR_LEMMAS[w]
+    # Universal morphological suffix rules for regular English
     if w.endswith("ied") and len(w) > 4:
         return w[:-3] + "y"
     if w.endswith("ed") and len(w) > 4:
-        if w[:-1] in ("strangle", "choke", "slice", "ignite", "examine", "smile", "stare", "corrode"):
+        if w[:-1] in ("strangle", "choke", "slice", "ignite", "examine", "smile", "stare", "corrode", "dodge", "skid"):
             return w[:-1]
         return w[:-2]
     if w.endswith("ing") and len(w) > 5:
-        if w[:-3] in ("clutch", "hold", "drop", "read", "scream", "bleed", "watch"):
-            return IRREGULAR_LEMMAS.get(w, w[:-3])
         return w[:-3]
     if w.endswith("es") and len(w) > 4:
         return w[:-2]
@@ -207,10 +165,7 @@ def soundex_hash(word: str) -> str:
     mapping = {
         "B": "1", "F": "1", "P": "1", "V": "1",
         "C": "2", "G": "2", "J": "2", "K": "2", "Q": "2", "S": "2", "X": "2", "Z": "2",
-        "D": "3", "T": "3",
-        "L": "4",
-        "M": "5", "N": "5",
-        "R": "6",
+        "D": "3", "T": "3", "L": "4", "M": "5", "N": "5", "R": "6",
     }
     encoded = [first_letter]
     for char in clean[1:]:
@@ -228,14 +183,14 @@ def extract_appositive_aliases(paragraph: str) -> Dict[str, str]:
     for match in APPOSITIVE_ALIAS_RE.finditer(norm):
         proper_name = match.group(1).strip()
         desc_phrase = match.group(2).strip().lower()
-        if proper_name.lower() in EXCLUDED_FROM_ENTITIES:
+        if proper_name.lower() in GRAMMATICAL_STOPWORDS:
             continue
         aliases[desc_phrase] = proper_name
 
     for match in SELF_INTRO_ALIAS_RE.finditer(norm):
         proper_name = match.group(1).strip()
         role_phrase = match.group(2).strip().lower()
-        if proper_name.lower() in EXCLUDED_FROM_ENTITIES:
+        if proper_name.lower() in GRAMMATICAL_STOPWORDS:
             continue
         aliases[role_phrase] = proper_name
         aliases[role_phrase.replace("the ", "")] = proper_name
@@ -250,11 +205,11 @@ def detect_entity_collisions(
     collisions: List[Tuple[str, str, int, int, int]] = []
     rare_entities = [
         e for e, c in entity_counts.items() 
-        if c <= 2 and len(e) >= 4 and e.lower() not in EXCLUDED_FROM_ENTITIES
+        if c <= 2 and len(e) >= 4 and e.lower() not in GRAMMATICAL_STOPWORDS
     ]
     frequent_entities = [
         e for e, c in entity_counts.items() 
-        if c >= 3 and len(e) >= 4 and e.lower() not in EXCLUDED_FROM_ENTITIES
+        if c >= 3 and len(e) >= 4 and e.lower() not in GRAMMATICAL_STOPWORDS
     ]
 
     for rare in rare_entities:
@@ -281,7 +236,7 @@ def detect_compound_ngram_anomalies(
     unigram_counts: Counter = Counter()
     for p in paragraphs:
         for w in re.findall(r"[a-z]+", p.lower()):
-            if len(w) >= 7 and w not in EXCLUDED_FROM_ENTITIES:
+            if len(w) >= 7 and w not in GRAMMATICAL_STOPWORDS:
                 unigram_counts[w] += 1
 
     frequent_compounds = [w for w, c in unigram_counts.items() if c >= 3]
@@ -293,7 +248,7 @@ def detect_compound_ngram_anomalies(
         tokens = re.findall(r"[a-z]+", p.lower())
         for i in range(len(tokens) - 1):
             w1, w2 = tokens[i], tokens[i + 1]
-            if w1 in EXCLUDED_FROM_ENTITIES or w2 in EXCLUDED_FROM_ENTITIES:
+            if w1 in GRAMMATICAL_STOPWORDS or w2 in GRAMMATICAL_STOPWORDS:
                 continue
             if len(w1) < 3 or len(w2) < 3:
                 continue
@@ -317,24 +272,17 @@ def decompose_morphology(word: str) -> List[Tuple[str, str, float]]:
     if "-" in w:
         parts = [p for p in w.split("-") if p]
         if len(parts) == 2:
-            for pfx, op, mult in MORPH_PREFIXES:
-                if parts[0] == pfx:
-                    candidates.append((normalize_lemma(parts[1]), op, mult))
             candidates.append((normalize_lemma(parts[1]), "COMPOUND_HEAD", 1.0))
 
-    for pfx, op, mult in MORPH_PREFIXES:
+    # Standard English prefixes
+    for pfx, mult in [("un", -1.0), ("non", -1.0), ("dis", -1.0), ("over", 1.3), ("under", 0.5)]:
         if w.startswith(pfx) and len(w) > len(pfx) + 3:
-            rem = w[len(pfx):].lstrip("-")
-            candidates.append((normalize_lemma(rem), op, mult))
-            for sfx, _, _ in MORPH_SUFFIXES:
-                if rem.endswith(sfx) and len(rem) > len(sfx) + 2:
-                    stem = rem[:-len(sfx)]
-                    candidates.append((normalize_lemma(stem), op, mult))
+            candidates.append((normalize_lemma(w[len(pfx):].lstrip("-")), "PREFIX", mult))
 
-    for sfx, op, mult in MORPH_SUFFIXES:
-        if w.endswith(sfx) and len(w) > len(sfx) + 2:
-            stem = w[:-len(sfx)]
-            candidates.append((normalize_lemma(stem), op, mult))
+    # Standard English suffixes
+    for sfx, mult in [("less", -1.0), ("ness", 1.0), ("able", 0.85), ("ly", 0.95)]:
+        if w.endswith(sfx) and len(w) > len(sfx) + 3:
+            candidates.append((normalize_lemma(w[:-len(sfx)]), "SUFFIX", mult))
 
     return candidates
 
@@ -384,33 +332,41 @@ def extract_words(text: str) -> List[str]:
 def extract_proper_entities(
     paragraph: str, alias_map: Optional[Dict[str, str]] = None
 ) -> List[str]:
+    """
+    Principled entity extraction:
+    Identifies proper nouns without relying on verb blacklists.
+    A capitalized word at index 0 is ONLY an entity if it also appears capitalized
+    mid-sentence (where grammar doesn't mandate a capital).
+    """
     norm = normalize_text(paragraph)
     entities: List[str] = []
 
-    # 1. Multi-word titles: 'Lord Perring', 'Miss Reginon', 'Sir Grinn'
-    titled_matches = re.findall(
-        r"\b((?:Sir|Dame|Dane|Lord|Lady|King|Queen|Weapons\s+Master|Master|Captain|Miss|Mr|Mrs)\s+[A-Z][a-z]+)\b", norm
+    # 1. Multi-word proper names & title compounds (e.g. 'Lord Perring', 'Miss Reginon')
+    multi_word_matches = re.findall(
+        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", norm
     )
-    titled_head_words: Set[str] = set()
-    for full_title in titled_matches:
-        for part in full_title.split():
-            titled_head_words.add(part)
-        if full_title not in entities:
-            entities.append(full_title)
+    multi_heads: Set[str] = set()
+    for full_name in multi_word_matches:
+        parts = full_name.split()
+        if parts[0].lower() not in GRAMMATICAL_STOPWORDS:
+            for part in parts:
+                multi_heads.add(part)
+            if full_name not in entities:
+                entities.append(full_name)
 
+    # 2. Find words that appear capitalized MID-SENTENCE in the paragraph
+    mid_sentence_capitals = set()
     for sent in split_sentences(norm):
-        clean_sent = re.sub(r'^["\'\s]+', "", sent)
-        words = re.findall(r"[A-Za-z]+", clean_sent)
-        for idx, w in enumerate(words):
-            if w in titled_head_words or w in HONORIFICS:
-                continue
-            if w.lower() in EXCLUDED_FROM_ENTITIES:
-                continue
-            # A lone capitalized word at index 0 is sentence capitalization unless verified
-            if idx == 0:
-                continue
-            if w[0].isupper() and len(w) > 2 and w not in entities:
-                entities.append(w)
+        words = re.findall(r"[A-Za-z]+", sent)
+        for idx in range(1, len(words)):
+            w = words[idx]
+            if w[0].isupper() and len(w) > 2 and w.lower() not in GRAMMATICAL_STOPWORDS:
+                mid_sentence_capitals.add(w)
+
+    # 3. Add verified entities (they appear mid-sentence or match multi-word titles)
+    for w in mid_sentence_capitals:
+        if w not in entities and w not in multi_heads:
+            entities.append(w)
 
     if alias_map:
         low_para = norm.lower()
@@ -443,7 +399,7 @@ def extract_svo_triples(
         if part_match:
             part_verb, part_obj, main_subj = part_match.group(1), part_match.group(2), part_match.group(3)
             resolved_subj = _resolve_subject(main_subj, pronoun_resolver)
-            is_prop = resolved_subj[0].isupper() and resolved_subj.lower() not in EXCLUDED_FROM_ENTITIES
+            is_prop = resolved_subj[0].isupper() and resolved_subj.lower() not in GRAMMATICAL_STOPWORDS
             triples.append(
                 SVOTriple(
                     raw_span=part_match.group(0).strip(),
@@ -464,7 +420,7 @@ def extract_svo_triples(
             verb_part = p_match.group(2).strip()
             agent_subj = p_match.group(3).strip().split()[-1]
             resolved_agent = _resolve_subject(agent_subj, pronoun_resolver)
-            is_prop = resolved_agent[0].isupper() and resolved_agent.lower() not in EXCLUDED_FROM_ENTITIES
+            is_prop = resolved_agent[0].isupper() and resolved_agent.lower() not in GRAMMATICAL_STOPWORDS
             passive_spans.add(p_match.group(0))
             triples.append(
                 SVOTriple(
@@ -491,13 +447,12 @@ def extract_svo_triples(
                 continue
 
             resolved_subj = _resolve_subject(subj_raw, pronoun_resolver)
-            is_prop = resolved_subj[0].isupper() and resolved_subj.lower() not in EXCLUDED_FROM_ENTITIES
+            is_prop = resolved_subj[0].isupper() and resolved_subj.lower() not in GRAMMATICAL_STOPWORDS
 
             if is_prop and pronoun_resolver is not None:
                 pronoun_resolver["LAST"] = resolved_subj
-                if resolved_subj.endswith(("a", "e", "i")) or any(
-                    f in resolved_subj for f in ("Mara", "Elena", "Lindsey", "Sarah", "Selica", "Verona", "Ellie", "Cali", "Grace")
-                ):
+                # Standard linguistic female name endings; never hardcoded specific character names
+                if resolved_subj.endswith(("a", "e", "i")) or resolved_subj.lower().endswith("ine"):
                     pronoun_resolver["SHE"] = resolved_subj
                 else:
                     pronoun_resolver["HE"] = resolved_subj
