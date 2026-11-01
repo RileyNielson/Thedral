@@ -1,15 +1,11 @@
 import os
 import re
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-_BACKEND_DIR = Path(__file__).resolve().parent
-if str(_BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(_BACKEND_DIR))
-
 from backend.config import WIKTIONARY_DB_PATH
-from cognitive_reader import CognitiveEngine, build_cognitive_database
+from backend.cognitive_reader.engine import CognitiveEngine
+from backend.cognitive_reader.compiler import build_cognitive_database
 from backend.reader_text import (
     _search,
     _first_matching_sentence,
@@ -25,7 +21,6 @@ def get_thedral_cognitive_engine() -> CognitiveEngine:
         db_path = Path(__file__).resolve().parent / "data" / "cognitive_lexicon.db"
         wikt_path = str(WIKTIONARY_DB_PATH) if WIKTIONARY_DB_PATH.exists() else None
         
-        # Build starter DB if missing, utilizing Wiktionary SQLite if present
         if not db_path.exists():
             build_cognitive_database(output_db_path=db_path, wiktionary_sqlite_path=wikt_path)
             
