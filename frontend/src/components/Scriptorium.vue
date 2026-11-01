@@ -19,6 +19,53 @@
       </div>
     </div>
 
+    <!-- Floating In-Editor Find & Replace Toolbar (Cmd+F / Ctrl+F) -->
+    <div 
+      v-if="showFindReplace && !store.isVoidMode" 
+      class="absolute top-2 right-6 z-40 bg-zinc-900/95 border border-zinc-700/80 rounded-xl p-2.5 shadow-2xl backdrop-blur-md flex flex-col gap-2 w-80 animate-fade-in font-mono text-xs"
+    >
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-1.5">
+        <span class="text-[10px] font-bold uppercase text-zinc-400 flex items-center gap-1">
+          <Search class="w-3 h-3 text-amber-500" /> Find & Replace in Scene
+        </span>
+        <button @click="closeFindReplace" class="text-zinc-500 hover:text-white"><X class="w-3.5 h-3.5" /></button>
+      </div>
+
+      <!-- Find Input -->
+      <div class="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded px-2 py-1">
+        <input 
+          ref="findInputEl"
+          v-model="findQuery" 
+          @keyup.enter="findNext" 
+          placeholder="Find in scene..." 
+          class="flex-1 bg-transparent text-xs text-zinc-200 outline-none"
+        />
+        <span v-if="matchCount > 0" class="text-[9px] text-zinc-500">{{ currentMatchIndex + 1 }} of {{ matchCount }}</span>
+        <button @click="findPrev" :disabled="matchCount === 0" class="text-zinc-400 hover:text-white disabled:opacity-30">▲</button>
+        <button @click="findNext" :disabled="matchCount === 0" class="text-zinc-400 hover:text-white disabled:opacity-30">▼</button>
+      </div>
+
+      <!-- Replace Input -->
+      <div class="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded px-2 py-1">
+        <input 
+          v-model="replaceQuery" 
+          placeholder="Replace with..." 
+          class="flex-1 bg-transparent text-xs text-zinc-200 outline-none"
+        />
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex items-center justify-between pt-1">
+        <label class="flex items-center gap-1 text-[9px] text-zinc-400 cursor-pointer">
+          <input type="checkbox" v-model="matchCase" class="accent-amber-500" /> Case sensitive
+        </label>
+        <div class="flex gap-1.5">
+          <button @click="replaceCurrent" :disabled="matchCount === 0" class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[10px] disabled:opacity-40">Replace</button>
+          <button @click="replaceAll" :disabled="matchCount === 0" class="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-zinc-950 font-bold text-[10px] disabled:opacity-40">All</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Standard Action Sub-Header -->
     <div v-if="store.activeNode?.id && !store.isVoidMode" class="h-9 border-b border-zinc-800/60 bg-zinc-900/40 px-6 flex items-center justify-between text-xs z-10 shrink-0 backdrop-blur-sm">
       <div class="flex items-center gap-4">
@@ -41,12 +88,16 @@
         <button @click="store.navigateScene(-1)" :disabled="!hasPreviousScene" title="Previous scene" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">← Scene</button>
         <button @click="store.navigateScene(1)" :disabled="!hasNextScene" title="Next scene" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">Scene →</button>
         
+        <button @click="toggleFindReplace" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 hover:bg-zinc-800 text-zinc-300 rounded text-xs font-medium flex items-center gap-1 transition" title="Find & Replace in Scene (Cmd+F / Ctrl+F)">
+          <Search class="w-3.5 h-3.5 text-zinc-400" /> <span class="hidden md:inline">Find</span>
+        </button>
+
         <button @click="toggleXRay" :class="['px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition border', store.isXRayActive ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.15)]' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800']">
           <Eye class="w-3.5 h-3.5" /> <span>Craft X-Ray</span>
         </button>
 
-        <button @click="toggleGutterBadges" :class="['px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition border', showGutterBadges ? 'bg-violet-500/20 text-violet-300 border-violet-500/40' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-zinc-200']" title="Toggle Reader Beat Gutter Pins">
-          <Compass class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Reader Gutter</span>
+        <button @click="toggleGutterBadges" :class="['px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition border', showGutterBadges ? 'bg-violet-500/20 text-violet-300 border-violet-500/40' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-zinc-200']" title="Toggle Reader Gutter Pins">
+          <Compass class="w-3.5 h-3.5" /> <span class="hidden sm:inline">Gutter</span>
         </button>
 
         <button @click="store.toggleVoidMode()" class="px-2.5 py-1 bg-zinc-800/80 border border-zinc-700/50 hover:bg-zinc-800 text-zinc-300 rounded text-xs font-medium flex items-center gap-1.5 transition">
@@ -173,9 +224,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { store, showToast } from '../store.js'
-import { Eye, Moon, Wand2, RotateCcw, Feather, Search, DoorOpen, Bold, Italic, Compass } from '@lucide/vue'
+import { Eye, Moon, Wand2, RotateCcw, Feather, Search, DoorOpen, Bold, Italic, Compass, X } from '@lucide/vue'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -186,12 +237,99 @@ import { contentToHtml, htmlToText } from '../editorText.js'
 
 const isXRayLoading = ref(false)
 const showGutterBadges = ref(true)
-const activeXRayLens = ref('energetics') // 'energetics' | 'clutter' | 'tags' | 'cadence'
+const activeXRayLens = ref('energetics')
 const xraySettings = ref({
   staccato_threshold: 9,
   expansive_threshold: 22,
   clutter_sensitivity: 2
 })
+
+// In-Editor Find & Replace State
+const showFindReplace = ref(false)
+const findQuery = ref('')
+const replaceQuery = ref('')
+const matchCase = ref(false)
+const currentMatchIndex = ref(0)
+const findInputEl = ref(null)
+
+const toggleFindReplace = () => {
+  showFindReplace.value = !showFindReplace.value
+  if (showFindReplace.value) {
+    nextTick(() => findInputEl.value?.focus())
+  }
+}
+
+const closeFindReplace = () => {
+  showFindReplace.value = false
+  findQuery.value = ''
+  replaceQuery.value = ''
+}
+
+const matchCount = computed(() => {
+  if (!findQuery.value || !store.activeNode?.content) return 0
+  const plain = htmlToText(store.activeNode.content)
+  const flags = matchCase.value ? 'g' : 'gi'
+  const matches = plain.match(new RegExp(findQuery.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags))
+  return matches ? matches.length : 0
+})
+
+const findNext = () => {
+  if (!editor || !findQuery.value) return
+  const plain = htmlToText(editor.getHTML())
+  const q = matchCase.value ? findQuery.value : findQuery.value.toLowerCase()
+  const docText = matchCase.value ? plain : plain.toLowerCase()
+  
+  let nextIdx = docText.indexOf(q, editor.state.selection.to)
+  if (nextIdx === -1) nextIdx = docText.indexOf(q)
+  
+  if (nextIdx !== -1) {
+    editor.commands.focus()
+    editor.commands.setTextSelection({ from: nextIdx + 1, to: nextIdx + 1 + q.length })
+  }
+}
+
+const findPrev = () => {
+  if (!editor || !findQuery.value) return
+  const plain = htmlToText(editor.getHTML())
+  const q = matchCase.value ? findQuery.value : findQuery.value.toLowerCase()
+  const docText = matchCase.value ? plain : plain.toLowerCase()
+  
+  let prevIdx = docText.lastIndexOf(q, Math.max(0, editor.state.selection.from - 2))
+  if (prevIdx === -1) prevIdx = docText.lastIndexOf(q)
+  
+  if (prevIdx !== -1) {
+    editor.commands.focus()
+    editor.commands.setTextSelection({ from: prevIdx + 1, to: prevIdx + 1 + q.length })
+  }
+}
+
+const replaceCurrent = () => {
+  if (!editor || !findQuery.value) return
+  const { from, to } = editor.state.selection
+  const selected = editor.state.doc.textBetween(from, to)
+  const matches = matchCase.value ? selected === findQuery.value : selected.toLowerCase() === findQuery.value.toLowerCase()
+  
+  if (matches) {
+    editor.commands.insertContent(replaceQuery.value)
+    findNext()
+  } else {
+    findNext()
+  }
+}
+
+const replaceAll = () => {
+  if (!editor || !findQuery.value) return
+  const currentHtml = editor.getHTML()
+  const flags = matchCase.value ? 'g' : 'gi'
+  const pattern = new RegExp(findQuery.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags)
+  const count = (currentHtml.match(pattern) || []).length
+  
+  if (count > 0) {
+    const updatedHtml = currentHtml.replace(pattern, replaceQuery.value)
+    editor.commands.setContent(updatedHtml)
+    showToast(`Replaced ${count} occurrence(s) in scene.`, 'success')
+  }
+}
 
 const wordTarget = computed(() => Number(store.activeNode?.card?.word_target) || 500)
 const goalProgress = computed(() => {
@@ -293,6 +431,14 @@ const handleXRaySentenceClick = (text, pNum) => {
   store.selectedText = text
   store.activeInspectorTab = 'reader'
   window.dispatchEvent(new CustomEvent('lens-beat-jump', { detail: { beat: pNum } }))
+}
+
+const handleKeydown = (e) => {
+  const isMeta = e.metaKey || e.ctrlKey
+  if (isMeta && e.key.toLowerCase() === 'f') {
+    e.preventDefault()
+    toggleFindReplace()
+  }
 }
 
 const initEditor = () => {
@@ -449,10 +595,12 @@ const runMasterTriage = async () => {
 
 onMounted(() => {
   if (store.activeNode?.id) initEditor()
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(() => {
   if (editor) editor.destroy()
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
