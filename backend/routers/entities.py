@@ -1,320 +1,247 @@
-import re
-import time
-from collections import defaultdict, Counter
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from backend.database import get_db
-from backend.entity_names import parse_entity_aliases, serialize_entity_aliases, text_mentions_entity
-from backend.guardrails import sanitize_entity_type
-from backend.text_utils import html_to_text
-from backend.wiktionary_lexicon import english_words, get_lexicon_status
+<template>
+  <div 
+    v-if="store.modals.cast" 
+    class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 select-none"
+    @click.self="closeModal"
+  >
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl flex flex-col max-h-[85vh] animate-fade-in">
+      
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-3 shrink-0">
+        <div class="flex items-center gap-3">
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <Users class="w-5 h-5 text-amber-500" /> Cast & Relics Directory
+          </h3>
+          <span class="text-[10px] font-mono bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
+            {{ displayedEntities.length }} in view
+          </span>
+        </div>
+        <button @click="closeModal" class="text-zinc-500 hover:text-white transition">
+          <X class="w-5 h-5" />
+        </button>
+      </div>
 
-router = APIRouter(tags=["Entities"])
+      <!-- Quick Registration Tray -->
+      <div class="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3 shrink-0 space-y-3">
+        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-wider font-mono flex items-center gap-1.5">
+          <Plus class="w-3.5 h-3.5" /> Track New Entity
+        </div>
+        <div class="flex gap-2">
+          <input 
+            v-model="newEntity.name" 
+            @keyup.enter="createEntity"
+            placeholder="Entity name (e.g. Lord Vael, The Sunstone)..." 
+            class="flex-1 bg-zinc-900 border border-zinc-700/60 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:border-amber-500/50 focus:outline-none transition"
+          />
+          <select 
+            v-model="newEntity.entity_type" 
+            class="bg-zinc-900 border border-zinc-700/60 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none"
+          >
+            <option value="CHARACTER">Character</option>
+            <option value="LOCATION">Place</option>
+            <option value="ITEM">Artifact / Relic</option>
+            <option value="FACTION">Group / faction</option>
+            <option value="WORLD_TERM">Worldbuilding term</option>
+          </select>
+          <button 
+            @click="createEntity" 
+            :disabled="!newEntity.name.trim()"
+            class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-zinc-950 font-bold rounded text-xs transition"
+          >
+            Add
+          </button>
+        </div>
+      </div>
 
-class QuickEntity(BaseModel):
-    name: str
-    entity_type: str = "CHARACTER"
-    role: str = "SUPPORTING"
-    aliases: str | list[str] = ""
+      <!-- Entity Directory List with Expandable Dossiers -->
+      <div class="flex-1 overflow-y-auto space-y-2 p-1 custom-scrollbar">
+        <div 
+          v-for="ent in displayedEntities" 
+          :key="ent.entity_id" 
+          class="bg-zinc-950 border border-zinc-800/80 rounded-xl overflow-hidden transition"
+        >
+          <!-- Summary Row -->
+          <div class="p-3 flex items-center justify-between hover:bg-zinc-900/40 cursor-pointer" @click="toggleDossier(ent.entity_id)">
+            <div class="min-w-0 flex-1 mr-3">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-zinc-100 truncate">{{ ent.name }}</span>
+                <span 
+                  :class="[
+                    'px-1.5 py-0.5 rounded text-[9px] font-mono uppercase font-bold', 
+                    ent.entity_type === 'CHARACTER' 
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
+                      : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                  ]"
+                >
+                  {{ ent.entity_type }}
+                </span>
+                <span v-if="activeDossier?.entity_id === ent.entity_id" class="text-[9px] text-amber-400 font-mono">
+                  ● Dossier Open
+                </span>
+              </div>
+              <div v-if="parseAliasList(ent.aliases).length" class="text-[10px] text-zinc-500 truncate mt-0.5 font-mono">
+                Aliases: {{ parseAliasList(ent.aliases).join(' · ') }}
+              </div>
+            </div>
 
-class EntityAliasesUpdate(BaseModel):
-    aliases: list[str]
+            <div class="flex items-center space-x-2 shrink-0">
+              <button 
+                @click.stop="toggleDossier(ent.entity_id)" 
+                class="px-2 py-1 rounded bg-zinc-800 text-[10px] font-mono text-zinc-300 hover:text-white transition"
+              >
+                {{ activeDossier?.entity_id === ent.entity_id ? 'Close' : 'Dossier' }}
+              </button>
+              <button 
+                @click.stop="deleteEntity(ent.entity_id)" 
+                class="p-1 hover:bg-zinc-800 text-zinc-600 hover:text-rose-400 rounded transition"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
 
-_NON_NAME_CAPITALS = {
-    "a", "an", "and", "as", "at", "but", "for", "he", "her", "hers", "him",
-    "his", "i", "if", "in", "it", "its", "me", "my", "nor", "of", "on",
-    "or", "our", "she", "so", "the", "their", "them", "they", "this", "to",
-    "us", "we", "you", "your",
+          <!-- Living Auto-Compiled Dossier Drawer -->
+          <div 
+            v-if="activeDossier?.entity_id === ent.entity_id" 
+            class="p-4 bg-zinc-900/80 border-t border-zinc-800/80 space-y-3 text-xs animate-fade-in"
+          >
+            <div v-if="isDossierLoading" class="py-4 text-center text-xs font-mono text-zinc-500 flex items-center justify-center gap-2">
+              <Loader class="w-3.5 h-3.5 animate-spin text-amber-500" /> Compiling living dossier from manuscript...
+            </div>
+            
+            <template v-else>
+              <!-- Timeline Presence -->
+              <div class="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                <div class="p-2 bg-zinc-950 rounded border border-zinc-800">
+                  <div class="text-zinc-500">First Appearance:</div>
+                  <div class="text-zinc-200 font-medium truncate mt-0.5">{{ activeDossier.first_appearance }}</div>
+                </div>
+                <div class="p-2 bg-zinc-950 rounded border border-zinc-800">
+                  <div class="text-zinc-500">Presence:</div>
+                  <div class="text-zinc-200 font-medium mt-0.5">{{ activeDossier.total_scenes }} Scene(s) across {{ activeDossier.chapters_present.length }} Chapter(s)</div>
+                </div>
+              </div>
+
+              <!-- Observed Appearance & Traits -->
+              <div v-if="activeDossier.traits?.length" class="space-y-1">
+                <div class="text-[10px] uppercase font-mono text-amber-400 font-bold">Observed Traits & Sensory Details (From Prose):</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <span v-for="trait in activeDossier.traits" :key="trait" class="px-2 py-0.5 bg-zinc-950 border border-zinc-800 text-zinc-300 rounded text-[10px]">
+                    {{ trait }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Top Associates -->
+              <div v-if="activeDossier.top_associates?.length" class="space-y-1">
+                <div class="text-[10px] uppercase font-mono text-zinc-400 font-bold">Frequent Associates:</div>
+                <div class="flex flex-wrap gap-2 text-[10px] text-zinc-400">
+                  <span v-for="assoc in activeDossier.top_associates" :key="assoc.name">
+                    <strong class="text-zinc-200">{{ assoc.name }}</strong> ({{ assoc.shared_scenes }} shared scenes)
+                  </span>
+                </div>
+              </div>
+
+              <!-- Spoken Dialogue -->
+              <div class="text-[10px] font-mono text-zinc-500 flex justify-between pt-1 border-t border-zinc-800/80">
+                <span>Spoken lines: <strong class="text-zinc-300">{{ activeDossier.dialogue_stats.lines_spoken }}</strong></span>
+                <span>Dialogue words: <strong class="text-zinc-300">{{ activeDossier.dialogue_stats.words_spoken }}</strong></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <CastRelationships />
+
+      <div class="border-t border-zinc-800 pt-3 flex justify-between items-center shrink-0">
+        <span class="text-[10px] text-zinc-500 font-mono">100% Deterministic Story Architecture</span>
+        <button @click="closeModal" class="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-lg transition">Done</button>
+      </div>
+
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue'
+import { store, showToast } from '../../store.js'
+import { Users, X, Trash2, Plus, Loader } from '@lucide/vue'
+
+import { API_BASE } from '@/api'
+import CastRelationships from './CastRelationships.vue'
+
+const activeDossier = ref(null)
+const isDossierLoading = ref(false)
+
+const newEntity = ref({
+  name: '',
+  entity_type: 'CHARACTER'
+})
+
+const parseAliasList = (value) => {
+  if (!value) return []
+  if (Array.isArray(value)) return value
+  try {
+    const parsed = JSON.parse(value)
+    if (Array.isArray(parsed)) return parsed
+  } catch {}
+  return value.split(/[,;\n|]+/).map(a => a.trim()).filter(Boolean)
 }
-_SENTENCE_OPENERS = {
-    "then", "when", "but", "after", "before", "while", "suddenly", "now", "with", "without", "by", "from",
-    "once", "later", "still", "there", "here", "what", "why", "how", "where", "who", "yes", "no", "oh",
-    "well", "maybe", "perhaps", "however", "meanwhile", "although", "though", "because", "since", "until",
-    "every", "each", "some", "all", "one", "two", "that", "these", "those", "there's", "i'm", "i'll", "i'd",
+
+const displayedEntities = computed(() => store.registeredEntities || [])
+
+const closeModal = () => {
+  store.toggleModal('cast', false)
+  activeDossier.value = null
 }
-_ENTITY_TYPES = {"CHARACTER", "ITEM", "LOCATION", "FACTION", "WORLD_TERM"}
 
-def _candidate_names(scenes: list[dict], existing: list[dict], dictionary_words: set[str] | None = None) -> list[dict]:
-    known_names = set()
-    for entity in existing:
-        known_names.add(entity["name"].casefold().strip())
-        known_names.update(alias.casefold() for alias in parse_entity_aliases(entity.get("aliases")))
+const toggleDossier = async (entityId) => {
+  if (activeDossier.value?.entity_id === entityId) {
+    activeDossier.value = null
+    return
+  }
+  isDossierLoading.value = true
+  activeDossier.value = { entity_id: entityId }
+  try {
+    const res = await fetch(`${API_BASE}/api/entities/${encodeURIComponent(entityId)}/dossier`)
+    if (!res.ok) throw new Error('Could not compile dossier')
+    activeDossier.value = await res.json()
+  } catch(e) {
+    showToast(e.message, 'error')
+    activeDossier.value = null
+  } finally {
+    isDossierLoading.value = false
+  }
+}
 
-    occurrences = defaultdict(list)
-    sentence_split = re.compile(r"(?<=[.!?])\s+|\n+")
-    capitalized = re.compile(r"[A-Z][A-Za-z0-9'’.-]*")
-    for scene in scenes:
-        text = html_to_text(scene["content"] or "")
-        for sentence in sentence_split.split(text):
-            matches = list(capitalized.finditer(sentence))
-            run = []
-            runs = []
-            for match in matches:
-                if run and sentence[run[-1].end():match.start()].strip():
-                    runs.append(run)
-                    run = []
-                run.append(match)
-            if run:
-                runs.append(run)
-            for name_parts in runs:
-                if name_parts[0].start() < 3:
-                    if name_parts[0].group(0).casefold() in _SENTENCE_OPENERS:
-                        name_parts = name_parts[1:]
-                    elif len(name_parts) < 2:
-                        continue
-                if not name_parts:
-                    continue
-                name = " ".join(part.group(0) for part in name_parts).strip(" .-'’")
-                if len(name) < 2 or name.casefold() in _NON_NAME_CAPITALS:
-                    continue
-                if name.casefold() not in known_names:
-                    occurrences[name.casefold()].append({
-                        "name": name,
-                        "scene_id": scene["id"],
-                        "scene_title": scene["title"],
-                        "excerpt": sentence.strip()[:280],
-                    })
+const createEntity = async () => {
+  const name = newEntity.value.name.trim()
+  if (!name) return
 
-    candidates = []
-    for mentions in occurrences.values():
-        scene_ids = {mention["scene_id"] for mention in mentions}
-        name = mentions[0]["name"]
-        if (len(mentions) < 2 and len(scene_ids) < 2) or (len(name.split()) == 1 and len(mentions) < 3 and len(scene_ids) < 2):
-            continue
-        candidates.append({
-            "name": name,
-            "mentions": len(mentions),
-            "scene_count": len(scene_ids),
-            "examples": mentions[:3],
-            "in_wiktionary": name.casefold() in dictionary_words if dictionary_words is not None else None,
-        })
-    return sorted(candidates, key=lambda item: (-item["mentions"], item["name"].casefold()))[:100]
+  try {
+    const res = await fetch(`${API_BASE}/api/entities/quick-register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, entity_type: newEntity.value.entity_type })
+    })
+    if (!res.ok) throw new Error('Registration failed')
+    newEntity.value.name = ''
+    await store.fetchCast()
+    showToast(`Tracked "${name}"`, 'info')
+  } catch(e) {
+    showToast(e.message, 'error')
+  }
+}
 
-
-@router.get("/api/entities")
-def get_all_entities():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT * FROM canonical_entities ORDER BY entity_type ASC, name ASC")
-    entities = [dict(r) for r in c.fetchall()]
-    conn.close()
-    return entities
-
-
-@router.get("/api/entities/{entity_id}/dossier")
-def get_entity_dossier(entity_id: str):
-    """
-    100% Deterministic Character Dossier Generator.
-    Extracts observed physical traits, first appearance, scene frequency,
-    top associates, and dialogue statistics directly from the manuscript text.
-    """
-    conn = get_db()
-    try:
-        entity = conn.execute(
-            "SELECT entity_id, name, entity_type, role, aliases, sensory_profile, status FROM canonical_entities WHERE entity_id = ?",
-            (entity_id,),
-        ).fetchone()
-        if not entity:
-            raise HTTPException(404, "Entity not found")
-
-        name = entity["name"]
-        aliases = parse_entity_aliases(entity["aliases"])
-        all_name_forms = [name] + aliases
-
-        # Fetch all scenes in order
-        scenes = [
-            dict(r) for r in conn.execute("""
-                SELECT s.id, s.title, s.content, ch.title as chapter_title, ch.sort_order as ch_sort, s.sort_order as sc_sort
-                FROM binder_nodes s
-                JOIN binder_nodes ch ON s.parent_id = ch.id
-                WHERE s.node_type = 'SCENE' AND (s.is_archived IS NULL OR s.is_archived = 0)
-                ORDER BY ch.sort_order ASC, s.sort_order ASC
-            """).fetchall()
-        ]
-
-        # Fetch all other registered characters for associate tracking
-        other_chars = [
-            dict(r) for r in conn.execute(
-                "SELECT entity_id, name, aliases FROM canonical_entities WHERE entity_id != ? AND entity_type = 'CHARACTER'",
-                (entity_id,),
-            ).fetchall()
-        ]
-
-        first_appearance = None
-        present_scenes = []
-        present_chapters = []
-        associate_counts = Counter()
-        observed_traits = set()
-        spoken_lines = 0
-        spoken_words = 0
-
-        # Regex for character appositive descriptions: "Cali, the queen's orbiter,"
-        appositive_pattern = re.compile(
-            r"\b(?:" + "|".join(re.escape(f) for f in all_name_forms) + r")\s*,\s+(the\s+[a-z\s]{3,35}?)\s*,",
-            re.IGNORECASE,
-        )
-
-        # Regex for physical traits: "hazel-yellow eyes", "red beard"
-        trait_pattern = re.compile(
-            r"\b(?:her|his|their|" + "|".join(re.escape(f) for f in all_name_forms) + r")['’]?s?\s+([a-z\-]+(?:\s+[a-z\-]+)?\s+(?:eyes|hair|beard|armor|dress|voice|face|hands?|smile))\b",
-            re.IGNORECASE,
-        )
-
-        for sc in scenes:
-            raw_text = html_to_text(sc["content"] or "")
-            if not raw_text:
-                continue
-
-            # Check if entity appears in this scene
-            if any(text_mentions_entity(raw_text, form, None) for form in all_name_forms):
-                if not first_appearance:
-                    first_appearance = f"{sc['chapter_title']} / {sc['title']}"
-                present_scenes.append(sc["title"])
-                if sc["chapter_title"] not in present_chapters:
-                    present_chapters.append(sc["chapter_title"])
-
-                # Check co-occurrence with other cast members
-                for other in other_chars:
-                    if text_mentions_entity(raw_text, other["name"], other["aliases"]):
-                        associate_counts[other["name"]] += 1
-
-                # Extract appositive roles
-                for m in appositive_pattern.finditer(raw_text):
-                    observed_traits.add(m.group(1).strip().lower())
-
-                # Extract physical modifications
-                for m in trait_pattern.finditer(raw_text):
-                    trait = m.group(1).strip().lower()
-                    if len(trait) > 5 and not any(sw in trait for sw in ("the", "this", "that")):
-                        observed_traits.add(trait)
-
-                # Dialogue stats (Count turns attributed to this entity)
-                dialogue_matches = re.findall(
-                    r'["“]([^"”]{1,400})["”]\s*,?\s*(?:' + "|".join(re.escape(f) for f in all_name_forms) + r')\s+(?:said|asked|replied|whispered|hissed|laughed|says)',
-                    raw_text,
-                    re.IGNORECASE,
-                )
-                spoken_lines += len(dialogue_matches)
-                spoken_words += sum(len(line.split()) for line in dialogue_matches)
-
-        top_associates = [
-            {"name": char_name, "shared_scenes": count}
-            for char_name, count in associate_counts.most_common(5)
-        ]
-
-        return {
-            "entity_id": entity["entity_id"],
-            "name": entity["name"],
-            "entity_type": entity["entity_type"],
-            "role": entity["role"],
-            "aliases": aliases,
-            "first_appearance": first_appearance or "Not yet in manuscript",
-            "total_scenes": len(present_scenes),
-            "chapters_present": present_chapters,
-            "traits": sorted(list(observed_traits))[:6],
-            "top_associates": top_associates,
-            "dialogue_stats": {
-                "lines_spoken": spoken_lines,
-                "words_spoken": spoken_words,
-            },
-        }
-    finally:
-        conn.close()
-
-
-@router.get("/api/entities/candidates/{book_id}")
-def get_entity_candidates(book_id: str):
-    conn = get_db()
-    try:
-        book = conn.execute(
-            "SELECT id FROM binder_nodes WHERE id = ? AND node_type = 'BOOK' AND (is_archived IS NULL OR is_archived = 0)",
-            (book_id,),
-        ).fetchone()
-        if not book:
-            raise HTTPException(404, "Manuscript not found")
-        scenes = [
-            dict(row)
-            for row in conn.execute("""
-                SELECT s.id, s.title, s.content
-                FROM binder_nodes ch
-                JOIN binder_nodes s ON s.parent_id = ch.id
-                WHERE ch.parent_id = ? AND s.node_type = 'SCENE'
-                  AND (s.is_archived IS NULL OR s.is_archived = 0)
-                ORDER BY ch.sort_order, s.sort_order
-            """, (book_id,))
-        ]
-        entities = [
-            dict(row)
-            for row in conn.execute("SELECT name, aliases FROM canonical_entities")
-        ]
-        candidates = _candidate_names(scenes, entities)
-        lexicon = get_lexicon_status()
-        if lexicon["available"]:
-            dictionary_words = english_words(candidate["name"] for candidate in candidates)
-            for candidate in candidates:
-                candidate["in_wiktionary"] = candidate["name"].casefold() in dictionary_words
-        return {"candidates": candidates, "wiktionary_available": lexicon["available"]}
-    finally:
-        conn.close()
-
-
-@router.post("/api/entities/quick-register")
-def register_entity(payload: QuickEntity):
-    name_clean = payload.name.strip()
-    requested_type = payload.entity_type.strip().upper()
-    if requested_type not in _ENTITY_TYPES:
-        raise HTTPException(400, f"Unsupported entity type: {requested_type}")
-    safe_type = sanitize_entity_type(name_clean, requested_type)
-    if safe_type == "CLUTTER":
-        raise HTTPException(400, f"'{name_clean}' is background clutter, not a character or key artifact.")
-
-    conn = get_db()
-    try:
-        eid = re.sub(r'\W+', '_', name_clean.lower())
-        aliases = parse_entity_aliases(payload.aliases)
-        now = time.strftime("%Y-%m-%d %H:%M:%S")
-        with conn:
-            conn.execute("""
-                INSERT INTO canonical_entities
-                (entity_id, name, entity_type, role, aliases, sensory_profile, status, axioms, created_at)
-                VALUES (?, ?, ?, ?, ?, '', 'ALIVE', '{}', ?)
-                ON CONFLICT(entity_id) DO UPDATE SET
-                    entity_type = excluded.entity_type,
-                    auto_detected = 0,
-                    aliases = CASE WHEN excluded.aliases != '[]' THEN excluded.aliases ELSE canonical_entities.aliases END
-            """, (eid, name_clean, safe_type, payload.role, serialize_entity_aliases(aliases), now))
-        return {"status": "registered", "entity_id": eid, "entity_type": safe_type}
-    finally:
-        conn.close()
-
-
-@router.put("/api/entities/{entity_id}/aliases")
-def update_entity_aliases(entity_id: str, payload: EntityAliasesUpdate):
-    conn = get_db()
-    try:
-        entity = conn.execute(
-            "SELECT entity_id, name FROM canonical_entities WHERE entity_id = ?",
-            (entity_id,),
-        ).fetchone()
-        if not entity:
-            raise HTTPException(404, "Entity not found")
-        aliases = parse_entity_aliases(payload.aliases)
-        with conn:
-            conn.execute(
-                "UPDATE canonical_entities SET aliases = ? WHERE entity_id = ?",
-                (serialize_entity_aliases(aliases), entity_id),
-            )
-        return {"status": "updated", "entity_id": entity_id, "aliases": aliases}
-    finally:
-        conn.close()
-
-
-@router.delete("/api/entities/{entity_id}")
-def delete_entity(entity_id: str):
-    conn = get_db()
-    with conn:
-        conn.execute("DELETE FROM canonical_worldlines WHERE entity_id = ?", (entity_id,))
-        conn.execute("DELETE FROM entity_relationships WHERE source_id = ? OR target_id = ?", (entity_id, entity_id))
-        conn.execute("DELETE FROM canonical_entities WHERE entity_id = ?", (entity_id,))
-    conn.close()
-    return {"status": "deleted"}
+const deleteEntity = async (eid) => {
+  try {
+    const res = await fetch(`${API_BASE}/api/entities/${eid}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error('Deletion failed')
+    await store.fetchCast()
+    if (activeDossier.value?.entity_id === eid) activeDossier.value = null
+  } catch(e) {
+    showToast('Failed to delete entity', 'error')
+  }
+}
+</script>
