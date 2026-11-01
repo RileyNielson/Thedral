@@ -1,15 +1,16 @@
 """Story shape: how strongly each plot strand shows up in a scene, chapter, or book.
 
 Scores come from transparent word lists counted in the manuscript text; no AI is used.
-Strand scores are relative to the book itself, so they show emphasis, not a grade.
+Strand scores are relative to the book itself, showing emphasis and contrast without prescriptive grading.
 """
 import hashlib
+import math
 import re
 from collections import OrderedDict
 
 from backend.text_utils import html_to_text
 
-# (key, label, core, confidence, terms). A trailing * lets a stem take any ending.
+# (key, label, core, confidence, terms)
 _STRAND_DEFS = [
     ("action", "Action", True, "high", [
         "punch*", "kick*", "strike*", "struck", "slash*", "stab*", "shot", "shoot*", "fire*", "fired", "swing*", "swung",
@@ -91,9 +92,7 @@ STRANDS = [
     for k, label, core, conf, _ in _STRAND_DEFS
 ]
 STRAND_KEYS = [s["key"] for s in STRANDS]
-PACING_KEYS = ["dialogue_share", "avg_sentence_words", "short_sentence_share"]
 
-# A strand never needs more than this many hits per 1,000 words to read as "fully present".
 _MIN_SCALE = 2.0
 _CACHE_LIMIT = 4000
 _cache: "OrderedDict[str, dict]" = OrderedDict()
@@ -127,7 +126,6 @@ def _dialogue_words(text: str) -> int:
 
 
 def analyze_text(raw: str, lore_terms: list[str] | None = None, evidence_per_strand: int = 6) -> dict:
-    """Raw strand hits, word count, pacing numbers, and evidence sentences for one block of text."""
     text = html_to_text(raw or "")
     lore_terms = sorted({t.strip() for t in (lore_terms or []) if t and len(t.strip()) > 2})
     key = hashlib.md5((text + "\x00" + "\x01".join(lore_terms)).encode("utf-8", "ignore")).hexdigest()
@@ -162,7 +160,6 @@ def analyze_text(raw: str, lore_terms: list[str] | None = None, evidence_per_str
                 hits["lore"] += len(found)
                 evidence.setdefault("lore", []).append({"sentence": sentence[:320], "matches": sorted(set(found))[:5], "order": index})
 
-    # Structure adds to suspense: clipped sentences and open questions make a reader lean in.
     if sentences:
         short_share = short / len(sentences)
         if len(sentences) >= 6 and short_share > 0.35:
@@ -202,20 +199,81 @@ def _density(hits: float, words: int) -> float:
     return hits * 1000.0 / words if words else 0.0
 
 
-def _trend(values: list[float]) -> dict:
-    n = len(values)
-    if n < 3:
-        return {"direction": "flat", "change": 0.0, "peak_index": max(range(n), key=lambda i: values[i]) if n else 0}
-    third = max(1, n // 3)
-    early = sum(values[:third]) / third
-    late = sum(values[-third:]) / third
-    change = late - early
-    direction = "rising" if change > 12 else "fading" if change < -12 else "flat"
-    return {"direction": direction, "change": round(change, 1), "peak_index": max(range(n), key=lambda i: values[i])}
+def _compute_non_prescriptive_insights(chapters: list[dict], book_scores: dict[str, float]) -> dict:
+    """Derives purely descriptive insights about contrast, balance, and transitions. Zero formula targets."""
+    if not chapters:
+        return {
+            "spine": [],
+            "dynamic_range": "No chapters available yet.",
+            "respiration": "Need at least two chapters to observe pacing waves.",
+            "handoffs": []
+        }
+
+    # 1. Narrative Spine (Top 2 dominant strands across entire book)
+    ranked = sorted(book_scores.items(), key=lambda i: i[1], reverse=True)
+    label_map = {s["key"]: s["label"] for s in STRANDS}
+    spine = [
+        {"key": k, "label": label_map.get(k, k.title()), "score": round(v)}
+        for k, v in ranked[:4] if v >= 15
+    ]
+
+    # 2. Dynamic Range & Contrast (Measure intensity variance across chapters)
+    chapter_intensities = [
+        sum(c["scores"].values()) / max(1, len(c["scores"]))
+        for c in chapters if c.get("words", 0) >= 50
+    ]
+
+    if len(chapter_intensities) >= 2:
+        mean = sum(chapter_intensities) / len(chapter_intensities)
+        variance = sum((x - mean) ** 2 for x in chapter_intensities) / len(chapter_intensities)
+        stdev = math.sqrt(variance)
+        if stdev >= 12.0:
+            dyn_range = "Wide dynamic range: The manuscript alternates between high-intensity focal points and quieter reflective beats."
+        elif stdev >= 6.0:
+            dyn_range = "Balanced dynamic range: Pacing flows with moderate rhythmic variation across chapters."
+        else:
+            dyn_range = "Consistent tonal baseline: Chapters maintain a focused, sustained atmosphere with minimal variance."
+    else:
+        dyn_range = "Establishing dynamic baseline."
+
+    # 3. Pacing Respiration (Breathing room following peak intensity)
+    respiration_notes = []
+    for i in range(1, len(chapters)):
+        prev = chapters[i - 1]
+        curr = chapters[i]
+        prev_intensity = sum(prev["scores"].values())
+        curr_intensity = sum(curr["scores"].values())
+        if prev_intensity >= 200 and curr_intensity <= 110:
+            respiration_notes.append(
+                f"Chapter {i + 1} ({curr['title']}) provides a contemplative rest beat after elevated intensity in Chapter {i}."
+            )
+
+    respiration = respiration_notes[0] if respiration_notes else "Pacing momentum carries steadily across chapters without prolonged breathers."
+
+    # 4. Strand Hand-offs (Where one strand yields to another)
+    handoffs = []
+    for i in range(1, len(chapters)):
+        prev = chapters[i - 1]["scores"]
+        curr = chapters[i]["scores"]
+        for k1, v1_prev in prev.items():
+            if v1_prev >= 45 and curr.get(k1, 0) <= 25:
+                # Find the strand that surged
+                for k2, v2_curr in curr.items():
+                    if k2 != k1 and v2_curr >= 45 and prev.get(k2, 0) <= 25:
+                        handoffs.append(
+                            f"Ch {i} ➔ Ch {i + 1}: {label_map.get(k1, k1)} eases as {label_map.get(k2, k2)} takes the lead."
+                        )
+                        break
+
+    return {
+        "spine": spine,
+        "dynamic_range": dyn_range,
+        "respiration": respiration,
+        "handoffs": handoffs[:3]
+    }
 
 
 def build_story_shape(units: list[dict], lore_terms: list[str] | None = None) -> dict:
-    """units: [{scene_id, title, chapter_id, chapter_title, content}] in reading order."""
     analyses = [analyze_text(u["content"], lore_terms) for u in units]
     strands = list(STRANDS)
     keys = list(STRAND_KEYS)
@@ -264,18 +322,17 @@ def build_story_shape(units: list[dict], lore_terms: list[str] | None = None) ->
     total_hits = {k: sum(a["hits"].get(k, 0.0) for a in analyses) for k in keys}
     book_scores = {k: score(total_hits[k], total_words, k) for k in keys}
 
-    chapter_trends = {k: _trend([c["scores"][k] for c in chapters]) for k in keys}
-    scene_trends = {k: _trend([s["scores"][k] for s in scenes]) for k in keys}
-    trends = {k: (chapter_trends[k] if len(chapters) >= 3 else scene_trends[k]) for k in keys}
+    insights = _compute_non_prescriptive_insights(chapters, book_scores)
 
     return {
         "strands": strands,
         "scenes": scenes,
         "chapters": chapters,
         "book": {"words": total_words, "scores": book_scores},
-        "trends": trends,
+        "trends": {},
+        "insights": insights,
         "method": (
             "Counts of words and phrases for each strand, per 1,000 words, scaled against this book's own busiest scenes. "
-            "No AI is used. Scores show emphasis, not quality; open the evidence to see what raised them."
+            "Zero generative AI. Scores describe emphasis, contrast, and respiration without formula targets."
         ),
     }
