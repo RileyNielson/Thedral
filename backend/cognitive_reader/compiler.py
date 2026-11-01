@@ -3,9 +3,12 @@ import os
 import re
 import sqlite3
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from cognitive_reader.wiktionary_ingestor import WiktionaryFullIngestor, compute_phonetic_texture
+try:
+    from .wiktionary_ingestor import WiktionaryFullIngestor, compute_phonetic_texture
+except (ImportError, ValueError):
+    from cognitive_reader.wiktionary_ingestor import WiktionaryFullIngestor, compute_phonetic_texture
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "cognitive_lexicon.db"
 TOKEN_RE = re.compile(r"[a-z]{2,}")
@@ -99,155 +102,120 @@ CREATE INDEX IF NOT EXISTS idx_forms_surface ON inflected_forms(surface_form);
 CREATE INDEX IF NOT EXISTS idx_edges_source ON concept_edges(source_lemma);
 """
 
+# Universal Natural Semantic Metalanguage (NSM) Calibration Anchors
+# Pure dimensional poles used to ground physical scales mathematically
 PRIMITIVE_POLES: Dict[str, Dict[str, float]] = {
-    "heavy": {"mass_weight": 0.90, "velocity": -0.40},
-    "massive": {"mass_weight": 0.95, "dominance": 0.60},
-    "dense": {"mass_weight": 0.80},
-    "weight": {"mass_weight": 0.70},
-    "crushing": {"mass_weight": 0.95, "valence": -0.80, "dominance": -0.80},
-    "iron": {"mass_weight": 0.85, "dominance": 0.70, "concreteness": 0.95},
-    "steel": {"mass_weight": 0.85, "dominance": 0.85, "concreteness": 0.96},
-    "metal": {"mass_weight": 0.80, "dominance": 0.75, "concreteness": 0.95},
-    "armor": {"mass_weight": 0.80, "dominance": 0.85, "concreteness": 0.95},
-    "stone": {"mass_weight": 0.85, "concreteness": 0.95},
-    "mountain": {"mass_weight": 0.98, "dominance": 0.85, "concreteness": 0.96},
-    "weightless": {"mass_weight": -0.90, "velocity": 0.30},
-    "hollow": {"mass_weight": -0.75, "valence": -0.45},
-    "hot": {"temperature": 0.85, "arousal": 0.40},
-    "fire": {"temperature": 0.95, "arousal": 0.80, "luminance": 0.85},
-    "flame": {"temperature": 0.90, "luminance": 0.80},
-    "burn": {"temperature": 0.90, "corrosion_decay": 0.70, "valence": -0.60},
-    "warm": {"temperature": 0.60, "valence": 0.70, "arousal": -0.30},
-    "cold": {"temperature": -0.85, "velocity": -0.40},
-    "ice": {"temperature": -0.95, "velocity": -0.85, "concreteness": 0.92},
-    "freeze": {"temperature": -0.95, "velocity": -0.95},
-    "sharp": {"sharpness": 0.95, "arousal": 0.50},
-    "blade": {"sharpness": 0.95, "valence": -0.50, "concreteness": 0.95},
-    "razor": {"sharpness": 0.98, "valence": -0.55},
-    "cut": {"sharpness": 0.85, "valence": -0.50},
-    "jagged": {"sharpness": 0.92, "valence": -0.55},
-    "splinter": {"sharpness": 0.85, "valence": -0.55, "concreteness": 0.92},
-    "shatter": {"sharpness": 0.88, "corrosion_decay": 0.80, "velocity": 0.75, "valence": -0.70},
-    "glass": {"sharpness": 0.80, "concreteness": 0.94},
-    "soft": {"sharpness": -0.85, "valence": 0.45},
-    "gentle": {"sharpness": -0.80, "valence": 0.75, "arousal": -0.60},
-    "fast": {"velocity": 0.85, "arousal": 0.60},
-    "rapid": {"velocity": 0.85, "arousal": 0.55},
-    "sudden": {"velocity": 0.90, "arousal": 0.75},
-    "strike": {"velocity": 0.85, "arousal": 0.85, "valence": -0.70},
-    "explode": {"velocity": 0.98, "arousal": 0.98, "temperature": 0.85, "valence": -0.80},
-    "slow": {"velocity": -0.80, "arousal": -0.40},
-    "stagnant": {"velocity": -0.92, "corrosion_decay": 0.60, "valence": -0.50},
-    "immobile": {"velocity": -0.95, "dominance": -0.60},
-    "moor": {"velocity": -0.90, "mass_weight": 0.80},
-    "anchor": {"velocity": -0.95, "mass_weight": 0.95, "concreteness": 0.96},
-    "rust": {"corrosion_decay": 0.92, "velocity": -0.60, "valence": -0.45},
-    "corrode": {"corrosion_decay": 0.95, "valence": -0.60},
-    "rot": {"corrosion_decay": 0.95, "valence": -0.80},
-    "decay": {"corrosion_decay": 0.90, "valence": -0.70},
-    "sour": {"corrosion_decay": 0.70, "valence": -0.65},
-    "ash": {"corrosion_decay": 0.88, "mass_weight": -0.70, "valence": -0.50},
-    "acid": {"corrosion_decay": 0.95, "sharpness": 0.75, "valence": -0.75},
-    "poison": {"corrosion_decay": 0.90, "valence": -0.92, "arousal": 0.65},
-    "toxic": {"corrosion_decay": 0.90, "valence": -0.90},
-    "pure": {"corrosion_decay": -0.85, "valence": 0.65},
-    "bright": {"luminance": 0.85, "valence": 0.40},
-    "sunset": {"luminance": 0.75, "temperature": 0.50, "concreteness": 0.85},
+    # Mass & Inertia
+    "heavy": {"mass_weight": 0.95, "velocity": -0.40},
+    "massive": {"mass_weight": 1.00, "dominance": 0.60},
+    "dense": {"mass_weight": 0.85},
+    "weightless": {"mass_weight": -0.95, "velocity": 0.30},
+    "hollow": {"mass_weight": -0.80, "valence": -0.40},
+    # Thermal Physics
+    "hot": {"temperature": 0.90, "arousal": 0.50},
+    "fire": {"temperature": 1.00, "luminance": 0.90, "arousal": 0.85},
+    "flame": {"temperature": 0.90, "luminance": 0.85},
+    "burn": {"temperature": 0.95, "corrosion_decay": 0.70, "valence": -0.60},
+    "cold": {"temperature": -0.90, "velocity": -0.40},
+    "ice": {"temperature": -1.00, "velocity": -0.85, "concreteness": 0.95},
+    "freezing": {"temperature": -1.00, "velocity": -0.90},
+    # Tactile Sharpness
+    "sharp": {"sharpness": 1.00, "arousal": 0.50},
+    "blade": {"sharpness": 1.00, "concreteness": 0.95},
+    "razor": {"sharpness": 1.00, "concreteness": 0.95},
+    "soft": {"sharpness": -0.90, "valence": 0.40},
+    "blunt": {"sharpness": -0.85},
+    # Velocity & Motion
+    "fast": {"velocity": 0.90, "arousal": 0.60},
+    "rapid": {"velocity": 0.90, "arousal": 0.60},
+    "sudden": {"velocity": 0.95, "arousal": 0.75},
+    "slow": {"velocity": -0.85, "arousal": -0.30},
+    "stagnant": {"velocity": -0.95, "corrosion_decay": 0.60},
+    "still": {"velocity": -0.90},
+    # Luminance & Optical Physics
+    "bright": {"luminance": 0.90, "valence": 0.40},
     "light": {"luminance": 0.85},
-    "dark": {"luminance": -0.88, "valence": -0.35},
-    "gloom": {"luminance": -0.80, "valence": -0.60},
-    "joy": {"valence": 0.92, "arousal": 0.65, "dominance": 0.55},
-    "love": {"valence": 0.92, "arousal": 0.65, "dominance": 0.50},
-    "happy": {"valence": 0.88, "arousal": 0.55, "dominance": 0.45},
-    "delight": {"valence": 0.88, "arousal": 0.60, "dominance": 0.50},
-    "pleasure": {"valence": 0.88, "arousal": 0.50, "dominance": 0.45},
-    "wonderful": {"valence": 0.90, "arousal": 0.55, "dominance": 0.55},
-    "peace": {"valence": 0.85, "arousal": -0.75, "dominance": 0.45},
-    "calm": {"valence": 0.72, "arousal": -0.80, "dominance": 0.45},
-    "safe": {"valence": 0.80, "arousal": -0.70, "dominance": 0.55},
-    "sadness": {"valence": -0.85, "arousal": -0.30, "dominance": -0.70},
-    "sorrow": {"valence": -0.85, "arousal": 0.15, "dominance": -0.75},
-    "grief": {"valence": -0.88, "arousal": 0.25, "dominance": -0.78},
-    "pain": {"valence": -0.90, "arousal": 0.80, "dominance": -0.75},
-    "fear": {"valence": -0.88, "arousal": 0.88, "dominance": -0.82},
-    "terror": {"valence": -0.96, "arousal": 0.96, "dominance": -0.92},
-    "dread": {"valence": -0.88, "arousal": 0.75, "dominance": -0.78},
-    "anger": {"valence": -0.80, "arousal": 0.90, "dominance": 0.55},
-    "rage": {"valence": -0.90, "arousal": 0.96, "dominance": 0.65},
-    "hate": {"valence": -0.92, "arousal": 0.85, "dominance": 0.30},
-    "insult": {"valence": -0.80, "arousal": 0.65, "sharpness": 0.60},
-    "sneer": {"valence": -0.75, "arousal": 0.55, "dominance": 0.30},
-    "snarl": {"valence": -0.80, "arousal": 0.75, "dominance": 0.40},
-    "frown": {"valence": -0.60, "arousal": 0.30},
-    "slaughter": {"valence": -0.98, "arousal": 0.98, "dominance": 0.70, "sharpness": 0.90},
-    "scream": {"valence": -0.85, "arousal": 0.95, "dominance": -0.55},
-    "bleed": {"valence": -0.85, "arousal": 0.85, "dominance": -0.65},
+    "radiant": {"luminance": 0.95, "valence": 0.50},
+    "dark": {"luminance": -0.90, "valence": -0.35},
+    "shadow": {"luminance": -0.80},
+    "black": {"luminance": -0.95},
+    # Corrosion & Material Decay
+    "rot": {"corrosion_decay": 1.00, "valence": -0.80},
+    "decay": {"corrosion_decay": 0.95, "valence": -0.70},
+    "rust": {"corrosion_decay": 0.90, "velocity": -0.50},
+    "pure": {"corrosion_decay": -0.90, "valence": 0.60},
+    # Affective Extremes (VAD Calibration)
+    "joy": {"valence": 0.95, "arousal": 0.65, "dominance": 0.55},
+    "peace": {"valence": 0.85, "arousal": -0.75, "dominance": 0.50},
+    "pain": {"valence": -0.95, "arousal": 0.85, "dominance": -0.75},
+    "terror": {"valence": -0.95, "arousal": 0.95, "dominance": -0.90},
+    "rage": {"valence": -0.90, "arousal": 0.95, "dominance": 0.70},
 }
 
+# Standard Genus Proximum Definition Patterns
+# Matches standard lexicographical definition frames across any English dictionary
 GENUS_DOMAIN_RULES: List[Tuple[str, float, Tuple[str, ...]]] = [
-    ("ABSTRACT_STATE", 0.14, (
-        "feeling", "emotion", "state of", "quality of", "condition of", "mental",
-        "belief", "idea", "concept", "attitude", "sadness", "sorrow", "fear", "anger", "joy", "unfriendly", "unemotional",
+    ("ABSTRACT_STATE", 0.15, (
+        "feeling of", "emotion of", "state of", "quality of", "condition of",
+        "attitude of", "mental state", "belief that", "desire to", "sensation of",
     )),
-    ("SOCIAL_CONSTRUCT", 0.22, (
-        "system", "organization", "government", "administration", "law", "custom",
-        "institution", "obligation", "debt", "policy", "contract", "authority",
+    ("SOCIAL_CONSTRUCT", 0.30, (
+        "system of", "organization of", "body of", "form of government", "law of",
+        "custom of", "obligation to", "title of", "rank of", "status of", "office of",
     )),
-    ("SOUND", 0.28, (
-        "sound", "noise", "voice", "cry", "shout", "whisper", "silence", "music", "tone", "utterance", "loud cry made by a dog",
+    ("SOUND", 0.30, (
+        "sound of", "noise of", "voice of", "cry of", "sound produced by", "acoustic",
+        "musical instrument", "auditory", "vocalization",
     )),
-    ("LIGHT", 0.92, (
-        "lamp", "lantern", "torch", "candle", "light source", "beacon", "chandelier", "bulb", "sunset",
+    ("LIGHT", 0.90, (
+        "source of light", "device that produces light", "radiation of", "optical",
+        "illumination", "emitting light",
     )),
-    ("THERMAL", 0.86, (
-        "fire", "flame", "heat", "conflagration", "wildfire", "ember", "blaze", "inferno", "low temperature",
+    ("THERMAL", 0.85, (
+        "combustion of", "heat produced", "burning of", "low temperature", "high temperature",
     )),
     ("SUBSTANCE_LIQUID", 0.90, (
-        "liquid", "fluid", "water", "beverage", "drink", "solution", "acid", "venom", "poison", "blood", "tea", "wine", "ale", "seawater",
+        "liquid that", "fluid that", "solution of", "beverage made", "water that",
     )),
     ("SPACE_CONTAINER", 0.92, (
-        "room", "building", "chamber", "hall", "house", "tavern", "cellar", "prison", "cage", "enclosure", "corridor", "place where", "bailey", "keep",
+        "enclosed space", "room in", "building used", "structure built", "chamber in",
+        "place where", "area used for", "fortification", "settlement", "compartment",
     )),
-    ("ANIMATE_BEING", 0.92, (
-        "person", "human", "man", "woman", "child", "animal", "creature", "bird", "dog", "hound", "organ", "body part", "thief", "guard", "knight", "executioner",
+    ("ANIMATE_BEING", 0.95, (
+        "person who", "human being", "animal of", "mammal of", "bird of", "creature that",
+        "individual who", "organ of", "body part of",
     )),
     ("ARTIFACT_SOLID", 0.94, (
-        "tool", "weapon", "instrument", "device", "object", "vessel", "block", "metal", "iron", "steel", "stone", "wood", "tree", "trunk", "exterior covering", "document", "inscription", "letter", "sword", "knife", "dagger", "anchor", "glass", "feather", "armor", "bread", "raisin", "sand",
+        "tool used", "weapon used", "instrument used", "device designed", "object made",
+        "vessel used", "piece of", "mineral consisting", "alloy of", "metal used",
     )),
 ]
 
-VERB_FRAME_RULES: List[Tuple[str, List[str], List[str], str, Dict[str, float], Tuple[str, ...]]] = [
-    (
-        "CONSTRICT_SUFFOCATE",
-        ["ANIMATE_BEING"],
-        ["ANIMATE_BEING"],
-        "NONE",
-        {"arousal": 0.85, "valence": -0.85, "dominance": -0.90, "mass_weight": 0.75, "velocity": -0.60},
-        ("strangle", "suffocate", "choke", "throttle", "asphyxiate", "constrict", "smother", "squeeze the throat"),
-    ),
-    (
-        "INGEST",
-        ["ANIMATE_BEING"],
-        ["SUBSTANCE_LIQUID", "ARTIFACT_SOLID"],
-        "NONE",
-        {"corrosion_decay": 0.75, "velocity": -0.60, "dominance": -0.70, "valence": -0.50},
-        ("digest", "swallow", "ingest", "devour", "consume", "drink", "absorb", "take into the stomach"),
-    ),
+# Universal Semantic Verb Classes (FrameNet / VerbNet aligned)
+VERB_CLASS_RULES: List[Tuple[str, List[str], List[str], str, Dict[str, float], Tuple[str, ...]]] = [
     (
         "SHATTER_DESTROY",
         ["ANIMATE_BEING", "ARTIFACT_SOLID"],
         ["ARTIFACT_SOLID"],
         "NONE",
         {"sharpness": 0.90, "velocity": 0.85, "arousal": 0.80, "valence": -0.75, "corrosion_decay": 0.80},
-        ("shatter", "smash", "splinter", "fracture", "break into pieces", "pulverize", "crush"),
+        ("break into pieces", "cause to fracture", "smash violently", "destroy by breaking", "cause to shatter"),
     ),
     (
-        "LIGHT_TERMINATION",
-        ["ANIMATE_BEING", "SUBSTANCE_LIQUID"],
-        ["LIGHT", "THERMAL"],
+        "INGEST",
+        ["ANIMATE_BEING"],
+        ["SUBSTANCE_LIQUID", "ARTIFACT_SOLID"],
         "NONE",
-        {"luminance": -0.95, "temperature": -0.50, "valence": -0.30},
-        ("extinguish", "put out a fire", "put out a light", "snuff", "quench", "douse"),
+        {"corrosion_decay": 0.75, "velocity": -0.50, "dominance": -0.70, "valence": -0.40},
+        ("take into the stomach", "swallow food", "drink liquid", "consume food", "absorb liquid"),
+    ),
+    (
+        "CONSTRICT_SUFFOCATE",
+        ["ANIMATE_BEING"],
+        ["ANIMATE_BEING"],
+        "NONE",
+        {"arousal": 0.85, "valence": -0.85, "dominance": -0.90, "mass_weight": 0.75, "velocity": -0.60},
+        ("cut off the breath", "compress the throat", "prevent breathing", "kill by suffocating"),
     ),
     (
         "LIGHT_ACTIVATION",
@@ -255,7 +223,15 @@ VERB_FRAME_RULES: List[Tuple[str, List[str], List[str], str, Dict[str, float], T
         ["LIGHT", "THERMAL", "ARTIFACT_SOLID"],
         "NONE",
         {"luminance": 0.90, "temperature": 0.85, "arousal": 0.50},
-        ("ignite", "set fire", "light a", "kindle", "illuminate"),
+        ("cause to burn", "set on fire", "produce light", "ignite fuel"),
+    ),
+    (
+        "LIGHT_TERMINATION",
+        ["ANIMATE_BEING", "SUBSTANCE_LIQUID"],
+        ["LIGHT", "THERMAL"],
+        "NONE",
+        {"luminance": -0.95, "temperature": -0.50, "valence": -0.30},
+        ("put out a fire", "cause to cease burning", "smother a flame", "extinguish light"),
     ),
     (
         "VISUAL_PERCEPTION",
@@ -263,7 +239,7 @@ VERB_FRAME_RULES: List[Tuple[str, List[str], List[str], str, Dict[str, float], T
         ["ARTIFACT_SOLID", "ANIMATE_BEING", "SPACE_CONTAINER"],
         "REQUIRES_LIGHT",
         {"arousal": 0.15},
-        ("read", "look at and interpret", "examine visually", "inspect closely", "decipher", "peruse", "watch"),
+        ("look at visually", "perceive with the eyes", "inspect visually", "examine visually"),
     ),
     (
         "ACQUIRE_OBJECT",
@@ -271,7 +247,7 @@ VERB_FRAME_RULES: List[Tuple[str, List[str], List[str], str, Dict[str, float], T
         ["ARTIFACT_SOLID", "LIGHT"],
         "NONE",
         {"dominance": 0.35},
-        ("take hold", "grasp", "pick up", "unsheathe", "draw a weapon", "seize"),
+        ("take hold of with the hand", "seize with the hands", "grasp firmly", "unsheathe a weapon"),
     ),
     (
         "RELEASE_OBJECT",
@@ -279,85 +255,28 @@ VERB_FRAME_RULES: List[Tuple[str, List[str], List[str], str, Dict[str, float], T
         ["ARTIFACT_SOLID", "LIGHT"],
         "REQUIRES_HOLDING",
         {"velocity": 0.50},
-        ("drop", "let fall", "release from the hand", "relinquish"),
+        ("let go of from the hand", "allow to fall", "release hold of"),
     ),
 ]
 
-BUILTIN_WIKTIONARY_GLOSSES: List[Tuple[str, str, str]] = [
-    ("bark", "noun", "The tough exterior covering of the woody trunk and branches of a tree, oak, or timber."),
-    ("bark", "noun", "The short, loud, sharp cry or sound made by a dog, hound, or wolf."),
-    ("cold", "adj", "Having a low temperature; freezing, icy, or glacial to the touch."),
-    ("cold", "adj", "Unfriendly, emotionless, distant, and lacking warm affection or joy."),
-    ("grief", "noun", "A feeling of deep sadness, sorrow, pain, and heavy loss."),
-    ("melancholy", "noun", "A feeling of deep sadness, gloom, and slow sorrow."),
-    ("silence", "noun", "The state of complete quiet and absence of sound or voice."),
-    ("hope", "noun", "A feeling of bright expectation, joy, and warm desire."),
-    ("fear", "noun", "A strong, cold emotion of terror, dread, and panic caused by danger."),
-    ("anger", "noun", "A strong feeling of hot rage, hostility, and desire to strike."),
-    ("bureaucracy", "noun", "An administrative system of government officials characterized by slow, stagnant, heavy rules."),
-    ("debt", "noun", "An obligation or heavy burden owed to another person under contract."),
-    ("secret", "noun", "Knowledge kept dark and hidden from other people."),
-    ("peace", "noun", "A state of calm, quiet, safe tranquility and gentle rest."),
-    ("calm", "adj", "Free from anger or sudden motion; quiet, gentle, and peaceful."),
-    ("quiet", "adj", "With little or no sound; calm and gentle."),
-    ("warm", "adj", "Having a moderate, pleasant heat; friendly and safe."),
-    ("safe", "adj", "Protected from danger, harm, or fear; calm and secure."),
-    ("gentle", "adj", "Soft, mild, calm, and free from sharp or sudden force."),
-    ("breeze", "noun", "A light, gentle, weightless current of air."),
-    ("tea", "noun", "A warm, calm beverage made by infusing leaves in water."),
-    ("anchor", "noun", "A heavy iron instrument used to moor a vessel to the bottom so it remains immobile."),
-    ("anvil", "noun", "A massive, heavy iron block on which metal is hammered."),
-    ("steel", "noun", "A hard, strong, heavy metal alloy of iron used for armor and weapons."),
-    ("armor", "noun", "A heavy protective metal covering worn in battle."),
-    ("glacier", "noun", "A massive, slow, freezing body of ice moving down a slope."),
-    ("sunset", "noun", "The bright, warm, glowing light in the sky as the sun goes down."),
-    ("executioner", "noun", "A terrifying person who carries out a death sentence with an axe or blade."),
-    ("glass", "noun", "A hard, brittle, sharp transparent solid vessel or material that can shatter."),
-    ("blade", "noun", "The sharp cutting edge of a metal weapon, knife, or sword."),
-    ("dagger", "noun", "A short, sharp pointed knife or blade used as a weapon for piercing."),
-    ("razor", "noun", "A keen, ultra-sharp metal instrument used for cutting."),
-    ("ash", "noun", "The weightless, dark, decayed powdery residue left after the burning of a substance by fire."),
-    ("wildfire", "noun", "A rapid, explosive, scorching conflagration of fire that burns out of control."),
-    ("acid", "noun", "A sour, sharp, corrosive liquid solution that dissolves and corrodes metal."),
-    ("poison", "noun", "A toxic liquid or substance that causes pain, decay, or death when swallowed."),
-    ("lantern", "noun", "A portable transparent case or lamp for holding a bright light or flame."),
-    ("inscription", "noun", "Words or letters carved into a solid stone or metal monument."),
-    ("letter", "noun", "A written document or message on paper."),
-    ("room", "noun", "A chamber or enclosed space within a building."),
-    ("tavern", "noun", "A public house or building where ale and wine are served at tables."),
-    ("oak", "noun", "A massive forest tree bearing acorns and rough timber bark."),
-    ("hound", "noun", "A domestic dog bred for hunting."),
-    ("rusted", "adj", "Corroded, decayed, and covered with slow iron rust."),
-    ("corroded", "adj", "Eaten away by acid or rust; decayed and weakened."),
-    ("shattered", "adj", "Broken suddenly into sharp, jagged fragments and ruined."),
-    ("explosive", "adj", "Tending to explode suddenly with violent fire and heat."),
-    ("screaming", "adj", "Uttering a sudden, sharp, terrified scream of pain or rage."),
-    ("bleeding", "adj", "Losing blood from a cut or painful wound."),
-    ("love", "verb", "To feel deep warm affection, joy, and delight toward someone."),
-    ("happy", "adj", "Feeling joy, pleasure, and warm delight."),
-    ("pleasure", "noun", "A state of joy, delight, and warm satisfaction."),
-    ("wonderful", "adj", "Tending to excite delight, pleasure, and joy; admirable."),
-    ("thrilled", "adj", "Suddenly filled with pleasure, joy, and delight."),
-    ("fine", "adj", "Acceptable, pure, or satisfactory."),
-    ("frown", "verb", "To wrinkle the brow in anger, displeasure, or gloom."),
-    ("snarl", "verb", "To growl with sharp teeth bared in anger and rage."),
-    ("sneer", "verb", "To smile or speak with cold contempt, insult, and hatred."),
-    ("insult", "verb", "To speak to with sharp disrespect, pain, and hostility."),
-    ("strangle", "verb", "To squeeze the throat so as to choke, suffocate, and kill."),
-    ("digest", "verb", "To swallow and dissolve food in the stomach."),
-    ("extinguish", "verb", "To put out a light, lamp, or fire; to quench or snuff."),
-    ("read", "verb", "To look at and interpret letters or an inscription visually."),
-    ("drop", "verb", "To let fall or release from the hand."),
-    ("take", "verb", "To grasp or pick up an object with the hand."),
-    ("slaughter", "verb", "To butcher or kill violently in a bloody massacre."),
-    ("burn", "verb", "To destroy or consume with hot fire and flame."),
-    ("kick the bucket", "verb", "(idiomatic) To die; to pass away."),
-    ("kicked the bucket", "verb", "(idiomatic) To die; to pass away."),
-    ("bite the dust", "verb", "(idiomatic) To die or fail completely in battle."),
-    ("bit the dust", "verb", "(idiomatic) To die or fail completely in battle."),
-    ("spill the beans", "verb", "(idiomatic) To reveal a secret prematurely."),
-    ("put out", "verb", "To extinguish a light, lamp, candle, or fire."),
-    ("give up", "verb", "To surrender, despair, and cease effort."),
+# Minimal Starter Calibration Set for unit testing when offline
+CORE_CALIBRATION_GLOSSES: List[Tuple[str, str, str]] = [
+    ("anvil", "noun", "A massive block of iron used as an instrument for hammering metal."),
+    ("blade", "noun", "The sharp cutting edge of an instrument, weapon, or knife."),
+    ("sword", "noun", "A weapon with a long metal blade used for cutting and thrusting."),
+    ("fire", "noun", "The thermal combustion of a substance producing heat and light."),
+    ("ice", "noun", "Frozen water in a solid state at a very low temperature."),
+    ("lantern", "noun", "A portable transparent device that produces light."),
+    ("melancholy", "noun", "A state of deep sadness, gloom, and sorrow."),
+    ("grief", "noun", "A feeling of deep emotional sorrow and suffering."),
+    ("strangle", "verb", "To compress the throat so as to prevent breathing."),
+    ("digest", "verb", "To dissolve and take into the stomach food or beverage."),
+    ("shatter", "verb", "To break into pieces violently."),
+    ("extinguish", "verb", "To put out a fire or light source."),
+    ("ignite", "verb", "To set on fire or cause to burn."),
+    ("read", "verb", "To look at visually and interpret written letters."),
+    ("drop", "verb", "To allow to fall from the hand."),
+    ("take", "verb", "To take hold of with the hand."),
 ]
 
 
@@ -442,13 +361,14 @@ def score_gloss_from_primitives(
     gloss: str,
     known_vectors: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> Tuple[str, Dict[str, float], List[str], str]:
+    """Scores any English definition against universal physical calibration primitives."""
     g_low = gloss.lower()
     tokens = TOKEN_RE.findall(g_low)
 
     domain = "ABSTRACT_STATE" if pos in ("adj", "adv") else "ARTIFACT_SOLID"
     concreteness = 0.50
-    for cand_domain, cand_conc, keywords in GENUS_DOMAIN_RULES:
-        if any(k in g_low for k in keywords):
+    for cand_domain, cand_conc, definition_frames in GENUS_DOMAIN_RULES:
+        if any(frame in g_low for frame in definition_frames):
             domain = cand_domain
             concreteness = cand_conc
             break
@@ -517,12 +437,13 @@ def _infer_mwe_canonical(phrase: str, gloss: str) -> Tuple[str, str, float, floa
 
 
 def infer_sensory_profile(domain: str, gloss: str, phys: Dict[str, float]) -> Dict[str, float]:
+    """Maps ontological domain and physical dimensions to Lancaster sensorimotor modalities."""
     g = gloss.lower()
     vis = 0.75 if domain in ("ARTIFACT_SOLID", "LIGHT", "SPACE_CONTAINER", "ANIMATE_BEING") else 0.25
-    aud = 0.90 if domain == "SOUND" or any(k in g for k in ("sound", "cry", "noise", "voice", "loud", "quiet")) else 0.10
-    hap = 0.80 if abs(phys.get("sharpness", 0)) >= 0.5 or abs(phys.get("temperature", 0)) >= 0.5 or abs(phys.get("mass_weight", 0)) >= 0.5 else 0.15
+    aud = 0.90 if domain == "SOUND" or any(k in g for k in ("sound", "cry", "noise", "voice", "loud", "quiet", "auditory")) else 0.10
+    hap = 0.85 if abs(phys.get("sharpness", 0)) >= 0.5 or abs(phys.get("temperature", 0)) >= 0.5 or abs(phys.get("mass_weight", 0)) >= 0.5 else 0.15
     olf = 0.85 if any(k in g for k in ("smell", "odor", "scent", "stench", "aroma", "fragrant", "reek")) else 0.05
-    gus = 0.85 if any(k in g for k in ("taste", "sweet", "sour", "bitter", "salty", "flavor", "beverage", "food", "drink")) else 0.05
+    gus = 0.85 if any(k in g for k in ("taste", "sweet", "sour", "bitter", "salty", "flavor", "beverage", "food", "drink", "edible")) else 0.05
     intero = 0.85 if domain == "ABSTRACT_STATE" or abs(phys.get("valence", 0)) >= 0.65 else 0.10
     return {
         "sensory_visual": round(vis, 3),
@@ -544,7 +465,7 @@ def build_cognitive_database(
     cur = conn.cursor()
     cur.executescript(SCHEMA_SQL)
 
-    gloss_rows: List[Tuple[str, str, str]] = list(BUILTIN_WIKTIONARY_GLOSSES)
+    gloss_rows: List[Tuple[str, str, str]] = list(CORE_CALIBRATION_GLOSSES)
     if wiktionary_sqlite_path and os.path.exists(wiktionary_sqlite_path):
         ingestor = WiktionaryFullIngestor(wiktionary_sqlite_path)
         for rec in ingestor.iter_rich_entries():
@@ -572,14 +493,10 @@ def build_cognitive_database(
             if target_prim != w:
                 concept_edge_rows.append((w, "GroundedInPrimitive", target_prim, 0.85))
 
-        for cue_tok in TOKEN_RE.findall(gloss.lower())[:12]:
-            if len(cue_tok) >= 3 and cue_tok not in ("the", "and", "with", "from", "made"):
-                concept_edge_rows.append((w, "SenseContext", cue_tok, 0.70))
-
         if p.startswith("v"):
             g_low = gloss.lower()
-            for mutation, req_s, req_o, precond, imp_phys, triggers in VERB_FRAME_RULES:
-                if any(t in g_low for t in triggers) or w in triggers:
+            for mutation, req_s, req_o, precond, imp_phys, definition_frames in VERB_CLASS_RULES:
+                if any(frame in g_low for frame in definition_frames) or w in definition_frames:
                     verb_frame_rows.append((
                         w, json.dumps(req_s), json.dumps(req_o), mutation, precond, json.dumps(imp_phys)
                     ))
