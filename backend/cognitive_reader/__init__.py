@@ -1,16 +1,17 @@
-from cognitive_reader.compiler import DEFAULT_DB_PATH, build_cognitive_database
-from cognitive_reader.engine import CognitiveEngine
-from cognitive_reader.models import (
+from .compiler import DEFAULT_DB_PATH, build_cognitive_database
+from .engine import CognitiveEngine
+from .models import (
     ContinuityAlert,
     DocumentReport,
     EpistemicAlert,
     MetaphorHit,
     OpenPromise,
+    ParagraphDiagnosis,
     ParagraphTick,
     ReaderNote,
     SubtextHit,
 )
-from cognitive_reader.state import VirtualBrainState
+from .state import VirtualBrainState
 
 __version__ = "0.3.0"
 
@@ -24,6 +25,7 @@ __all__ = [
     "ContinuityAlert",
     "EpistemicAlert",
     "OpenPromise",
+    "ParagraphDiagnosis",
     "ReaderNote",
     "ParagraphTick",
     "DocumentReport",
