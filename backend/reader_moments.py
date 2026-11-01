@@ -4,11 +4,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Prioritize backend/cognitive_reader over any site-packages or sibling packages
 _BACKEND_DIR = Path(__file__).resolve().parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
+from backend.config import WIKTIONARY_DB_PATH
 from cognitive_reader import CognitiveEngine, build_cognitive_database
 from backend.reader_text import (
     _search,
@@ -23,10 +23,13 @@ def get_thedral_cognitive_engine() -> CognitiveEngine:
     global _ENGINE_INSTANCE
     if _ENGINE_INSTANCE is None:
         db_path = Path(__file__).resolve().parent / "data" / "cognitive_lexicon.db"
-        wikt_env = os.environ.get("THEDRAL_WIKTIONARY_SQLITE_PATH", "").strip()
-        if not db_path.exists() and wikt_env and os.path.exists(wikt_env):
-            build_cognitive_database(output_db_path=db_path, wiktionary_sqlite_path=wikt_env)
-        _ENGINE_INSTANCE = CognitiveEngine(db_path=db_path)
+        wikt_path = str(WIKTIONARY_DB_PATH) if WIKTIONARY_DB_PATH.exists() else None
+        
+        # Build starter DB if missing, utilizing Wiktionary SQLite if present
+        if not db_path.exists():
+            build_cognitive_database(output_db_path=db_path, wiktionary_sqlite_path=wikt_path)
+            
+        _ENGINE_INSTANCE = CognitiveEngine(db_path=db_path, wiktionary_db_path=wikt_path)
     return _ENGINE_INSTANCE
 
 
@@ -36,9 +39,7 @@ def clip_excerpt(text: str, max_chars: int = 140) -> str:
 
 
 def _loss_and_care(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List[Dict[str, Any]]:
-    """Detects where loss occurs after an established bond of care on the SAME entity."""
     moments = []
-    
     care_bonds = []
     for idx, p in enumerate(paragraphs, 1):
         if _search(cues["care"], p):
@@ -85,7 +86,6 @@ def _loss_and_care(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List[D
 
 
 def _empathy_moments(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List[Dict[str, Any]]:
-    """Detects raw vulnerability or emotional shame, ignoring requests for solitude."""
     moments = []
     for idx, p in enumerate(paragraphs, 1):
         if re.search(r"\b(?:talk|speak|meet|leave|let|be)\s+(?:\w+\s+)?alone\b", p, re.IGNORECASE):
@@ -113,7 +113,6 @@ def _empathy_moments(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List
 
 
 def _trust_shifts(paragraphs: List[str], cues: dict[str, re.Pattern]) -> List[Dict[str, Any]]:
-    """Detects broken promises, false reassurances, or sudden trust fractures."""
     moments = []
     for idx, p in enumerate(paragraphs, 1):
         reassurance = bool(_search(cues["reassurance"], p))
