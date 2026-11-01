@@ -38,8 +38,8 @@
       </div>
 
       <div class="flex items-center space-x-2">
-        <button @click="store.navigateScene(-1)" :disabled="!hasPreviousScene" title="Previous scene (Ctrl/Cmd+Alt+Left)" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">← Scene</button>
-        <button @click="store.navigateScene(1)" :disabled="!hasNextScene" title="Next scene (Ctrl/Cmd+Alt+Right)" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">Scene →</button>
+        <button @click="store.navigateScene(-1)" :disabled="!hasPreviousScene" title="Previous scene" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">← Scene</button>
+        <button @click="store.navigateScene(1)" :disabled="!hasNextScene" title="Next scene" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">Scene →</button>
         
         <button @click="toggleXRay" :class="['px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition border', store.isXRayActive ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.15)]' : 'bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800']">
           <Eye class="w-3.5 h-3.5" /> <span>Craft X-Ray</span>
@@ -64,7 +64,8 @@
       <div class="flex items-center gap-1.5 overflow-x-auto">
         <span class="text-zinc-500 uppercase tracking-wider font-bold mr-1">Lens:</span>
         <button @click="activeXRayLens = 'energetics'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'energetics' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">⚡ Energetics</button>
-        <button @click="activeXRayLens = 'clutter'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'clutter' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🔍 Clutter & Filters</button>
+        <button @click="activeXRayLens = 'clutter'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'clutter' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🔍 Filter Verbs</button>
+        <button @click="activeXRayLens = 'tags'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'tags' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🏷️ Tags & Passive</button>
         <button @click="activeXRayLens = 'cadence'" :class="['px-2 py-0.5 rounded transition', activeXRayLens === 'cadence' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-zinc-900 text-zinc-400 hover:text-white']">🎵 Cadence</button>
       </div>
 
@@ -144,6 +145,7 @@
                   @click="handleXRaySentenceClick(s.text, pIdx + 1)"
                 >
                   <span v-if="activeXRayLens === 'clutter' && s.clutter_html" v-html="s.clutter_html"></span>
+                  <span v-else-if="activeXRayLens === 'tags' && s.tags_html" v-html="s.tags_html"></span>
                   <span v-else>{{ s.text }}</span>{{ ' ' }}
                   <span class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-zinc-950 text-zinc-200 text-[10px] font-mono rounded-lg shadow-2xl border border-zinc-700 z-50 whitespace-nowrap pointer-events-none">
                     {{ getSentenceTooltip(s) }}
@@ -171,7 +173,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { store, showToast } from '../store.js'
 import { Eye, Moon, Wand2, RotateCcw, Feather, Search, DoorOpen, Bold, Italic, Compass } from '@lucide/vue'
 import { Editor, EditorContent } from '@tiptap/vue-3'
@@ -184,7 +186,7 @@ import { contentToHtml, htmlToText } from '../editorText.js'
 
 const isXRayLoading = ref(false)
 const showGutterBadges = ref(true)
-const activeXRayLens = ref('energetics')
+const activeXRayLens = ref('energetics') // 'energetics' | 'clutter' | 'tags' | 'cadence'
 const xraySettings = ref({
   staccato_threshold: 9,
   expansive_threshold: 22,
@@ -219,9 +221,7 @@ const hasNextScene = computed(() => bookScenes.value.length > 0 && activeSceneIn
 
 const scrollContainer = ref(null)
 let editor = null
-let scrollThrottle = null
 let hasPendingSave = false
-let savePromise = null
 const activeMarks = ref({ bold: false, italic: false })
 
 const updateActiveMarks = () => {
@@ -239,7 +239,6 @@ const toggleGutterBadges = () => {
   showGutterBadges.value = !showGutterBadges.value
 }
 
-// Gutter Badge Helpers
 const getGutterIcon = (diag) => {
   switch (diag.cognitive_function) {
     case 'KINETIC_ACTION': return '⚡'
@@ -285,7 +284,6 @@ const getGutterBadgeClass = (diag) => {
   }
 }
 
-// Two-way synchronization: click gutter badge to highlight paragraph in inspector
 const jumpToDiagnostic = (pNum) => {
   store.activeInspectorTab = 'reader'
   window.dispatchEvent(new CustomEvent('lens-beat-jump', { detail: { beat: pNum } }))
@@ -419,11 +417,17 @@ const getSentenceLensClass = (s) => {
     return 'text-zinc-300'
   } else if (activeXRayLens.value === 'clutter') {
     return s.has_clutter ? 'bg-zinc-900/60' : 'text-zinc-300'
+  } else if (activeXRayLens.value === 'tags') {
+    return s.has_tags_or_passive ? 'bg-purple-950/30' : 'text-zinc-300'
   }
   return 'text-zinc-300'
 }
 
-const getSentenceTooltip = (s) => s.energetics_reason || s.reason || ''
+const getSentenceTooltip = (s) => {
+  if (activeXRayLens.value === 'tags') return s.tags_reason || ''
+  if (activeXRayLens.value === 'clutter') return s.clutter_reason || ''
+  return s.energetics_reason || s.reason || ''
+}
 
 const runMasterTriage = async () => {
   if (!store.activeNode?.id) return
@@ -466,4 +470,7 @@ onBeforeUnmount(() => {
 .xray-slack { background-color: rgba(113, 113, 122, 0.2); color: #a1a1aa; text-decoration: underline dotted #71717a; }
 .clutter-filter { background-color: rgba(244, 63, 94, 0.35); color: #fda4af; border-bottom: 2px solid #f43f5e; padding: 1px 3px; border-radius: 2px; font-weight: 600; }
 .clutter-crutch { background-color: rgba(245, 158, 11, 0.35); color: #fde68a; border-bottom: 2px solid #f59e0b; padding: 1px 3px; border-radius: 2px; font-weight: 600; }
+.xray-strained-tag { background-color: rgba(168, 85, 247, 0.25); color: #d8b4fe; border-bottom: 2px solid #a855f7; border-radius: 2px; padding: 1px 3px; }
+.xray-dialogue-adverb { background-color: rgba(244, 63, 94, 0.25); color: #fda4af; border-bottom: 2px dashed #f43f5e; border-radius: 2px; padding: 1px 3px; }
+.xray-passive { background-color: rgba(234, 179, 8, 0.2); color: #fef08a; border-bottom: 2px dashed #eab308; }
 </style>
