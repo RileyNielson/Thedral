@@ -123,7 +123,6 @@ def build_chapter_micro_lens(
             beats_sizes.append(node_size)
             beats_colors.append(node_color)
             
-            # Pack scene_id, beat number, and text snippet for click navigation
             beats_customdata.append({
                 "scene_id": sc_id,
                 "beat_idx": p_idx,
@@ -133,7 +132,7 @@ def build_chapter_micro_lens(
             hover_info = (
                 f"<b>{sc_title}</b> (Beat {p_idx})<br>"
                 f"{mode_label}<br>"
-                f"Text-derived tension estimate: <b>{tension_estimate:.2f}</b> ({words}w)<br>"
+                f"Tension estimate: <b>{tension_estimate:.2f}</b> ({words}w)<br>"
                 f"<i>\"{snippet}\"</i>"
             )
             beats_text.append(hover_info)
@@ -186,7 +185,7 @@ def build_chapter_micro_lens(
         "scene": {
             "xaxis": {"title": "Chapter Beats", "color": "#71717a", "gridcolor": "#27272a", "showticklabels": True},
             "yaxis": {"title": y_axis_title, "tickvals": y_tick_vals, "ticktext": y_tick_text, "color": "#a1a1aa", "gridcolor": "#27272a"},
-            "zaxis": {"title": "Text-derived tension estimate", "range": [0, 1], "color": "#71717a", "gridcolor": "#27272a"},
+            "zaxis": {"title": "Tension estimate", "range": [0, 1], "color": "#71717a", "gridcolor": "#27272a"},
             "camera": {"eye": {"x": 1.1, "y": -1.5, "z": 0.8}}
         },
         "margin": {"l": 0, "r": 0, "b": 0, "t": 0}
@@ -196,7 +195,7 @@ def build_chapter_micro_lens(
 
 
 # =============================================================================
-# 2. MACRO COSMOGRAPH (Full Manuscript 8-Layer Spacetime)
+# 2. MACRO COSMOGRAPH (100% Deterministic Prose-Derived Spacetime)
 # =============================================================================
 
 def build_astrolabe_manifest(
@@ -227,7 +226,7 @@ def build_astrolabe_manifest(
         b_row = c.fetchone()
 
     if not b_row:
-        return {"data": [], "layout": {}, "locations": {}, "anomalies": []}
+        return {"data": [], "layout": {}, "locations": {}, "anomalies": [], "transit_matrix": {}}
 
     book_id = b_row["id"]
 
@@ -242,272 +241,147 @@ def build_astrolabe_manifest(
     scene_rows = c.fetchall()
 
     if not scene_rows:
-        return {"data": [], "layout": {}, "locations": {}, "anomalies": []}
+        return {"data": [], "layout": {}, "locations": {}, "anomalies": [], "transit_matrix": {}}
 
     total_scenes = len(scene_rows)
     scene_seq_map = {r["id"]: idx + 1 for idx, r in enumerate(scene_rows)}
 
-    # Fetch canonical locations
+    # Fetch canonical entities
     c.execute("SELECT entity_id, name, aliases, entity_type FROM canonical_entities WHERE entity_type = 'LOCATION' ORDER BY rowid ASC")
     location_entities = [dict(r) for r in c.fetchall()]
-    canonical_locations = [entity["name"].strip() for entity in location_entities]
 
-    scene_ids = [r["id"] for r in scene_rows]
-    placeholders = ",".join(["?"] * len(scene_ids))
-    
-    c.execute(f"""
-        SELECT w.event_id, w.entity_id, w.timeline_tick, w.scene_id, w.state_delta, w.epistemic_tier, w.carrier_id, 
-               e.name, e.entity_type
-        FROM canonical_worldlines w
-        JOIN canonical_entities e ON w.entity_id = e.entity_id
-        WHERE w.scene_id IN ({placeholders})
-        ORDER BY w.timeline_tick ASC
-    """, scene_ids)
-    events = c.fetchall()
+    c.execute("SELECT entity_id, name, aliases, entity_type FROM canonical_entities WHERE entity_type = 'CHARACTER' ORDER BY rowid ASC")
+    character_entities = [dict(r) for r in c.fetchall()]
 
-    worldline_locations = []
-    scene_actual_ticks = {}
-
-    for ev in events:
-        try:
-            d = json.loads(ev["state_delta"])
-            raw_location = d.get("location", "").strip()
-            known_location = next(
-                (loc["name"] for loc in location_entities if _mentions_entity(raw_location, loc)),
-                None,
-            )
-            loc_val = known_location or raw_location.title()
-            if loc_val and loc_val not in worldline_locations and loc_val not in canonical_locations:
-                worldline_locations.append(loc_val)
-            # Record actual chronological tick for each scene
-            sc_id = ev["scene_id"]
-            if sc_id not in scene_actual_ticks:
-                scene_actual_ticks[sc_id] = float(ev["timeline_tick"])
-        except Exception:
-            pass
-
-    locations = []
-    for loc in canonical_locations + worldline_locations:
-        if loc and loc not in locations:
-            locations.append(loc)
-
-    if not locations:
-        locations = ["Unspecified"]
-    elif "Unspecified" not in locations:
-        locations.append("Unspecified")
-
-    loc_to_y = {loc: idx for idx, loc in enumerate(locations)}
-
+    # 1. Map Each Scene to an Inhabited Geographic Location (from prose or title)
     scene_location_map = {}
+    active_locations = []
 
     for sc in scene_rows:
         sc_id = sc["id"]
         sc_content = html_to_text(sc["content"] or "")
         matched_loc = None
 
+        # Check prose for confirmed locations
         for loc in location_entities:
             if _mentions_entity(sc_content, loc) or _mentions_entity(sc["title"], loc):
                 matched_loc = loc["name"]
                 break
 
-        if not matched_loc:
-            for ev in events:
-                if ev["scene_id"] == sc_id:
-                    try:
-                        d = json.loads(ev["state_delta"])
-                        if "location" in d:
-                            canonical_location = next(
-                                (loc["name"] for loc in location_entities if _mentions_entity(d["location"], loc)),
-                                d["location"],
-                            )
-                            if canonical_location in loc_to_y:
-                                matched_loc = canonical_location
-                                break
-                    except Exception:
-                        pass
+        final_loc = matched_loc or "Unspecified"
+        scene_location_map[sc_id] = final_loc
+        if final_loc not in active_locations:
+            active_locations.append(final_loc)
 
-        scene_location_map[sc_id] = matched_loc or "Unspecified"
+    if not active_locations:
+        active_locations = ["Unspecified"]
 
-    # The arc reflects text-derived telemetry; it does not model reader response.
+    loc_to_y = {loc: idx for idx, loc in enumerate(active_locations)}
+
+    # 2. Compute Pacing Telemetry & Tension Estimates across scenes
     tension_estimates = []
     prev_tens = 0.35
-
     for sc in scene_rows:
         metric = calculate_text_telemetry(sc["content"] or "", prev_tens)
         scene_telemetry[sc["id"]] = metric
         prev_tens = metric["tension_elevation"]
         tension_estimates.append(metric["tension_elevation"])
 
-    character_events = {}
-    artifact_events = {}
+    # 3. AUTOMATED CHARACTER WORLDLINES (Extracted directly from prose mentions)
+    character_trajectories = {}
     co_locations = {}
     anomalies = []
 
-    for ev in events:
-        eid = ev["entity_id"]
-        etype = ev["entity_type"]
-        tick = float(ev["timeline_tick"])
-        x_val = tick if time_mode == "chronological" else float(scene_seq_map.get(ev["scene_id"], 1.0))
-
-        loc_name = scene_location_map.get(ev["scene_id"], locations[0])
-        health_val = 1.0
-        try:
-            d = json.loads(ev["state_delta"])
-            if "location" in d:
-                canonical_location = next(
-                    (loc["name"] for loc in location_entities if _mentions_entity(d["location"], loc)),
-                    d["location"],
-                )
-                if canonical_location in loc_to_y:
-                    loc_name = canonical_location
-            health_val = float(d.get("health_score", 1.0))
-        except Exception:
-            pass
-
-        y_val = loc_to_y.get(loc_name, 0)
-        sc_idx = scene_seq_map.get(ev["scene_id"], 1) - 1
-        z_val = tension_estimates[sc_idx] if 0 <= sc_idx < len(tension_estimates) else 0.45
-
-        pt = {
-            "x": x_val, "y": y_val, "z": z_val, "tick": tick,
-            "scene_id": ev["scene_id"], "loc_name": loc_name,
-            "health": health_val, "name": ev["name"], "tier": ev["epistemic_tier"]
-        }
-
-        if etype == "CHARACTER":
-            if eid not in character_events:
-                character_events[eid] = {"name": ev["name"], "points": []}
-            character_events[eid]["points"].append(pt)
-
-            coord_key = (round(x_val, 2), y_val)
-            if coord_key not in co_locations:
-                co_locations[coord_key] = []
-            co_locations[coord_key].append(ev["name"])
-
-            if health_val < 0.40 and z_val > 0.70:
-                anomalies.append({
-                    "type": "POTENTIAL_STRAIN_CONTINUITY", "entity": ev["name"], "scene_id": ev["scene_id"],
-                    "desc": f"Mapped state data places {ev['name']} in a scene with a text-derived tension estimate of {z_val:.2f} while vitality is {int(health_val*100)}%. Check whether that combination matches the prose."
-                })
-
-        elif etype == "ITEM":
-            if eid not in artifact_events:
-                artifact_events[eid] = {"name": ev["name"], "points": [], "carrier": ev["carrier_id"]}
-            artifact_events[eid]["points"].append(pt)
-
-    c.execute("SELECT entity_id, name, aliases, entity_type FROM canonical_entities WHERE entity_type = 'CHARACTER' ORDER BY rowid ASC")
-    text_traces = {}
-    for entity in c.fetchall():
-        mapped_scenes = {
-            point["scene_id"]
-            for point in character_events.get(entity["entity_id"], {}).get("points", [])
-        }
+    for char in character_entities:
+        c_id = char["entity_id"]
+        c_name = char["name"]
         points = []
-        for scene in scene_rows:
-            scene_text = html_to_text(scene["content"] or "")
-            if scene["id"] in mapped_scenes or not _mentions_entity(scene_text, entity):
-                continue
-            scene_id = scene["id"]
-            tick = scene_actual_ticks.get(scene_id, float(scene_seq_map[scene_id]))
-            scene_index = scene_seq_map[scene_id] - 1
-            tension = tension_estimates[scene_index] if 0 <= scene_index < len(tension_estimates) else 0.45
-            loc_name = scene_location_map.get(scene_id, "Unspecified")
-            points.append({
-                "x": tick if time_mode == "chronological" else float(scene_seq_map[scene_id]),
-                "y": loc_to_y.get(loc_name, loc_to_y["Unspecified"]),
-                "z": tension,
-                "scene_id": scene_id,
-                "name": entity["name"],
-                "loc_name": loc_name,
-            })
-        if points:
-            text_traces[entity["entity_id"]] = {"name": entity["name"], "points": points}
 
-    traces = []
-    palette = ["#f59e0b", "#38bdf8", "#ec4899", "#a855f7", "#10b981", "#fb923c", "#34d399"]
+        for idx, sc in enumerate(scene_rows, 1):
+            sc_id = sc["id"]
+            sc_text = html_to_text(sc["content"] or "")
 
-    # Layer 1: Character Trajectory Ribbons
-    for idx, (eid, cdata) in enumerate(character_events.items()):
-        pts = cdata["points"]
-        if not pts: continue
+            if _mentions_entity(sc_text, char):
+                loc_name = scene_location_map[sc_id]
+                y_val = loc_to_y[loc_name]
+                z_val = tension_estimates[idx - 1]
+                x_val = float(idx)
 
-        for i in range(1, len(pts)):
-            prev, curr = pts[i-1], pts[i]
-            if prev["y"] != curr["y"] and (curr["tick"] - prev["tick"]) <= 0.05:
-                anomalies.append({
-                    "type": "SPATIAL_TELEPORTATION", "entity": cdata["name"], "scene_id": curr["scene_id"],
-                    "desc": f"{cdata['name']} traversed between '{prev['loc_name']}' and '{curr['loc_name']}' with 0.0 elapsed story days."
+                points.append({
+                    "x": x_val, "y": y_val, "z": z_val,
+                    "scene_id": sc_id, "scene_title": sc["title"],
+                    "chapter_title": sc["ch_title"], "loc_name": loc_name,
+                    "name": c_name
                 })
 
-        color = palette[idx % len(palette)]
-        is_focal = (projection_mode in ["ALL", "KINEMATIC", "SOMATIC", "SYNAPTIC"])
-        opacity = 1.0 if is_focal else 0.08
-        width = 6 if is_focal else 2
+                coord_key = (idx, y_val)
+                co_locations.setdefault(coord_key, []).append(c_name)
 
-        traces.append({
-            "type": "scatter3d", "mode": "lines+markers", "name": f"Actor: {cdata['name']}",
-            "x": [p["x"] for p in pts], "y": [p["y"] for p in pts], "z": [p["z"] for p in pts],
-            "customdata": [p["scene_id"] for p in pts],
-            "text": [f"<b>{p['name']}</b><br>Location: {p['loc_name']}<br>Day: {p['tick']:.1f}<br>Vitality: {int(p['health']*100)}%" for p in pts],
-            "hoverinfo": "text",
-            "line": {"color": color, "width": width},
-            "marker": {"size": 7, "color": color, "opacity": opacity},
-            "opacity": opacity
-        })
+        if points:
+            character_trajectories[c_id] = {"name": c_name, "points": points}
 
-    for idx, cdata in enumerate(text_traces.values()):
+            # Detect Spatial Teleportation: character jumps location with 0 elapsed narrative beats
+            for i in range(1, len(points)):
+                prev_p, curr_p = points[i-1], points[i]
+                if prev_p["loc_name"] != curr_p["loc_name"] and (curr_p["x"] - prev_p["x"]) <= 1.0:
+                    anomalies.append({
+                        "type": "SPATIAL_JUMP",
+                        "entity": c_name,
+                        "scene_id": curr_p["scene_id"],
+                        "desc": f"{c_name} transitions from '{prev_p['loc_name']}' to '{curr_p['loc_name']}' in consecutive scenes without travel transition."
+                    })
+
+    # 4. Construct Plotly 3D Traces
+    traces = []
+    palette = ["#f59e0b", "#38bdf8", "#ec4899", "#a855f7", "#10b981", "#fb923c", "#34d399", "#818cf8"]
+
+    # Layer 1: Continuous Character Trajectory Ribbons
+    for idx, (cid, cdata) in enumerate(character_trajectories.items()):
         pts = cdata["points"]
-        traces.append({
-            "type": "scatter3d", "mode": "markers", "name": f"Text mentions: {cdata['name']}",
-            "x": [point["x"] for point in pts],
-            "y": [point["y"] for point in pts],
-            "z": [point["z"] for point in pts],
-            "customdata": [point["scene_id"] for point in pts],
-            "text": [
-                f"<b>{point['name']}</b> is named in this scene<br>Text-matched setting: {point['loc_name']}"
-                for point in pts
-            ],
-            "hoverinfo": "text",
-            "marker": {"size": 6, "symbol": "circle-open", "color": palette[idx % len(palette)], "opacity": 0.8},
-        })
+        color = palette[idx % len(palette)]
+        
+        # Ribbons for characters with 2+ points
+        if len(pts) >= 2:
+            traces.append({
+                "type": "scatter3d", "mode": "lines+markers", "name": f"Cast: {cdata['name']}",
+                "x": [p["x"] for p in pts], "y": [p["y"] for p in pts], "z": [p["z"] for p in pts],
+                "customdata": [p["scene_id"] for p in pts],
+                "text": [f"<b>{p['name']}</b><br>Scene: {p['scene_title']}<br>Setting: <b>{p['loc_name']}</b>" for p in pts],
+                "hoverinfo": "text",
+                "line": {"color": color, "width": 5},
+                "marker": {"size": 7, "color": color, "opacity": 0.95}
+            })
+        else:
+            # Standalone point marker for single scene appearances
+            traces.append({
+                "type": "scatter3d", "mode": "markers", "name": f"Cast: {cdata['name']}",
+                "x": [p["x"] for p in pts], "y": [p["y"] for p in pts], "z": [p["z"] for p in pts],
+                "customdata": [p["scene_id"] for p in pts],
+                "text": [f"<b>{p['name']}</b><br>Scene: {p['scene_title']}<br>Setting: <b>{p['loc_name']}</b>" for p in pts],
+                "hoverinfo": "text",
+                "marker": {"size": 8, "symbol": "diamond", "color": color, "opacity": 0.95}
+            })
 
-    # Layer 2: Relic Custody Braiding
-    for idx, (aid, adata) in enumerate(artifact_events.items()):
-        pts = adata["points"]
-        if not pts: continue
-        is_focal = (projection_mode in ["ALL", "CUSTODY"])
-        opacity = 1.0 if is_focal else 0.05
-
-        traces.append({
-            "type": "scatter3d", "mode": "lines+markers", "name": f"Relic: {adata['name']}",
-            "x": [p["x"] for p in pts], "y": [p["y"] for p in pts], "z": [p["z"] for p in pts],
-            "customdata": [p["scene_id"] for p in pts],
-            "text": [f"<b>Relic: {adata['name']}</b><br>Held in: {p['loc_name']}<br>Day: {p['tick']:.1f}" for p in pts],
-            "hoverinfo": "text",
-            "line": {"color": "#f8fafc", "width": 4, "dash": "dash"},
-            "marker": {"size": 6, "color": "#f8fafc", "symbol": "diamond", "opacity": opacity},
-            "opacity": opacity
-        })
-
-    # Layer 3: Physical Convergence Knots
+    # Layer 2: Physical Convergence Knots (Characters sharing the same room)
     conv_x, conv_y, conv_z, conv_text = [], [], [], []
     for coord, names in co_locations.items():
-        if len(set(names)) >= 2:
+        unique_names = list(set(names))
+        if len(unique_names) >= 2:
             x_val, y_val = coord
             conv_x.append(x_val)
             conv_y.append(y_val)
             conv_z.append(0.55)
-            conv_text.append(f"<b>Convergence Knot</b><br>Meeting: {', '.join(set(names))}<br>Location: <b>{locations[y_val]}</b>")
+            conv_text.append(f"<b>Convergence Knot</b><br>Characters Present: {', '.join(unique_names)}<br>Setting: <b>{active_locations[y_val]}</b>")
 
     if conv_x and projection_mode in ["ALL", "KINEMATIC"]:
         traces.append({
-            "type": "scatter3d", "mode": "markers", "name": "Convergence Knots",
+            "type": "scatter3d", "mode": "markers", "name": "Shared Scenes",
             "x": conv_x, "y": conv_y, "z": conv_z,
             "text": conv_text, "hoverinfo": "text",
-            "marker": {"size": 11, "symbol": "diamond", "color": "#38bdf8", "opacity": 0.95}
+            "marker": {"size": 11, "symbol": "diamond", "color": "#22d3ee", "opacity": 0.95}
         })
 
-    # Layer 4: Chekhov Foreshadowing Gravity Wells
+    # Layer 3: Chekhov Foreshadowing Gravity Wells
     c.execute("""
         SELECT promise_desc, target_tick, target_location, status 
         FROM promises_ledger 
@@ -516,82 +390,47 @@ def build_astrolabe_manifest(
     promises = c.fetchall()
 
     for p in promises:
-        px = float(p["target_tick"]) if time_mode == "chronological" else 5.0
+        px = float(p["target_tick"])
         py = loc_to_y.get(p["target_location"], 0)
-        is_focal = (projection_mode in ["ALL", "FORESHADOW"])
-        opacity = 0.95 if is_focal else 0.08
-
         traces.append({
             "type": "scatter3d", "mode": "markers", "name": f"Chekhov: {p['promise_desc'][:16]}...",
             "x": [px], "y": [py], "z": [0.92],
-            "text": [f"<b>Chekhov Gravity Well</b><br>Promise: {p['promise_desc']}<br>Target Day: {px}<br>Status: {p['status']}"],
+            "text": [f"<b>Chekhov Promise</b><br>Promise: {p['promise_desc']}<br>Target Beat: {px}<br>Status: {p['status']}"],
             "hoverinfo": "text",
-            "marker": {"size": 13, "symbol": "diamond-open", "color": "#34d399" if p["status"] == "PAID_OFF" else "#ec4899", "line": {"width": 3, "color": "#10b981" if p["status"] == "PAID_OFF" else "#f43f5e"}, "opacity": opacity}
+            "marker": {"size": 12, "symbol": "diamond-open", "color": "#34d399" if p["status"] == "PAID_OFF" else "#ec4899", "line": {"width": 3, "color": "#10b981" if p["status"] == "PAID_OFF" else "#f43f5e"}, "opacity": 0.95}
         })
 
-    # Layer 5: Dynamic Event Horizon Deadlines
-    if projection_mode in ["ALL", "DEADLINES"] and time_mode == "chronological":
-        c.execute("SELECT title, deadline_tick, urgency_level FROM story_deadlines WHERE book_id = ? AND status = 'ACTIVE'", (book_id,))
-        deadlines = c.fetchall()
-        for dl in deadlines:
-            dl_tick = float(dl["deadline_tick"])
-            dl_name = dl["title"]
-            traces.append({
-                "type": "scatter3d", "mode": "lines", "name": f"Deadline: {dl_name}",
-                "x": [dl_tick, dl_tick, dl_tick, dl_tick],
-                "y": [0, len(locations)-1, len(locations)-1, 0],
-                "z": [0.05, 0.05, 0.95, 0.95],
-                "line": {"color": "#ef4444", "width": 4, "dash": "dot"},
-                "text": [f"<b>Event Horizon:</b> {dl_name}<br>Tick: Day {dl_tick:.1f}"] * 4,
-                "hoverinfo": "text"
-            })
-
-    # Layer 6: Text-derived tension-estimate spine
+    # Layer 4: Manuscript Narrative Pacing Spine
     spine_x, spine_y, spine_z, spine_sizes, spine_colors, spine_text = [], [], [], [], [], []
     scene_id_list = []
 
-    for idx, (r, tension_estimate) in enumerate(zip(scene_rows, tension_estimates), 1):
-        # In chronological mode, leap to actual story tick if known (handles flashbacks!)
-        if time_mode == "chronological":
-            x_story = scene_actual_ticks.get(r["id"], idx * 0.5)
-        else:
-            x_story = idx
+    for idx, (r, tension) in enumerate(zip(scene_rows, tension_estimates), 1):
+        loc_name = scene_location_map[r["id"]]
+        y_val = loc_to_y[loc_name]
+        is_focal = (focus_scene_id and r["id"] == focus_scene_id)
 
-        loc_name = scene_location_map.get(r["id"], locations[0])
-        y_val = loc_to_y.get(loc_name, 0)
-        metric = scene_telemetry.get(r["id"]) or calculate_text_telemetry(r["content"] or "")
-
-        point_color = "#22d3ee" if (focus_scene_id and r["id"] == focus_scene_id) else "#f59e0b"
-        node_size = 20 if (focus_scene_id and r["id"] == focus_scene_id) else max(6, min(16, int(6 + ((r["word_count"] or 0) / 160))))
-
-        spine_x.append(x_story)
+        spine_x.append(idx)
         spine_y.append(y_val)
-        spine_z.append(tension_estimate)
-        spine_sizes.append(node_size)
-        spine_colors.append(point_color)
+        spine_z.append(tension)
+        spine_sizes.append(18 if is_focal else max(6, min(14, int(5 + ((r["word_count"] or 0) / 160)))))
+        spine_colors.append("#22d3ee" if is_focal else "#f59e0b")
         scene_id_list.append(r["id"])
 
         hover = (
-            f"<b>{r['title']}</b><br>"
-            f"Corridor: <b>{loc_name}</b><br>"
-            f"Words: {r['word_count']:,} | Text-derived tension estimate: <b>{tension_estimate:.2f}</b>"
+            f"<b>{r['title']}</b> ({r['ch_title']})<br>"
+            f"Setting: <b>{loc_name}</b><br>"
+            f"Words: {r['word_count']:,} | Tension: <b>{tension:.2f}</b>"
         )
         spine_text.append(hover)
 
-    # Narrative Spacetime Spine
     traces.append({
         "type": "scatter3d", "mode": "lines+markers",
-        "name": "Narrative Spacetime Spine",
+        "name": "Pacing Spine",
         "x": spine_x, "y": spine_y, "z": spine_z,
         "customdata": scene_id_list,
         "text": spine_text, "hoverinfo": "text",
-        "line": {"color": "#fbbf24", "width": 6},
-        "marker": {
-            "size": spine_sizes,
-            "color": spine_colors,
-            "symbol": "circle",
-            "opacity": 0.95
-        }
+        "line": {"color": "#fbbf24", "width": 5},
+        "marker": {"size": spine_sizes, "color": spine_colors, "symbol": "circle", "opacity": 0.95}
     })
 
     layout = {
@@ -599,7 +438,7 @@ def build_astrolabe_manifest(
         "paper_bgcolor": "rgba(9, 9, 11, 1)",
         "plot_bgcolor": "rgba(9, 9, 11, 1)",
         "scene": {
-            "xaxis": {"title": "Story Timeline (Days)" if time_mode == "chronological" else "Reading Sequence", "color": "#71717a", "gridcolor": "#27272a"},
+            "xaxis": {"title": "Scene Sequence", "color": "#71717a", "gridcolor": "#27272a"},
             "yaxis": {
                 "title": "Story Geography",
                 "tickvals": list(loc_to_y.values()),
@@ -607,11 +446,37 @@ def build_astrolabe_manifest(
                 "color": "#a1a1aa",
                 "gridcolor": "#27272a"
             },
-            "zaxis": {"title": "Text-derived tension estimate (heuristic)", "range": [0, 1], "color": "#71717a", "gridcolor": "#27272a"},
+            "zaxis": {"title": "Tension Elevation", "range": [0, 1], "color": "#71717a", "gridcolor": "#27272a"},
             "camera": {"eye": {"x": 0.1, "y": -2.3, "z": 1.0}}
         },
         "margin": {"l": 0, "r": 0, "b": 0, "t": 10},
         "legend": {"font": {"color": "#a1a1aa", "size": 11}, "bgcolor": "rgba(18, 18, 20, 0.75)"}
     }
 
-    return {"data": traces, "layout": layout, "locations": loc_to_y, "anomalies": anomalies}
+    # 5. Build 2D Subway-Style Transit Matrix Payload
+    transit_scenes = [
+        {"idx": idx + 1, "id": sc["id"], "title": sc["title"], "chapter": sc["ch_title"], "location": scene_location_map[sc["id"]]}
+        for idx, sc in enumerate(scene_rows)
+    ]
+    transit_characters = [
+        {
+            "id": cid, "name": cdata["name"],
+            "color": palette[idx % len(palette)],
+            "stops": [{"scene_idx": p["x"], "scene_title": p["scene_title"], "location": p["loc_name"]} for p in cdata["points"]]
+        }
+        for idx, (cid, cdata) in enumerate(character_trajectories.items())
+    ]
+
+    transit_matrix = {
+        "locations": active_locations,
+        "scenes": transit_scenes,
+        "characters": transit_characters,
+    }
+
+    return {
+        "data": traces,
+        "layout": layout,
+        "locations": loc_to_y,
+        "anomalies": anomalies,
+        "transit_matrix": transit_matrix
+    }
