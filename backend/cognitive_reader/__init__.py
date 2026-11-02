@@ -10,14 +10,17 @@ from .models import (
     ParagraphTick,
     ReaderNote,
     SubtextHit,
+    StorySoFar,
+    ThreadImpact,
 )
-from .state import VirtualBrainState
+from .state import VirtualBrainState, ActiveStoryThread
 
 __version__ = "0.3.0"
 
 __all__ = [
     "CognitiveEngine",
     "VirtualBrainState",
+    "ActiveStoryThread",
     "build_cognitive_database",
     "DEFAULT_DB_PATH",
     "MetaphorHit",
@@ -26,6 +29,8 @@ __all__ = [
     "EpistemicAlert",
     "OpenPromise",
     "ParagraphDiagnosis",
+    "StorySoFar",
+    "ThreadImpact",
     "ReaderNote",
     "ParagraphTick",
     "DocumentReport",
