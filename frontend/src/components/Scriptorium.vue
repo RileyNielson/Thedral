@@ -31,7 +31,6 @@
         <button @click="closeFindReplace" class="text-zinc-500 hover:text-white"><X class="w-3.5 h-3.5" /></button>
       </div>
 
-      <!-- Find Input -->
       <div class="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded px-2 py-1">
         <input 
           ref="findInputEl"
@@ -45,7 +44,6 @@
         <button @click="findNext" :disabled="matchCount === 0" class="text-zinc-400 hover:text-white disabled:opacity-30">▼</button>
       </div>
 
-      <!-- Replace Input -->
       <div class="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded px-2 py-1">
         <input 
           v-model="replaceQuery" 
@@ -54,7 +52,6 @@
         />
       </div>
 
-      <!-- Action Buttons -->
       <div class="flex items-center justify-between pt-1">
         <label class="flex items-center gap-1 text-[9px] text-zinc-400 cursor-pointer">
           <input type="checkbox" v-model="matchCase" class="accent-amber-500" /> Case sensitive
@@ -66,7 +63,7 @@
       </div>
     </div>
 
-    <!-- Standard Action Sub-Header -->
+    <!-- Action Sub-Header -->
     <div v-if="store.activeNode?.id && !store.isVoidMode" class="h-9 border-b border-zinc-800/60 bg-zinc-900/40 px-6 flex items-center justify-between text-xs z-10 shrink-0 backdrop-blur-sm">
       <div class="flex items-center gap-4">
         <span class="text-[11px] text-zinc-500 font-mono">
@@ -88,7 +85,7 @@
         <button @click="store.navigateScene(-1)" :disabled="!hasPreviousScene" title="Previous scene" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">← Scene</button>
         <button @click="store.navigateScene(1)" :disabled="!hasNextScene" title="Next scene" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 disabled:opacity-30 text-zinc-300 rounded text-xs transition">Scene →</button>
         
-        <button @click="toggleFindReplace" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 hover:bg-zinc-800 text-zinc-300 rounded text-xs font-medium flex items-center gap-1 transition" title="Find & Replace in Scene (Cmd+F / Ctrl+F)">
+        <button @click="toggleFindReplace" class="px-2 py-1 bg-zinc-800/80 border border-zinc-700/50 hover:bg-zinc-800 text-zinc-300 rounded text-xs font-medium flex items-center gap-1 transition">
           <Search class="w-3.5 h-3.5 text-zinc-400" /> <span class="hidden md:inline">Find</span>
         </button>
 
@@ -134,7 +131,7 @@
       </div>
     </div>
 
-    <!-- Active Writing Canvas with Interactive Gutter -->
+    <!-- Active Writing Canvas with Pixel-Perfect Dynamic Gutter -->
     <div 
       ref="scrollContainer" 
       @scroll="handleEditorScroll" 
@@ -155,16 +152,17 @@
         <button @mousedown.prevent @click="toggleMark('italic')" :class="['p-2 rounded transition', activeMarks.italic ? 'bg-amber-500/20 text-amber-300' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white']" title="Italic (Ctrl/Cmd+I)"><Italic class="w-4 h-4" /></button>
       </div>
 
-      <!-- Main Editor Container (Prose + Live Gutter) -->
+      <!-- Main Editor Container (Prose + Dynamically Aligned Gutter) -->
       <div class="flex gap-4 relative">
         
-        <!-- Live Reader Gutter Badges -->
-        <div v-if="showGutterBadges && !store.isVoidMode" class="w-24 shrink-0 space-y-6 pt-1 select-none hidden md:block">
+        <!-- Live Gutter Badges (Positioned by exact paragraph offsetTop) -->
+        <div v-if="showGutterBadges && !store.isVoidMode" class="w-24 shrink-0 relative select-none hidden md:block">
           <div 
             v-for="(diag, idx) in paragraphDiagnoses" 
             :key="idx" 
             @click="jumpToDiagnostic(idx + 1)"
-            class="group cursor-pointer rounded-lg border p-1 text-[9px] font-mono leading-tight transition flex items-center gap-1.5 shadow-sm"
+            class="absolute left-0 w-24 group cursor-pointer rounded-lg border p-1 text-[9px] font-mono leading-tight transition flex items-center gap-1.5 shadow-sm"
+            :style="{ top: `${paraOffsets[idx] ?? (idx * 38)}px` }"
             :class="getGutterBadgeClass(diag)"
             :title="diag.reader_experience"
           >
@@ -173,7 +171,7 @@
           </div>
         </div>
 
-        <!-- TipTap WYSIWYG Editor Surface -->
+        <!-- TipTap Editor -->
         <div class="flex-1 min-w-0">
           <editor-content 
             v-show="!store.isXRayActive" 
@@ -243,6 +241,25 @@ const xraySettings = ref({
   expansive_threshold: 22,
   clutter_sensitivity: 2
 })
+
+// Exact Paragraph Top Offsets (Prevents gutter drift)
+const paraOffsets = ref([])
+
+const updateGutterPositions = () => {
+  if (!scrollContainer.value) return
+  const selector = store.isXRayActive ? '.xray-paragraph' : '.ProseMirror > p'
+  const paras = scrollContainer.value.querySelectorAll(selector)
+  const offsets = []
+  
+  // Measure relative to the editor container
+  const editorBox = scrollContainer.value.querySelector('.ProseMirror') || scrollContainer.value.querySelector('.prose-canvas')
+  const baseTop = editorBox ? editorBox.offsetTop : 0
+
+  paras.forEach((p) => {
+    offsets.push(p.offsetTop)
+  })
+  paraOffsets.value = offsets
+}
 
 // In-Editor Find & Replace State
 const showFindReplace = ref(false)
@@ -337,16 +354,17 @@ const goalProgress = computed(() => {
   return Math.min(100, Math.round(((Number(store.activeNode?.word_count) || 0) / target) * 100))
 })
 
+// Always bound to the live, reactive paragraph diagnoses
 const paragraphDiagnoses = computed(() => {
-  return store.readerStoryCache?.analyses?.find(a => a.scene_id === store.activeNode?.id)?.analysis?.paragraph_diagnoses || []
+  return store.currentParagraphDiagnoses || []
 })
 
 const bookScenes = computed(() => {
   const scenes = []
   const visit = (nodes) => {
-    for (const node of nodes || []) {
-      if (node.node_type === 'SCENE') scenes.push(node)
-      visit(node.children)
+    for (const n of nodes || []) {
+      if (n.node_type === 'SCENE') scenes.push(n)
+      visit(n.children)
     }
   }
   visit(store.getBook()?.children || [])
@@ -375,6 +393,7 @@ const toggleMark = (mark) => {
 
 const toggleGutterBadges = () => {
   showGutterBadges.value = !showGutterBadges.value
+  if (showGutterBadges.value) nextTick(updateGutterPositions)
 }
 
 const getGutterIcon = (diag) => {
@@ -413,15 +432,16 @@ const getGutterShortLabel = (diag) => {
 
 const getGutterBadgeClass = (diag) => {
   switch (diag.cognitive_function) {
-    case 'SEMANTIC_SLACK_ALERT': return 'bg-amber-950/40 text-amber-300 border-amber-900/60 hover:bg-amber-900/60'
-    case 'WHITE_ROOM_ALERT': return 'bg-rose-950/40 text-rose-300 border-rose-900/60 hover:bg-rose-900/60'
-    case 'VISCERAL_GROUNDING': return 'bg-emerald-950/40 text-emerald-300 border-emerald-900/60 hover:bg-emerald-900/60'
-    case 'KINETIC_ACTION': return 'bg-cyan-950/40 text-cyan-300 border-cyan-900/60 hover:bg-cyan-900/60'
-    case 'SOCIAL_HIERARCHY': return 'bg-purple-950/40 text-purple-300 border-purple-900/60 hover:bg-purple-900/60'
-    default: return 'bg-zinc-950/80 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200'
+    case 'SEMANTIC_SLACK_ALERT': return 'bg-amber-950/50 text-amber-300 border-amber-900/80 hover:bg-amber-900/60'
+    case 'WHITE_ROOM_ALERT': return 'bg-rose-950/50 text-rose-300 border-rose-900/80 hover:bg-rose-900/60'
+    case 'VISCERAL_GROUNDING': return 'bg-emerald-950/50 text-emerald-300 border-emerald-900/80 hover:bg-emerald-900/60'
+    case 'KINETIC_ACTION': return 'bg-cyan-950/50 text-cyan-300 border-cyan-900/80 hover:bg-cyan-900/60'
+    case 'SOCIAL_HIERARCHY': return 'bg-purple-950/50 text-purple-300 border-purple-900/80 hover:bg-purple-900/60'
+    default: return 'bg-zinc-950/90 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200'
   }
 }
 
+// Click badge: opens Reader tab and scrolls to that paragraph beat
 const jumpToDiagnostic = (pNum) => {
   store.activeInspectorTab = 'reader'
   window.dispatchEvent(new CustomEvent('lens-beat-jump', { detail: { beat: pNum } }))
@@ -459,6 +479,7 @@ const initEditor = () => {
       store.activeNode.content = serialized
       store.activeNode.word_count = text.split(/\s+/).filter(Boolean).length
       queueAutoSave()
+      nextTick(updateGutterPositions)
     },
     onSelectionUpdate: () => updateActiveMarks(),
     onTransaction: () => updateActiveMarks()
@@ -477,18 +498,28 @@ watch(() => store.activeNode?.id, async (newId) => {
         editor.commands.setContent(storedHtml || '')
       }
     }
-    if (store.isXRayActive && store.activeNode?.content) {
-      await fetchXRayAnalysis()
-    }
+    await nextTick()
+    updateGutterPositions()
   }
 })
 
 let saveTimeout = null
+let analysisTimeout = null
+
 const queueAutoSave = () => {
   hasPendingSave = true
   store.saveStatus = 'Saving...'
   clearTimeout(saveTimeout)
+  clearTimeout(analysisTimeout)
+  
   saveTimeout = setTimeout(persistActiveScene, 1200)
+  
+  // Debounced real-time reader analysis while typing (800ms)
+  analysisTimeout = setTimeout(() => {
+    if (store.activeNode?.id) {
+      store.fetchSceneReaderAnalysis(store.activeNode.id, editor?.getHTML() || '')
+    }
+  }, 800)
 }
 
 const persistActiveScene = async () => {
@@ -534,6 +565,8 @@ const fetchXRayAnalysis = async () => {
     if (!res.ok) throw new Error('X-Ray extraction failed')
     const data = await res.json()
     store.xraySentences = data.paragraphs || [data.sentences] || []
+    await nextTick()
+    updateGutterPositions()
   } catch(e) { 
     showToast(e.message, 'error') 
   } finally {
@@ -543,7 +576,12 @@ const fetchXRayAnalysis = async () => {
 
 const toggleXRay = async () => {
   store.isXRayActive = !store.isXRayActive
-  if (store.isXRayActive) await fetchXRayAnalysis()
+  if (store.isXRayActive) {
+    await fetchXRayAnalysis()
+  } else {
+    await nextTick()
+    updateGutterPositions()
+  }
 }
 
 const getSentenceLensClass = (s) => {
@@ -587,20 +625,46 @@ const runMasterTriage = async () => {
       store.activeNode.content = editor?.getHTML() || data.formatted_text
       showToast('Draft cleaned and formatted.', 'info')
       queueAutoSave()
+      await nextTick()
+      updateGutterPositions()
     }
   } catch(e) {
     showToast(e.message, 'error')
   }
 }
 
+// Watch live diagnoses updates and realign gutter badges
+watch(() => store.currentParagraphDiagnoses, async () => {
+  await nextTick()
+  updateGutterPositions()
+})
+
+const handleLensBeatJump = (e) => {
+  const pNum = e.detail?.beat
+  if (!pNum || !scrollContainer.value) return
+  const selector = store.isXRayActive ? '.xray-paragraph' : '.ProseMirror > p'
+  const paras = scrollContainer.value.querySelectorAll(selector)
+  const targetP = paras[pNum - 1]
+  if (targetP) {
+    targetP.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    targetP.classList.add('pulse-beat')
+    setTimeout(() => targetP.classList.remove('pulse-beat'), 2200)
+  }
+}
+
 onMounted(() => {
   if (store.activeNode?.id) initEditor()
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('lens-beat-jump', handleLensBeatJump)
+  window.addEventListener('resize', updateGutterPositions)
+  nextTick(() => setTimeout(updateGutterPositions, 300))
 })
 
 onBeforeUnmount(() => {
   if (editor) editor.destroy()
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('lens-beat-jump', handleLensBeatJump)
+  window.removeEventListener('resize', updateGutterPositions)
 })
 </script>
 
@@ -621,4 +685,5 @@ onBeforeUnmount(() => {
 .xray-strained-tag { background-color: rgba(168, 85, 247, 0.25); color: #d8b4fe; border-bottom: 2px solid #a855f7; border-radius: 2px; padding: 1px 3px; }
 .xray-dialogue-adverb { background-color: rgba(244, 63, 94, 0.25); color: #fda4af; border-bottom: 2px dashed #f43f5e; border-radius: 2px; padding: 1px 3px; }
 .xray-passive { background-color: rgba(234, 179, 8, 0.2); color: #fef08a; border-bottom: 2px dashed #eab308; }
+.pulse-beat { background-color: rgba(139, 92, 246, 0.2) !important; border-left: 3px solid #a855f7 !important; padding-left: 8px !important; border-radius: 4px; transition: all 0.4s ease; }
 </style>
