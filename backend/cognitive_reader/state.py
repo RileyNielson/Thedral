@@ -1,6 +1,6 @@
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 try:
@@ -26,6 +26,16 @@ class MemoryTrace:
         self.mentions += 1
         self.decay_rate = max(0.0003, self.decay_rate * 0.78)
         self.last_word_offset = current_word_offset
+
+
+@dataclass
+class ActiveStoryThread:
+    thread_id: str
+    label: str
+    seeded_paragraph: int
+    last_touched_paragraph: int
+    key_terms: Set[str]
+    status: str = "ACTIVE"  # 'ACTIVE' | 'ESCALATED' | 'RESOLVED'
 
 
 @dataclass
@@ -55,7 +65,7 @@ class VirtualBrainState:
         self.neurotransmitter_pool: float = 1.0
         self.felt_arousal: float = 0.15
 
-        self.current_location: str = "UNSPECIFIED"
+        self.current_location: str = "Scene Opening"
         self.lighting: str = "LIT"
         self.active_light_source: Optional[str] = None
         self.present_cast: Set[str] = set()
@@ -75,6 +85,9 @@ class VirtualBrainState:
 
         self.promises: List[OpenPromise] = []
         self.primed_concepts: Set[str] = set()
+
+        # Cumulative Thread Tracking ("The Story So Far")
+        self.active_threads: List[ActiveStoryThread] = []
 
     def register_entity_in_stack(self, entity: str) -> None:
         self.pronoun_stack["LAST"] = entity
