@@ -86,6 +86,27 @@ class ReaderNote:
 
 
 @dataclass
+class ThreadImpact:
+    action_type: str  # 'SEED' | 'ESCALATE' | 'PAYOFF' | 'MAINTAIN'
+    thread_name: str
+    detail: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class StorySoFar:
+    location: str
+    characters_present: List[str]
+    active_threads: List[str]
+    active_tension_level: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class ParagraphDiagnosis:
     paragraph_index: int
     headline: str
@@ -94,9 +115,16 @@ class ParagraphDiagnosis:
     salient_words: List[str]
     primary_senses: List[str]
     craft_advisory: Optional[str] = None
+    story_so_far: Optional[StorySoFar] = None
+    thread_impact: Optional[ThreadImpact] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        res = asdict(self)
+        if self.story_so_far:
+            res["story_so_far"] = self.story_so_far.to_dict()
+        if self.thread_impact:
+            res["thread_impact"] = self.thread_impact.to_dict()
+        return res
 
 
 @dataclass
